@@ -1,0 +1,57 @@
+[project]
+name = "fraudlens"
+version = "0.1.0"
+description = "Scam-to-cash-out interception for mobile financial services"
+authors = [
+    { name = "0xdevabir", email = "261-15-001@diu.edu.bd" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.20.0",
+    "anthropic>=1.11.0",
+    "argon2-cffi>=25.1.0",
+    "fastapi>=0.142.2",
+    "httpx>=0.28.1",
+    "lightgbm>=4.7.0",
+    "networkx>=3.7",
+    "numpy>=2.5.3",
+    "pandas>=3.0.6",
+    "psycopg[binary]>=3.3.6",
+    "pyarrow>=25.0.1",
+    "pydantic-settings>=2.15.0",
+    "pyjwt>=2.15.1",
+    "pyyaml>=6.0.3",
+    "redis>=8.1.0",
+    "scikit-learn>=1.9.1",
+    "sqlalchemy>=2.1.1",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.9",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: needs the Postgres and Redis containers from docker-compose",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.isort]
+# backend/alembic/ is the migration directory, not the alembic package.
+known-third-party = ["alembic"]
