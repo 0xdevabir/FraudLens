@@ -1,3 +1,5 @@
+# `make up` starts Postgres and Redis for development on the host.
+# `make demo` adds the `demo` profile: the API and the console in containers.
 services:
   postgres:
     image: postgres:16-alpine
@@ -26,5 +28,50 @@ services:
       timeout: 3s
       retries: 10
 
+  # Builds the dataset, the models and the database contents on its first start
+  # (about half an hour), then serves. Later starts go straight to serving.
+  api:
+    profiles: [demo]
+    build: ./backend
+    init: true
+    env_file:
+      - path: backend/.env # written by `make demo` if it is missing
+        required: false
+    environment:
+      FRAUDLENS_DATABASE_URL: postgresql+psycopg://fraudlens:${POSTGRES_PASSWORD:-fraudlens_dev}@postgres:5432/fraudlens
+      FRAUDLENS_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8010:8010"
+    volumes:
+      - data:/app/data
+      - artifacts:/app/artifacts
+    healthcheck:
+      # Healthy only once the build steps are over and the API answers.
+      test: ["CMD", "python", "-m", "fraudlens.platform.demo", "--check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 2h
+      start_interval: 10s
+
+  console:
+    profiles: [demo]
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8010}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3100:3100"
+
 volumes:
   pgdata:
+  data:
+  artifacts:

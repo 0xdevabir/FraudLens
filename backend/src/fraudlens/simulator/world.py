@@ -31,6 +31,16 @@ DISTRICTS: tuple[tuple[str, int, int], ...] = (
     ("Kushtia", 0, 3),
 )
 
+# The administrative division each district belongs to: the regions reports are cut by.
+DIVISIONS: dict[str, str] = {
+    "Dhaka": "Dhaka", "Gazipur": "Dhaka", "Narayanganj": "Dhaka", "Faridpur": "Dhaka",
+    "Chattogram": "Chattogram", "Cumilla": "Chattogram", "Cox's Bazar": "Chattogram",
+    "Noakhali": "Chattogram", "Sylhet": "Sylhet", "Rajshahi": "Rajshahi",
+    "Bogura": "Rajshahi", "Khulna": "Khulna", "Jashore": "Khulna", "Kushtia": "Khulna",
+    "Barishal": "Barishal", "Rangpur": "Rangpur", "Dinajpur": "Rangpur",
+    "Mymensingh": "Mymensingh",
+}  # fmt: skip
+
 SEGMENTS = (
     "salaried",
     "garment_worker",

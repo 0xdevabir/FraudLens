@@ -74,10 +74,14 @@ served at `/docs` outside production.
 | Cases | `GET /cases`, `POST /cases`, `GET /cases/{id}`, `POST /cases/{id}/assign\|notes\|escalate\|verdict`, `GET /users/reviewers` | analyst, supervisor |
 | Freezes | `POST /wallets/{id}/freeze-requests`, `GET /freeze-requests` | analyst, supervisor |
 | | `POST /freeze-requests/{id}/approve\|reject`, `POST /wallets/{id}/unfreeze` | supervisor |
+| | `POST /rings/{ring_id}/freeze-requests` (one request per member wallet, §5) | analyst, supervisor |
 | Network | `GET /wallets/{id}`, `GET /wallets/{id}/network`, `GET /rings`, `GET /rings/{ring_id}`, `GET /agents/risk`, `GET /agents/{id}`, `GET /past-cases/{id}` | analyst, supervisor |
 | Customer | `POST /customer/recipient-check`, `POST /customer/transactions/{txn_id}/respond`, `POST /customer/reports` | service |
-| Operations | `GET /metrics/summary`, `GET /model` | analyst, supervisor, admin |
-| | `GET /audit` | supervisor, admin |
+| Operations | `GET /metrics/summary`, `GET /metrics/daily`, `GET /model`, `GET /model/report`, `GET /policy` | analyst, supervisor, admin |
+| After deployment (§12) | `GET /models`, `GET /model/shadow`, `GET /metrics/drift`, `GET /feedback` | analyst, supervisor, admin |
+| Audit | `GET /audit` | supervisor, admin |
+| | `POST /audit/reveals` (§7) | analyst, supervisor |
+| Demo (§14), absent in production | `GET /demo/scenarios`, `GET /demo/payment-draft`, `POST /demo/pay\|respond\|report\|recipient-check\|advance-clock` | analyst, supervisor, admin |
 | | `GET /health`, `GET /ready` | none |
 
 Errors always have the same shape, with the request id that is also in the
@@ -130,6 +134,12 @@ and again by a `CHECK` constraint in the database, so a bug or a direct write
 cannot produce a freeze that one person both asked for and approved. Unfreezing
 is a supervisor action with a reason. All of it is in the audit log.
 
+A ring (wallets tied by shared handsets and transfers to confirmed fraud) can be
+proposed for freezing in one step. That creates one ordinary request per member
+wallet and nothing else: wallets that already have a pending request and
+customers whose wallets were taken over are skipped and listed with the reason,
+and each request still needs its own approval by a second person.
+
 ## 6. Customer side
 
 - **Recipient check.** Returns `none`, `caution` or `high` for a receiver, with
@@ -157,6 +167,14 @@ is a supervisor action with a reason. All of it is in the audit log.
 - **Audit log.** Logins, every case action, every freeze step, every flag and
   every view of a wallet profile. The table is append-only: a database trigger
   refuses `UPDATE`, `DELETE` and `TRUNCATE`.
+- **Identifiers are masked on screen.** The console shows wallet, agent and
+  device numbers as `W***6128`. Showing one in full is a click that first calls
+  `POST /audit/reveals`, so every look at a full identifier has a name, a time
+  and, where there is one, a case on it. Supervisors and admins can filter the
+  audit log by `pii.reveal`.
+- **Customer free text is masked on the way out.** A scam report is stored as
+  written; e-mail addresses and numbers of 10 to 19 digits (Bangla digits
+  included) are replaced whenever it is returned by the API.
 - **Input.** Every body is validated with unknown fields refused; identifiers
   match a fixed pattern; bodies over 1 MB are refused; all SQL is parameterised.
 - **Headers.** `nosniff`, `X-Frame-Options: DENY`, `no-store`, `no-referrer`,
@@ -205,8 +223,14 @@ bit-identical features to the one that lived through it.
   `EventSource` cannot send; the console reads it with `fetch`.
 - **Step-up is asserted by the caller** (`step_up_passed`). The platform trusts
   upay's authentication; it does not perform one.
-- **Wallet numbers in API responses to analysts are not masked** (they need them
-  to act). Masking applies to case notes and anything sent to the language model.
+- **Identifier masking is a console control, not access control.** The API
+  returns full wallet numbers to analysts and supervisors, who need them to act;
+  the console hides them until a reveal is recorded. A reviewer calling the API
+  directly sees them without a reveal row (the wallet view itself is still
+  audited). Identifiers also appear in the console's page addresses. Evidence
+  sent to the language model is masked in the backend, before it leaves.
+- **The free-text mask is a pattern match.** It catches long numbers and e-mail
+  addresses, not a name or an address written in words.
 - **No TLS, secrets manager or key rotation**: deployment concerns outside this
   prototype.
 
@@ -259,7 +283,70 @@ transactions: 0 feature rows differ.
 metrics summary about 270 ms (both aggregate over all rows on each call and are
 not cached); the rest answer in under 50 ms.
 
-## 12. Run it
+## 12. After deployment
+
+Code: `backend/src/fraudlens/mlops/`. The console's model dashboard reads all of
+it; results and caveats are in MODEL_CARD §13.
+
+- **Verdicts become labels.** A closed case labels the scored payments in it:
+  `confirmed_fraud` as fraud, `legitimate` as not. `GET /feedback` counts what
+  has come back. `make retrain` trains a new version on the original training
+  period plus those rows and registers it with its parent, the number of labels
+  used and the time of the last one. It promotes nothing.
+- **Registry.** Each version is a directory under `backend/artifacts/models/`
+  with its models, manifest and reports; a `CURRENT` file names the promoted one.
+  `make models` lists them, `make promote VERSION=vN` changes the pointer, and
+  the API picks it up on its next start (`GET /models` reports
+  `restart_needed` until then).
+- **Shadow mode.** With `FRAUDLENS_SHADOW_MODEL_VERSION` set, the challenger
+  scores every transaction after the served model has decided, from the same
+  feature row. Its score is stored in its own table and never reaches the
+  decision, the customer or the alert. A challenger that fails to load or to
+  score is logged and skipped; serving is not affected. `make shadow
+  VERSION=vN` scores past decisions from their stored features, so a comparison
+  does not have to wait for new traffic. `GET /model/shadow` compares the two on
+  the decisions both have scored.
+- **Drift.** `GET /metrics/drift` compares the latest served decisions with the
+  training period: a population stability index per feature and for the score
+  (below 0.1 stable, 0.1 to 0.25 watch, above 0.25 shifted), and the alert rate
+  against the rate expected on validation data.
+
+## 13. Console
+
+`frontend/` is a Next.js application that holds a bearer token in the browser
+session and calls the endpoints above; it computes nothing itself. Pages are
+shown by role, and the API enforces the same roles whatever the console shows.
+
+| Pages | Roles |
+| --- | --- |
+| Executive summary, impact simulator, model dashboard, fairness report, decision policy, customer phone demo | analyst, supervisor, admin |
+| Alert queue, payment, cases, freeze approvals, network explorer, wallet, rings, agent risk | analyst, supervisor |
+| Audit log | supervisor, admin |
+
+`make smoke` signs in as each role in a headless browser and opens every page
+that role may see, failing on a console error, a failed request, an error notice,
+a blank page or a page wider than the window.
+
+## 14. Demo endpoints and the clock
+
+The console's phone demo plays upay's app. A real channel knows the customer's
+handset, balance and district; `/v1/demo/*` fills those in from what the platform
+has seen and then sends the payment, the customer's answer and the scam report
+through exactly the code the service account's endpoints use. Each call is
+audited as a demo action under the name of the signed-in member of staff. The
+router, like the seed accounts, does not exist when
+`FRAUDLENS_ENVIRONMENT=production`.
+
+The platform's clock is the time of the newest event it has seen, because the
+data is a recorded period. Review deadlines and cooling-off periods are measured
+on it. `POST /v1/demo/advance-clock` moves it forward by 1 to 60 minutes so a
+cooling-off period can be shown ending; open cases come closer to their
+deadlines by the same amount. Audit rows carry the real time.
+
+## 15. Run it
+
+`make demo` does all of the following in containers (see the README). Step by
+step on the host:
 
 ```
 make up          # Postgres and Redis
@@ -269,9 +356,12 @@ make api         # API and worker on http://127.0.0.1:8010
 make replay      # test days 95-118 through the stream   (other terminal)
 make replay-live # day 119 over HTTP, writes the latency report
 make verify      # served decisions against the offline evaluation
-make test        # 147 tests; 32 of them run against real Postgres and Redis
+make review      # close the older cases with the simulation's ground truth (demo scaffolding)
+make retrain     # a challenger trained on those verdicts
+make console     # the console on http://localhost:3100
+make test        # 175 tests; the platform and MLOps ones run against real Postgres and Redis
 ```
 
 The demo accounts (`analyst1`, `analyst2`, `supervisor1`, `supervisor2`, `admin`,
-`upay-core`) get the password in `FRAUDLENS_SEED_PASSWORD` (`backend/.env`, see
+`upay-core`, and `review-sim` for `make review`) get the password in `FRAUDLENS_SEED_PASSWORD` (`backend/.env`, see
 `.env.example`).

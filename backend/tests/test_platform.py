@@ -10,21 +10,25 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+import shutil
 
 import numpy as np
 import pytest
 import redis.asyncio as aioredis
 from fastapi.testclient import TestClient
 from redis import Redis
-from sqlalchemy import create_engine, func, select, text, update
+from sqlalchemy import create_engine, delete, func, select, text, update
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from fraudlens.api import create_app
 from fraudlens.api.middleware import MAX_BODY_BYTES
 from fraudlens.config import Settings
-from fraudlens.decision import evaluate
-from fraudlens.features import Txn
+from fraudlens.decision import evaluate, insights
+from fraudlens.features import FEATURES, Txn
+from fraudlens.mlops import drift, feedback, review
+from fraudlens.mlops import shadow as shadow_mode
+from fraudlens.models.train import FEEDBACK_COLUMNS
 from fraudlens.platform import replay, verify
 from fraudlens.platform.db import make_engine, make_sessions, migrate
 from fraudlens.platform.events import moment
@@ -32,8 +36,10 @@ from fraudlens.platform.load import load
 from fraudlens.platform.models import (
     AuditLog,
     Case,
+    CustomerReport,
     Decision,
     FreezeRequest,
+    ShadowScore,
     Transaction,
     User,
     Wallet,
@@ -47,11 +53,12 @@ pytestmark = pytest.mark.integration
 PASSWORD = "correct-horse-battery-staple"
 TEST_DB = "fraudlens_test"
 REASON = "written by the integration tests"
+CHALLENGER = "v2"
 
 
 @pytest.fixture(scope="module")
-def settings(trained):
-    data_dir, models_root, _ = trained
+def settings(trained, tmp_path_factory):
+    data_dir, shared_root, _ = trained
     base = Settings()
     admin_url = make_url(base.database_url)
     redis_url = base.redis_url.rsplit("/", 1)[0] + "/15"
@@ -64,11 +71,22 @@ def settings(trained):
         Redis.from_url(redis_url).flushdb()
     except Exception as exc:  # the containers are not running
         pytest.skip(f"Postgres/Redis not reachable: {type(exc).__name__}")
+    # A registry of its own: other tests count the versions in the shared one.
+    models_root = tmp_path_factory.mktemp("platform") / "models"
+    shutil.copytree(shared_root, models_root)
     evaluate.run(data_dir, models_root=models_root)  # builds the similar-case index
+    insights.run(data_dir, models_root=models_root)  # and the drift reference
+    # The challenger is the served model under another name, so it must agree with it.
+    shutil.copytree(models_root / "v1", models_root / CHALLENGER)
+    manifest = json.loads((models_root / CHALLENGER / "manifest.json").read_text())
+    (models_root / CHALLENGER / "manifest.json").write_text(
+        json.dumps(manifest | {"version": CHALLENGER, "parent": "v1"})
+    )
     return Settings(
         data_dir=data_dir.parent,
         dataset=data_dir.name,
         models_root=models_root,
+        shadow_model_version=CHALLENGER,
         database_url=admin_url.set(database=TEST_DB).render_as_string(hide_password=False),
         redis_url=redis_url,
         events_stream="fraudlens-test:events",
@@ -758,6 +776,310 @@ def test_network_views(client, tokens, p, replayed):
     assert client.get("/v1/users/reviewers", headers=analyst).status_code == 200
     queue = client.get("/v1/cases?status=open&limit=5", headers=analyst).json()
     assert queue["total"] >= len(queue["cases"]) > 0
+
+
+def test_a_ring_freeze_is_one_request_per_wallet_and_each_needs_a_second_person(
+    client, tokens, p, replayed
+):
+    analyst = tokens("analyst1")
+    ring = client.get("/v1/rings", headers=analyst).json()[0]
+    path = f"/v1/rings/{ring['ring_id']}/freeze-requests"
+    assert client.post(path, headers=tokens("admin"), json={"reason": REASON}).status_code == 403
+    asked = client.post(path, headers=analyst, json={"reason": REASON})
+    assert asked.status_code == 201, asked.text
+    out = asked.json()
+    requested = {r["wallet_id"] for r in out["requested"]}
+    assert requested and requested <= set(ring["wallets"]) - set(ring["takeover_victims"])
+    assert requested | {row["wallet_id"] for row in out["skipped"]} == set(ring["wallets"])
+    assert all(
+        r["status"] == "pending" and ring["ring_id"] in r["reason"] for r in out["requested"]
+    )
+    assert not requested & p.scorer.frozen  # proposing freezes nothing
+
+    again = client.post(path, headers=analyst, json={"reason": REASON}).json()
+    assert again["requested"] == []
+    assert {row["why"] for row in again["skipped"]} <= {"freeze_pending", "takeover_victim"}
+    missing = client.post(
+        "/v1/rings/R-nobody/freeze-requests", headers=analyst, json={"reason": REASON}
+    )
+    assert missing.status_code == 404
+
+    supervisor = tokens("supervisor1")
+    for request in out["requested"]:
+        decided = client.post(
+            f"/v1/freeze-requests/{request['id']}/reject", headers=supervisor, json={"note": REASON}
+        )
+        assert decided.status_code == 200 and decided.json()["status"] == "rejected"
+    assert not requested & p.scorer.frozen
+
+
+# ------------------------------------------------- the customer, played by staff
+
+
+def test_staff_can_play_the_customer_and_every_step_is_audited(client, tokens, p, replayed):
+    analyst = tokens("analyst1")
+    found = client.get("/v1/demo/scenarios", headers=analyst).json()["scenarios"]
+    by_id = {scenario["id"]: scenario for scenario in found}
+
+    def pay(scenario: str):
+        payment = by_id[scenario]["payment"]
+        body = {key: payment[key] for key in ("sender_id", "receiver_id", "amount")}
+        return client.post("/v1/demo/pay", headers=analyst, json=body)
+
+    paid = pay("allow")
+    assert paid.status_code == 200, paid.text
+    assert paid.json()["decision"]["tier"] == "allow" and paid.json()["status"] == "completed"
+    held = pay("confirmed_fraud").json()
+    assert held["decision"]["tier"] == "hold" and held["status"] == "held"
+    # A hold is not the customer's to answer: only a reviewer releases it.
+    answer = {"txn_id": held["txn_id"], "action": "proceed", "step_up_passed": True}
+    refused = client.post("/v1/demo/respond", headers=analyst, json=answer)
+    assert refused.status_code == 409 and refused.json()["error"]["code"] == "not_pending"
+
+    # A step-up: verification, then the cooling-off, which the demo clock can run out.
+    pending = _pending(client, tokens, p, "step_up")
+    answer = {"txn_id": pending["txn_id"], "action": "proceed"}
+    unverified = client.post("/v1/demo/respond", headers=analyst, json=answer)
+    assert unverified.status_code == 403
+    early = client.post("/v1/demo/respond", headers=analyst, json=answer | {"step_up_passed": True})
+    assert early.status_code == 409 and early.json()["error"]["code"] == "cooling_off"
+    before = p.scorer.clock.now()
+    moved = client.post("/v1/demo/advance-clock", headers=analyst, json={"minutes": 31})
+    assert moved.status_code == 200
+    # The clock keeps running while it is moved, so the jump is 31 minutes and a moment.
+    assert p.scorer.clock.now() == pytest.approx(before + 31 * 60, abs=5)
+    done = client.post("/v1/demo/respond", headers=analyst, json=answer | {"step_up_passed": True})
+    assert done.status_code == 200 and done.json()["status"] == "completed"
+
+    flagged = by_id["confirmed_fraud"]["payment"]
+    check = client.post(
+        "/v1/demo/recipient-check",
+        headers=analyst,
+        json={"sender_id": flagged["sender_id"], "receiver_id": flagged["receiver_id"]},
+    ).json()
+    assert check["level"] != "none" and check["message"]["bn"]
+
+    with p.sessions() as s:
+        actions = s.execute(
+            select(AuditLog.action, func.count())
+            .where(AuditLog.actor == "analyst1", AuditLog.action.like("demo.%"))
+            .group_by(AuditLog.action)
+        ).all()
+    assert dict(actions) == {"demo.payment": 2, "demo.clock_advanced": 1}
+
+    for path, body in (
+        ("/v1/demo/pay", {"sender_id": "W1", "receiver_id": "W1", "amount": 10}),
+        ("/v1/demo/pay", {"sender_id": "W1", "receiver_id": "W2", "amount": -1}),
+        ("/v1/demo/advance-clock", {"minutes": 61}),
+        ("/v1/demo/respond", {"txn_id": 1, "action": "refund"}),
+    ):
+        assert client.post(path, headers=analyst, json=body).status_code == 422, path
+        assert client.post(path, headers=tokens("upay-core"), json=body).status_code == 403
+    missing = client.post(
+        "/v1/demo/respond", headers=analyst, json={"txn_id": 2**40, "action": "cancel"}
+    )
+    assert missing.status_code == 404
+
+
+def test_what_a_customer_typed_is_masked_when_it_is_shown(client, tokens, p, replayed, spare):
+    analyst = tokens("analyst1")
+    typed = "A man called from 01712-345678 for my PIN. His mail is boss@example.com"
+    made = client.post(
+        "/v1/demo/report",
+        headers=analyst,
+        json={
+            "reporter_id": spare(),
+            "reported_wallet_id": spare(),
+            "category": "impersonation",
+            "description": typed,
+        },
+    )
+    assert made.status_code == 201, made.text
+    detail = client.get(f"/v1/cases/{made.json()['case_id']}", headers=analyst).json()
+    shown = detail["customer_reports"][0]["description"]
+    assert shown == "A man called from [number] for my PIN. His mail is [email]"
+    assert "01712" not in json.dumps(detail) and "boss@" not in json.dumps(detail)
+    with p.sessions() as s:  # the record itself is kept as written
+        assert s.get(CustomerReport, made.json()["report_id"]).description == typed
+
+
+def test_unmasking_an_identifier_is_recorded(client, tokens, p, replayed, spare):
+    analyst, wallet = tokens("analyst1"), spare()
+    body = {"object_type": "wallet", "object_id": wallet}
+    made = client.post("/v1/audit/reveals", headers=analyst, json=body)
+    assert made.status_code == 201 and made.json()["revealed"] is True
+    with p.sessions() as s:
+        row = s.scalars(
+            select(AuditLog).where(AuditLog.action == "pii.reveal").order_by(AuditLog.id.desc())
+        ).first()
+    assert (row.actor, row.object_type, row.object_id) == ("analyst1", "wallet", wallet)
+    for bad in (
+        body | {"object_id": "W1'; DROP TABLE users"},
+        body | {"object_type": "password"},
+        body | {"why": "curious"},
+    ):
+        assert client.post("/v1/audit/reveals", headers=analyst, json=bad).status_code == 422
+    unknown = client.post("/v1/audit/reveals", headers=analyst, json=body | {"case_id": 2**31 - 1})
+    assert unknown.status_code == 404
+    for other in ("admin", "upay-core"):  # people who do not review cases see masks only
+        assert client.post("/v1/audit/reveals", headers=tokens(other), json=body).status_code == 403
+
+
+# ---------------------------------------------------- after deployment (MLOps)
+
+
+def test_the_challenger_scores_every_decision_and_decides_nothing(client, tokens, p, replayed):
+    assert p.scorer.shadow is not None and p.scorer.shadow.version == CHALLENGER
+    with p.sessions() as s:
+        rows = s.execute(
+            select(Decision, ShadowScore)
+            .outerjoin(ShadowScore, ShadowScore.txn_id == Decision.txn_id)
+            .where(Decision.risk.is_not(None))
+        ).all()
+    assert len(rows) > 1000
+    for decision, challenger in rows:
+        # The same model under another name: the same answer, every time.
+        assert challenger is not None and challenger.model_version == CHALLENGER
+        assert challenger.risk == pytest.approx(decision.risk, abs=1e-12)
+        assert challenger.tier == decision.model_tier and challenger.latency_ms >= 0
+        assert decision.model_version == "v1"  # what was served is never the challenger
+
+    report = client.get("/v1/model/shadow", headers=tokens("supervisor1")).json()
+    assert report["status"] == "ok" and report["live"] == report["model_version"] == CHALLENGER
+    assert report["served_version"] == "v1" and report["decisions"] == len(rows)
+    assert report["agreement"] == 1.0
+    assert report["challenger_only_alerts"] == report["served_only_alerts"] == 0
+    assert report["served"] == report["challenger"]
+    assert report["latency"]["scored_live"] == len(rows)
+    reviewed = report["reviewed"]["confirmed_fraud"]
+    assert reviewed["alerts"] >= reviewed["challenger_also_alerts"] >= reviewed["challenger_holds"]
+
+    supervisor = tokens("supervisor1")
+    none = client.get("/v1/model/shadow?version=v9", headers=supervisor).json()
+    assert none == {"status": "no_scores", "model_version": "v9", "available": [CHALLENGER]}
+    assert client.get("/v1/model/shadow?version=latest", headers=supervisor).status_code == 422
+    assert client.get("/v1/model/shadow", headers=tokens("upay-core")).status_code == 403
+
+
+def test_past_decisions_can_be_scored_by_a_challenger_afterwards(p, replayed):
+    with p.sessions() as s:
+        some = s.scalars(select(ShadowScore.txn_id).order_by(ShadowScore.txn_id).limit(40)).all()
+        s.execute(delete(ShadowScore).where(ShadowScore.txn_id.in_(some)))
+        s.commit()
+        assert shadow_mode.backfill(s, p.scorer.shadow) == len(some) == 40
+        assert shadow_mode.backfill(s, p.scorer.shadow) == 0  # nothing is scored twice
+        restored = s.execute(
+            select(ShadowScore, Decision.risk, Decision.model_tier)
+            .join(Decision, Decision.txn_id == ShadowScore.txn_id)
+            .where(ShadowScore.txn_id.in_(some))
+        ).all()
+        assert shadow_mode.versions(s) == [CHALLENGER]
+    assert len(restored) == 40
+    for challenger, risk, tier in restored:
+        assert challenger.risk == pytest.approx(risk, abs=1e-12) and challenger.tier == tier
+        assert challenger.latency_ms is None  # not measured on live traffic
+
+
+def test_the_registry_shows_what_serves_and_what_only_watches(client, tokens, replayed):
+    admin = tokens("admin")
+    listed = client.get("/v1/models", headers=admin).json()
+    assert (listed["serving"], listed["promoted"], listed["shadow"]) == ("v1", "v1", CHALLENGER)
+    assert listed["restart_needed"] is False
+    newest, oldest = listed["versions"]
+    assert (newest["version"], newest["parent"], newest["shadow"]) == (CHALLENGER, "v1", True)
+    assert not newest["serving"] and not newest["promoted"]
+    assert oldest["version"] == "v1" and oldest["serving"] and oldest["promoted"]
+    assert oldest["feedback"] is None and 0 < oldest["thresholds"]["warn"] < 1
+
+    report = client.get(f"/v1/model/report?version={CHALLENGER}", headers=admin)
+    assert report.status_code == 200 and report.json()["model_version"] == CHALLENGER
+    assert client.get("/v1/model/report?version=v9", headers=admin).status_code == 404
+    assert client.get("/v1/model/report?version=../v1", headers=admin).status_code == 422
+    assert client.get("/v1/models", headers=tokens("upay-core")).status_code == 403
+
+
+def test_live_drift_is_measured_on_what_was_served(client, tokens, p, replayed):
+    analyst = tokens("analyst1")
+    report = client.get("/v1/metrics/drift?rows=5000", headers=analyst).json()
+    assert report["status"] == "ok" and report["model_version"] == "v1"
+    assert drift.MIN_ROWS <= report["rows"] <= 5000 and report["from"] <= report["to"]
+    assert {row["feature"] for row in report["features"]} == set(FEATURES)
+    assert sum(report["feature_status"].values()) == len(FEATURES)
+    psis = [row["psi"] for row in report["features"]]
+    assert psis == sorted(psis, reverse=True)  # what moved most comes first
+    assert report["score"]["status"] in ("stable", "watch", "shifted")
+    assert sum(day["rows"] for day in report["daily"]) <= report["rows"]
+    assert client.get("/v1/metrics/drift?rows=10", headers=analyst).status_code == 422
+    assert client.get("/v1/metrics/drift", headers=tokens("upay-core")).status_code == 403
+
+
+def test_verdicts_come_back_as_labels(client, tokens, p, replayed, spare):
+    supervisor = tokens("supervisor1")
+    before = client.get("/v1/feedback", headers=supervisor).json()
+    txn = {}
+    for verdict in ("confirmed_fraud", "legitimate", "inconclusive"):
+        body, result = held_payment(client, tokens, p, spare)
+        closed = client.post(
+            f"/v1/cases/{result['decision']['case_id']}/verdict",
+            headers=supervisor,
+            json={"verdict": verdict, "note": REASON},
+        )
+        assert closed.status_code == 200, closed.text
+        txn[verdict] = body["txn_id"]
+    after = client.get("/v1/feedback", headers=supervisor).json()
+    for verdict in txn:
+        assert after["cases"][verdict] == before["cases"][verdict] + 1
+    assert after["labels"]["fraud"] == before["labels"]["fraud"] + 1
+    assert after["labels"]["legitimate"] == before["labels"]["legitimate"] + 1
+    assert after["last_verdict_at"] and after["versions_trained_on_feedback"] == []
+
+    with p.sessions() as s:
+        labels = feedback.labels(s)
+        served = s.get(Decision, txn["confirmed_fraud"]).features
+    assert set(FEEDBACK_COLUMNS) <= set(labels.columns) and labels["txn_id"].is_unique
+    assert labels["ts"].dt.tz is None  # naive UTC, like the training data it joins
+    labels = labels.set_index("txn_id")
+    fraud, clean = labels.loc[txn["confirmed_fraud"]], labels.loc[txn["legitimate"]]
+    assert (fraud["y"], fraud["y_mule"]) == (1, 1) and (clean["y"], clean["y_mule"]) == (0, 0)
+    assert txn["inconclusive"] not in labels.index  # no answer is not a label
+    # The model learns from exactly the inputs it was served.
+    np.testing.assert_array_equal(
+        fraud[list(FEATURES)].to_numpy(dtype=np.float64), np.array(served, dtype=np.float64)
+    )
+
+
+def test_the_review_simulator_works_through_the_api_like_any_reviewer(
+    client, tokens, p, settings, replayed
+):
+    with p.sessions() as s:
+        waiting = s.scalar(select(func.count()).select_from(Case).where(Case.status != "closed"))
+    reviewer = TestClient(client.app, headers=tokens(review.REVIEW_USER))
+    report = review.run(reviewer, settings.dataset_dir, leave_days=0, inconclusive=0.0, limit=5)
+    assert report["open_cases"] == waiting and report["closed"] == 5
+    assert report["left_open"] == waiting - 5 and report["skipped"] == 0
+    assert set(report["verdicts"]) <= {"confirmed_fraud", "legitimate"}
+
+    mules, fraud = review.ground_truth(settings.dataset_dir)
+    with p.sessions() as s:
+        sim = s.scalar(select(User.id).where(User.username == review.REVIEW_USER))
+        closed = s.scalars(select(Case).where(Case.closed_by == sim)).all()
+        assert len(closed) == 5
+        for case in closed:
+            alerts = set(s.scalars(select(Decision.txn_id).where(Decision.case_id == case.id)))
+            guilty = case.subject_id in mules or bool(alerts & fraud)
+            assert case.verdict == ("confirmed_fraud" if guilty else "legitimate")
+            assert (case.subject_id in p.scorer.engine.flagged) or not guilty
+        audited = s.scalar(
+            select(func.count())
+            .select_from(AuditLog)
+            .where(AuditLog.action == "case.verdict", AuditLog.actor == review.REVIEW_USER)
+        )
+    assert audited == 5
+    # Some reviews end without an answer, and the simulator leaves the newest cases alone.
+    unsure = review.run(reviewer, settings.dataset_dir, leave_days=0, inconclusive=1.0, limit=2)
+    assert unsure["verdicts"] == {"inconclusive": 2}
+    nothing = review.run(reviewer, settings.dataset_dir, leave_days=10_000)
+    assert nothing["closed"] == 0 and nothing["left_open"] == nothing["open_cases"] > 0
 
 
 # ------------------------------------------------------------- audit trail

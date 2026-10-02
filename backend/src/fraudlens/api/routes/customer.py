@@ -10,7 +10,7 @@ from fastapi import APIRouter
 
 from ...platform import cases as workflow
 from ...platform.audit import WorkflowError
-from ..deps import Plat, Service, TxnId
+from ..deps import Plat, Platform, Service, TxnId
 from ..schemas import CustomerResponse, RecipientCheck, ScamReport
 
 router = APIRouter(prefix="/customer", tags=["customer"])
@@ -33,15 +33,19 @@ def recipient_check(body: RecipientCheck, p: Plat, ctx: Service) -> dict:
     it cannot be used to probe which wallets have been caught.
     """
     _limit(p.check_limit, body.sender_id)
-    risk = p.graph.risk(body.receiver_id)
+    return check_recipient(p, body.receiver_id)
+
+
+def check_recipient(p: Platform, receiver_id: str) -> dict:
+    risk = p.graph.risk(receiver_id)
     level = "none"
     if risk is not None:
-        if risk["confirmed_fraud"] or body.receiver_id in p.scorer.frozen:
+        if risk["confirmed_fraud"] or receiver_id in p.scorer.frozen:
             level = "high"
         elif risk["mule_alert"]:
             level = "caution"
     message = p.scorer.policy.messages["scam"]["warn"].model_dump() if level != "none" else None
-    return {"receiver_id": body.receiver_id, "level": level, "message": message}
+    return {"receiver_id": receiver_id, "level": level, "message": message}
 
 
 @router.post("/transactions/{txn_id}/respond")

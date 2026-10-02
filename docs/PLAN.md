@@ -83,23 +83,23 @@ check has actually been run and passed.
   run, and measured p95 scoring latency.
 
 ## Phase 6 — Analyst console and customer demo
-- [ ] Login, layout, live alert queue
-- [ ] Case page: timeline, evidence, reasons, narrative, network graph, actions
-- [ ] Network explorer, rings, agent risk, wallet profile
-- [ ] Customer phone demo with the Bangla warning and cooling-off flow
-- [ ] Impact simulator and executive dashboard
-- [ ] Model monitoring: performance, drift, fairness
-- [ ] Policy view and audit log
+- [x] Login, layout, live alert queue
+- [x] Case page: timeline, evidence, reasons, narrative, network graph, actions
+- [x] Network explorer, rings, agent risk, wallet profile
+- [x] Customer phone demo with the Bangla warning and cooling-off flow
+- [x] Impact simulator and executive dashboard
+- [x] Model monitoring: performance, drift, fairness
+- [x] Policy view and audit log
 - **Verified by:** production build passes, and each page is exercised in a browser
   against the running backend.
 
 ## Phase 7 — MLOps and responsible AI
-- [ ] Analyst verdicts become labels; retraining job
-- [ ] Shadow mode for a challenger model
-- [ ] Drift monitoring on features and scores
-- [ ] Fairness report across region, account age, balance tier and channel
-- [ ] PII masking in UI payloads and narrative prompts
-- [ ] Prompt-injection defence for the narrative layer
+- [x] Analyst verdicts become labels; retraining job
+- [x] Shadow mode for a challenger model
+- [x] Drift monitoring on features and scores
+- [x] Fairness report across region, account age, balance tier and channel
+- [x] PII masking in UI payloads and narrative prompts
+- [x] Prompt-injection defence for the narrative layer
 - **Verified by:** tests for masking, retraining on feedback, drift detection on a
   shifted sample, and a generated fairness report.
 

@@ -21,6 +21,7 @@ from ...platform.models import (
     Transaction,
     User,
 )
+from ...platform.pii import redact
 from ..deps import REVIEWERS, Db, Plat, Reviewer, RowId, Supervisor
 from ..schemas import (
     Assign,
@@ -154,7 +155,10 @@ def get_case(case_id: RowId, p: Plat, s: Db, ctx: Reviewer) -> dict:
         **case_view(case, p.scorer.now(), names),
         "subject": p.graph.risk(case.subject_id),
         "alerts": [alert_view(t, d) for t, d in alerts],
-        "timeline": [event_view(e, names) for e in events],
+        "timeline": [
+            event_view(e, names) | ({"body": redact(e.body)} if e.kind == "customer_report" else {})
+            for e in events
+        ],
         "freeze_requests": [freeze_view(f, names) for f in freezes],
         "customer_reports": [
             {
@@ -162,8 +166,9 @@ def get_case(case_id: RowId, p: Plat, s: Db, ctx: Reviewer) -> dict:
                 "reporter_id": r.reporter_id,
                 "txn_id": r.txn_id,
                 "category": r.category,
-                # Typed by a customer. Shown as written; nothing reads it to decide.
-                "description": r.description,
+                # Typed by a customer: numbers and addresses in it are masked, and
+                # nothing reads it to decide.
+                "description": redact(r.description),
                 "reported_at": r.reported_at,
             }
             for r in reports

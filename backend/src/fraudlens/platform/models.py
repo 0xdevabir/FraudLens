@@ -210,6 +210,25 @@ class Decision(Base):
     created_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
 
 
+class ShadowScore(Base):
+    """What a challenger model would have said about a decision. Never acted on."""
+
+    __tablename__ = "shadow_scores"
+    __table_args__ = (
+        CheckConstraint("tier IN ('allow', 'warn', 'step_up', 'hold')", name="tier"),
+        Index("ix_shadow_scores_model_version", "model_version"),
+    )
+
+    txn_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("decisions.txn_id", ondelete="CASCADE"), primary_key=True
+    )
+    model_version: Mapped[str] = mapped_column(String(16), primary_key=True)
+    risk: Mapped[float] = mapped_column(Float(53))
+    tier: Mapped[str] = mapped_column(String(8))  # from the challenger's own thresholds
+    latency_ms: Mapped[float | None] = mapped_column(Float)  # NULL when scored afterwards
+    created_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
+
+
 class CaseEvent(Base):
     """The case timeline: who did what, in order. Rows are never changed."""
 

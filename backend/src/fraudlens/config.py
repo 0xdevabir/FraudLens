@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     models_root: Path | None = None
     model_version: str | None = None
     policy_version: str = "v1"
+    # A challenger scored next to the served model on every decision. It is recorded
+    # for comparison and never decides anything.
+    shadow_model_version: str | None = None
 
     database_url: str = "postgresql+psycopg://fraudlens:fraudlens_dev@127.0.0.1:5433/fraudlens"
     redis_url: str = "redis://127.0.0.1:6380/0"
@@ -43,7 +46,8 @@ class Settings(BaseSettings):
     # Case notes from the language model. Off unless enabled and ANTHROPIC_API_KEY is set.
     llm_notes: bool = False
 
-    cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    # Where the console is served from in development (`make console`).
+    cors_origins: list[str] = ["http://localhost:3100", "http://127.0.0.1:3100"]
 
     @property
     def dataset_dir(self) -> Path:

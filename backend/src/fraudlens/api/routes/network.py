@@ -6,13 +6,18 @@ from typing import Annotated
 
 from fastapi import APIRouter, Path, Query
 
+from ...platform import cases as workflow
 from ...platform.audit import WorkflowError, audit
 from ...platform.events import Identifier
 from ...platform.models import PastCase
 from ...platform.scoring import clean
 from ..deps import Db, Plat, Reviewer, TxnId
+from ..schemas import Unfreeze
+from ..views import freeze_view
 
 router = APIRouter(tags=["network"])
+
+RingId = Annotated[str, Path(pattern=r"^R-[A-Za-z0-9_-]{1,32}$")]
 
 
 @router.get("/wallets/{wallet_id}")
@@ -41,8 +46,31 @@ def rings(p: Plat, ctx: Reviewer) -> list[dict]:
 
 
 @router.get("/rings/{ring_id}")
-def ring(ring_id: Annotated[str, Path(pattern=r"^R-[A-Za-z0-9_-]{1,32}$")], p: Plat, ctx: Reviewer):
+def ring(ring_id: RingId, p: Plat, ctx: Reviewer):
     return clean(p.graph.ring(ring_id))
+
+
+@router.post("/rings/{ring_id}/freeze-requests", status_code=201)
+def request_ring_freeze(ring_id: RingId, body: Unfreeze, p: Plat, ctx: Reviewer) -> dict:
+    """Propose freezing a whole ring: one request per wallet, each waiting for a second person.
+
+    Takeover victims are left out: their wallets were used, they are not the ring."""
+    ring = p.graph.ring(ring_id)
+    victims = set(ring["takeover_victims"])
+    requested, skipped = [], []
+    for wallet_id in ring["wallets"]:
+        if wallet_id in victims:
+            skipped.append({"wallet_id": wallet_id, "why": "takeover_victim"})
+            continue
+        try:
+            request = workflow.request_freeze(
+                p.sessions, ctx, wallet_id, f"Ring {ring_id}: {body.reason}"
+            )
+        except WorkflowError as error:  # already frozen, already waiting, or not a wallet here
+            skipped.append({"wallet_id": wallet_id, "why": error.code})
+        else:
+            requested.append(freeze_view(request))
+    return {"ring_id": ring_id, "requested": requested, "skipped": skipped}
 
 
 @router.get("/agents/risk")

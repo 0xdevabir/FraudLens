@@ -1,0 +1,12 @@
+# Secrets and everything generated stay out of the image.
+.env
+.env.*
+.venv/
+data/
+artifacts/
+graft/
+tests/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/

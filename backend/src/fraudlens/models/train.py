@@ -223,15 +223,67 @@ def ring_report(engine: FeatureEngine, suspicious: dict[str, float], wallets: pd
     return report, rings
 
 
-def train(data_dir: Path, models_root: Path | None = None, promote: bool = True) -> dict:
+FEEDBACK_COLUMNS = ("txn_id", "ts", "type", "y", "y_mule", *FEATURES)
+
+
+def add_feedback(fold: dict[str, pd.DataFrame], feedback: pd.DataFrame) -> dict:
+    """Add analysts' verdicts to the training fold, and keep the test period honest.
+
+    `feedback` has FEEDBACK_COLUMNS: the features that were served and the label the
+    analyst gave. Those transactions happened during the test period, so the test fold
+    is cut to what came after the last of them: a model must not be judged on days it
+    has seen answers from. Returns what was done, for the report and the manifest.
+    """
+    missing = set(FEEDBACK_COLUMNS) - set(feedback.columns)
+    if missing:
+        raise ValueError(f"feedback is missing columns: {sorted(missing)}")
+    if feedback["txn_id"].duplicated().any():
+        raise ValueError("feedback has more than one label for a transaction")
+    if not feedback["y"].isin((0, 1)).all():
+        raise ValueError("feedback labels must be 0 or 1")
+    labelled = feedback["txn_id"]
+    # The same transactions with their simulated labels must not be trained on twice.
+    fold["train"] = fold["train"][~fold["train"]["txn_id"].isin(labelled)]
+    cutoff = feedback["ts"].max()
+    before = len(fold["test"])
+    fold["test"] = fold["test"][fold["test"]["ts"] > cutoff]
+    if len(fold["test"]) == 0 or fold["test"]["y"].sum() == 0:
+        raise ValueError("no test data is left after the last verdict to evaluate the model on")
+    rows = feedback[list(FEEDBACK_COLUMNS)].astype({"y": "int8", "y_mule": "int8"})
+    fold["train"] = pd.concat([fold["train"], rows], ignore_index=True)
+    return {
+        "rows": int(len(rows)),
+        "fraud": int(rows["y"].sum()),
+        "legitimate": int((rows["y"] == 0).sum()),
+        "last_label_at": str(cutoff),
+        "test_rows_before": before,
+        "test_rows_after_last_label": int(len(fold["test"])),
+    }
+
+
+def train(
+    data_dir: Path,
+    models_root: Path | None = None,
+    promote: bool = True,
+    feedback: pd.DataFrame | None = None,
+) -> dict:
+    """Train, evaluate and save a model version.
+
+    With `feedback` (see `add_feedback`) the verdicts join the training data, and the
+    version being served is scored on the same later test rows so the two can be compared.
+    """
     t0 = time.perf_counter()
     frame = load_frame(data_dir)
     wallets = pd.read_parquet(data_dir / "wallets.parquet")
     agents = pd.read_parquet(data_dir / "agents.parquet")
     feature_cols, recipient_cols = list(FEATURES), list(RECIPIENT_FEATURES)
+    root = models_root or registry.models_dir()
 
     clean = frame[~frame["ambiguous"]]
     fold = {name: clean[clean["fold"] == name] for name in ("train", "val_a", "val_b", "test")}
+    feedback_used = None
+    if feedback is not None and len(feedback):
+        feedback_used = add_feedback(fold, feedback)
     send = {name: part[part["type"] == "SEND_MONEY"] for name, part in fold.items()}
 
     # --- models
@@ -361,8 +413,25 @@ def train(data_dir: Path, models_root: Path | None = None, promote: bool = True)
         "top_features": {"transaction_model": top_features(txn), "mule_model": top_features(mule)},
     }
 
+    parent = registry.current_version(root)
+    if feedback_used is not None:
+        report["feedback"] = feedback_used
+        if parent is not None:
+            # The served version on the same rows: did the verdicts make it better?
+            served = registry.load(parent, root).score(te[feature_cols].to_numpy())["risk"]
+            feedback_used["parent"] = parent
+            report["feedback"]["comparison_after_last_label"] = {
+                name: {
+                    **metrics.ranking(y_te, score),
+                    **{
+                        key: metrics.at_budgets(te, score, budgets)[HEADLINE_BUDGET][key]
+                        for key in ("precision", "loss_txn_recall", "taka_recall")
+                    },
+                }
+                for name, score in (("parent", served), ("retrained", risk_te))
+            }
+
     # --- save
-    root = models_root or registry.models_dir()
     bundle.version = registry.next_version(root)
     bundle.manifest = {
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -372,6 +441,8 @@ def train(data_dir: Path, models_root: Path | None = None, promote: bool = True)
         "thresholds": thresholds,
         "tier_policy": TIER_POLICY,
         "mule_wallet_threshold": mule_threshold,
+        "parent": parent,
+        "feedback": feedback_used and {k: v for k, v in feedback_used.items() if k != "parent"},
         "headline": {
             "pr_auc": report["test"]["risk_score"]["all_fraud_chain"]["pr_auc"],
             **{

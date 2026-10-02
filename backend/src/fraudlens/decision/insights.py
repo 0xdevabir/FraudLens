@@ -26,10 +26,12 @@ from ..features import FEATURES
 from ..models import registry
 from ..models.data import load_frame
 from ..models.metrics import alert_outcomes
+from ..simulator.world import DIVISIONS
 from .evaluate import add_context, decide_batch
 from .policy import ALERT_TIERS, DEFAULT_POLICY, RANK, TIERS, load_policy
 
 INSIGHTS_FILE = "insights.json"
+DRIFT_REFERENCE_FILE = "drift_reference.json"
 SWEEP_POINTS = 40
 SWEEP_RATES = (0.0005, 0.05)  # share of transactions alerted, lowest to highest
 PSI_BINS = 10
@@ -37,6 +39,18 @@ PSI_WATCH, PSI_SHIFTED = 0.1, 0.25  # the usual rule of thumb for the index
 WEEK_DAYS = 7
 MIN_GROUP_ROWS = 200  # smaller groups are reported but marked as too small to compare
 GROUP_COLUMNS = ("segment", "area_type", "channel")
+# (upper limit, label), lowest first; the last band has no upper limit.
+AGE_BANDS = (
+    (30.0, "under 30 days"),
+    (180.0, "30-179 days"),
+    (365.0, "180-364 days"),
+    (np.inf, "1 year or more"),
+)
+BALANCE_BANDS = (
+    (1_000.0, "under 1,000 BDT"),
+    (10_000.0, "1,000-9,999 BDT"),
+    (np.inf, "10,000 BDT or more"),
+)
 _SWEEP_KEYS = (
     "alerts_per_day",
     "false_alerts_per_day",
@@ -58,23 +72,41 @@ def psi(reference: np.ndarray, current: np.ndarray, bins: int = PSI_BINS) -> flo
     a few values (a flag, a count) is compared value by value. Missing values get a
     bin too, so a feature that starts arriving empty shows up as drift.
     """
+    return psi_against(reference_bins(reference, bins), current)
+
+
+def _shares(edges: np.ndarray, values: np.ndarray) -> np.ndarray:
+    missing = np.isnan(values)
+    present = values[~missing]
+    # 2k for a value between edges k-1 and k, 2k+1 for a value equal to edge k.
+    index = np.searchsorted(edges, present, "left") + np.searchsorted(edges, present, "right")
+    counts = np.bincount(index, minlength=2 * len(edges) + 1).astype(np.float64)
+    counts = np.append(counts, missing.sum())
+    return np.clip(counts / len(values), 1e-4, None)
+
+
+def reference_bins(reference: np.ndarray, bins: int = PSI_BINS) -> dict:
+    """The reference side of `psi`, small enough to keep: bin edges and the share in each.
+
+    Saved next to the model so that live traffic can be compared with the training
+    period without the training data being at hand.
+    """
     reference = np.asarray(reference, dtype=np.float64)
-    current = np.asarray(current, dtype=np.float64)
-    if len(reference) == 0 or len(current) == 0:
+    if len(reference) == 0:
         raise ValueError("psi needs at least one value on each side")
     known = reference[~np.isnan(reference)]
     edges = np.unique(np.quantile(known, np.linspace(0, 1, bins + 1))) if len(known) else []
+    edges = np.asarray(edges, dtype=np.float64)
+    return {"edges": edges.tolist(), "shares": _shares(edges, reference).tolist()}
 
-    def shares(values: np.ndarray) -> np.ndarray:
-        missing = np.isnan(values)
-        present = values[~missing]
-        # 2k for a value between edges k-1 and k, 2k+1 for a value equal to edge k.
-        index = np.searchsorted(edges, present, "left") + np.searchsorted(edges, present, "right")
-        counts = np.bincount(index, minlength=2 * len(edges) + 1).astype(np.float64)
-        counts = np.append(counts, missing.sum())
-        return np.clip(counts / len(values), 1e-4, None)
 
-    p, q = shares(reference), shares(current)
+def psi_against(reference: dict, current: np.ndarray) -> float:
+    """`psi` of `current` against a reference kept by `reference_bins`."""
+    current = np.asarray(current, dtype=np.float64)
+    if len(current) == 0:
+        raise ValueError("psi needs at least one value on each side")
+    p = np.asarray(reference["shares"], dtype=np.float64)
+    q = _shares(np.asarray(reference["edges"], dtype=np.float64), current)
     return round(float(np.sum((q - p) * np.log(q / p))), 4)
 
 
@@ -204,13 +236,34 @@ def drift(frame: pd.DataFrame, risk: np.ndarray, thresholds: dict[str, float]) -
     }
 
 
-def _group_table(groups: np.ndarray, test: pd.DataFrame, rank: np.ndarray) -> list[dict]:
+def drift_reference(frame: pd.DataFrame, risk: np.ndarray, thresholds: dict[str, float]) -> dict:
+    """What live traffic is compared with: the same references as `drift`, as bins."""
+    train = (frame["fold"] == "train").to_numpy()
+    val_b = (frame["fold"] == "val_b").to_numpy()
+    return {
+        "reference": {"features": "train", "score": "val_b"},
+        "rows": {"features": int(train.sum()), "score": int(val_b.sum())},
+        "features": {
+            name: reference_bins(frame[name].to_numpy(dtype=np.float64)[train]) for name in FEATURES
+        },
+        "score": reference_bins(risk[val_b]),
+        "validation_alert_rate": round(float((risk[val_b] >= thresholds["warn"]).mean()), 5),
+        "validation_hold_rate": round(float((risk[val_b] >= thresholds["hold"]).mean()), 5),
+    }
+
+
+def _group_table(
+    groups: np.ndarray, test: pd.DataFrame, rank: np.ndarray, order: tuple[str, ...] | None = None
+) -> list[dict]:
     legit = test["y"].to_numpy() == 0
     victim = test["y_loss"].to_numpy() == 1
     alert, hold = rank > 0, rank == RANK["hold"]
     overall = float(alert[legit].mean())
     rows = []
-    for group in sorted(pd.unique(groups)):
+    present = set(pd.unique(groups))
+    # Bands (age, balance) keep their natural order; names are sorted.
+    listed = [g for g in order if g in present] if order else []
+    for group in [*listed, *sorted(present - set(listed))]:
         mask = groups == group
         n_legit, n_victim = int((mask & legit).sum()), int((mask & victim).sum())
         false_rate = float(alert[mask & legit].mean()) if n_legit else None
@@ -240,6 +293,18 @@ def _round(value: float | None, digits: int = 5) -> float | None:
     return None if value is None else round(value, digits)
 
 
+def _labels(bands: tuple[tuple[float, str], ...]) -> tuple[str, ...]:
+    return tuple(label for _, label in bands)
+
+
+def _band(values: np.ndarray, bands: tuple[tuple[float, str], ...]) -> np.ndarray:
+    """The band each value falls in; `bands` is (upper limit, label), lowest first."""
+    limits = np.array([limit for limit, _ in bands[:-1]])
+    labels = np.array([*_labels(bands), "unknown"])
+    index = np.searchsorted(limits, values, side="right")
+    return labels[np.where(np.isnan(values), len(bands), index)]
+
+
 def fairness(test: pd.DataFrame, tiers: np.ndarray, wallets: pd.DataFrame) -> dict:
     """False-alert rates by customer group, for the sender and for the receiving wallet.
 
@@ -247,7 +312,7 @@ def fairness(test: pd.DataFrame, tiers: np.ndarray, wallets: pd.DataFrame) -> di
     wallet that comes under suspicion. Groups are the synthetic population's attributes.
     """
     rank = np.array([RANK[t] for t in tiers])
-    attributes = wallets.set_index("wallet_id")[list(GROUP_COLUMNS)]
+    attributes = wallets.set_index("wallet_id")[[*GROUP_COLUMNS, "district"]]
     legit = test["y"].to_numpy() == 0
     out = {
         "overall": {
@@ -266,6 +331,23 @@ def fairness(test: pd.DataFrame, tiers: np.ndarray, wallets: pd.DataFrame) -> di
         out["receiver"][column] = _group_table(
             receiver.to_numpy(str), test[sends].reset_index(drop=True), rank[sends]
         )
+
+    # Region, account age and balance: the three a regulator asks about first.
+    sent, sent_rank = test[sends].reset_index(drop=True), rank[sends]
+    for side, rows, ranks, party, age in (
+        ("sender", test, rank, "sender_id", "s_age_days"),
+        ("receiver", sent, sent_rank, "receiver_id", "r_age_days"),
+    ):
+        region = rows[party].map(attributes["district"]).map(DIVISIONS).fillna("unknown")
+        out[side]["region"] = _group_table(region.to_numpy(str), rows, ranks)
+        out[side]["account_age"] = _group_table(
+            _band(rows[age].to_numpy(dtype=np.float64), AGE_BANDS), rows, ranks, _labels(AGE_BANDS)
+        )
+    # What the sender held before paying. The receiver's balance is not an input.
+    before = (test["balance_after"] + test["amount"]).to_numpy(dtype=np.float64)
+    out["sender"]["balance_tier"] = _group_table(
+        _band(before, BALANCE_BANDS), test, rank, _labels(BALANCE_BANDS)
+    )
     for side in ("sender", "receiver"):
         ratios = [
             row["ratio_to_overall"]
@@ -318,6 +400,8 @@ def run(
         "fairness": fairness(test, tiers, pd.read_parquet(data_dir / "wallets.parquet")),
     }
     (model_dir / INSIGHTS_FILE).write_text(json.dumps(report, indent=2))
+    reference = {"model_version": bundle.version, **drift_reference(frame, risk, thresholds)}
+    (model_dir / DRIFT_REFERENCE_FILE).write_text(json.dumps(reference))
     return report
 
 

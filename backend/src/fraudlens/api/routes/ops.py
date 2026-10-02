@@ -13,6 +13,8 @@ from sqlalchemy import Date, cast, func, select, text
 
 from ...decision.evaluate import REPORT_FILE as POLICY_REPORT_FILE
 from ...decision.insights import INSIGHTS_FILE
+from ...models import registry
+from ...platform.audit import WorkflowError
 from ...platform.models import AuditLog, Case, Decision, FreezeRequest, Transaction
 from ..deps import Db, Oversight, Plat, Staff
 
@@ -241,17 +243,23 @@ def _report(directory: Path, name: str) -> dict | None:
 
 
 @router.get("/model/report")
-def model_report(p: Plat, ctx: Staff) -> dict:
-    """How the served model and policy did on the held-out test period.
+def model_report(
+    p: Plat, ctx: Staff, version: Annotated[str | None, Query(pattern=r"^v\d{1,6}$")] = None
+) -> dict:
+    """How a model version (default: the served one) and the policy did on the test period.
 
     A back-test with known labels: `model` is the model card's numbers, `policy` the
     effect of the rules, `insights` the threshold sweep, drift and fairness tables.
     """
-    if p.scorer.bundle is None:
+    if version is None and p.scorer.bundle is not None:
+        version = p.scorer.bundle.version
+    if version is None:
         return {"model_version": None, "model": None, "policy": None, "insights": None}
-    directory = p.settings.models_dir / p.scorer.bundle.version
+    if version not in registry.versions(p.settings.models_dir):
+        raise WorkflowError(404, "model_not_found", f"no model version {version}")
+    directory = p.settings.models_dir / version
     return {
-        "model_version": p.scorer.bundle.version,
+        "model_version": version,
         "model": _report(directory, "report.json"),
         "policy": _report(directory, POLICY_REPORT_FILE),
         "insights": _report(directory, INSIGHTS_FILE),

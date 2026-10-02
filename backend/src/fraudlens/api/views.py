@@ -39,6 +39,7 @@ def case_view(c: Case, now: datetime, names: dict[int, str] | None = None) -> di
         "verdict": c.verdict,
         "closed_at": c.closed_at,
         "closed_by": c.closed_by,
+        "closer": names.get(c.closed_by),
     }
 
 

@@ -1,7 +1,12 @@
-"""Versioned model storage: artifacts/models/<version>/ plus a CURRENT pointer."""
+"""Versioned model storage: artifacts/models/<version>/ plus a CURRENT pointer.
+
+uv run python -m fraudlens.models.registry              # list the versions
+uv run python -m fraudlens.models.registry promote v3   # serve v3 after a restart
+"""
 
 from __future__ import annotations
 
+import argparse
 import re
 from pathlib import Path
 
@@ -47,3 +52,26 @@ def load(version: str | None = None, root: Path | None = None) -> ModelBundle:
     if version is None or not _VERSION.match(version):
         raise FileNotFoundError(f"no model version to load in {root}")
     return ModelBundle.load(root / version)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="List model versions or promote one")
+    parser.add_argument("command", nargs="?", choices=("list", "promote"), default="list")
+    parser.add_argument("version", nargs="?")
+    args = parser.parse_args()
+    if args.command == "promote":
+        if args.version is None:
+            parser.error("promote needs a version, for example v3")
+        try:
+            load(args.version)  # a version that cannot be loaded is never promoted
+            promote(args.version)
+        except (ValueError, OSError) as exc:
+            parser.error(str(exc))
+        print(f"{args.version} promoted: restart the API to serve it")
+    current = current_version()
+    for version in versions():
+        print(version, "(promoted)" if version == current else "")
+
+
+if __name__ == "__main__":
+    main()

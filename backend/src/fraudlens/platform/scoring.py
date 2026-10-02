@@ -40,10 +40,20 @@ from ..decision import Decision as EngineDecision
 from ..decision import DecisionEngine, SimilarCases, context_from_engine, load_policy
 from ..decision.policy import RANK
 from ..features import SCORED_TYPES, FeatureEngine, Txn
+from ..mlops.shadow import Shadow
 from ..models import registry
 from .audit import WorkflowError
 from .events import FlagEvent, TxnEvent, moment
-from .models import Agent, Case, CaseEvent, Decision, Transaction, Wallet, WalletFlag
+from .models import (
+    Agent,
+    Case,
+    CaseEvent,
+    Decision,
+    ShadowScore,
+    Transaction,
+    Wallet,
+    WalletFlag,
+)
 
 log = logging.getLogger(__name__)
 
@@ -143,6 +153,8 @@ class Scorer:
             else:
                 log.warning("no similar-case index for model %s", self.bundle.version)
         self.decision = DecisionEngine(self.policy, self.bundle, similar)
+        self.shadow = self._load_shadow()
+        self._shadow_rows: list[dict] = []
         self.engine = FeatureEngine()
         self.clock = Clock(0.0)
         self.frozen: set[str] = set()
@@ -156,6 +168,37 @@ class Scorer:
     @property
     def mode(self) -> str:
         return "model" if self.bundle is not None else "rules_only"
+
+    def _load_shadow(self) -> Shadow | None:
+        """The challenger to record next to the served model, if one is configured."""
+        version = self.settings.shadow_model_version
+        if not version or self.bundle is None or version == self.bundle.version:
+            return None
+        try:
+            return Shadow.load(version, self.settings.models_dir, self.policy)
+        except Exception:
+            # A challenger is optional: serving starts without it.
+            log.exception("shadow model %s could not be loaded; shadow mode is off", version)
+            return None
+
+    def _shadow_score(self, txn_id: int, features) -> None:
+        """Record what the challenger says. It can fail; the decision cannot depend on it."""
+        t0 = time.perf_counter()
+        try:
+            risk, tier = self.shadow.score(features)
+        except Exception:
+            log.exception("shadow model failed on transaction %d; shadow mode is off", txn_id)
+            self.shadow = None
+            return
+        self._shadow_rows.append(
+            {
+                "txn_id": txn_id,
+                "model_version": self.shadow.version,
+                "risk": risk,
+                "tier": tier,
+                "latency_ms": (time.perf_counter() - t0) * 1000,
+            }
+        )
 
     # ------------------------------------------------------------- recovery
 
@@ -254,7 +297,7 @@ class Scorer:
         seen = set(s.scalars(select(Transaction.txn_id).where(Transaction.txn_id.in_(ids))))
         results: list[Result] = []
         txn_rows: list[dict] = []
-        self._new_wallets, self._new_agents = [], []
+        self._new_wallets, self._new_agents, self._shadow_rows = [], [], []
         decided: list[tuple[Result, Txn, EngineDecision, dict]] = []
         for event in events:
             if isinstance(event, FlagEvent):
@@ -291,6 +334,8 @@ class Scorer:
         if decision_rows:
             s.flush()
             s.execute(insert(Decision), decision_rows)
+        if self._shadow_rows:
+            s.execute(insert(ShadowScore), self._shadow_rows)
         for result in results:
             if result.duplicate:
                 self._recorded(s, result)
@@ -323,6 +368,8 @@ class Scorer:
         features = self.engine.features(t)
         decision = self.decision.decide(t, features, context_from_engine(self.engine, t))
         latency_ms = (time.perf_counter() - t0) * 1000
+        if self.shadow is not None and decision.risk is not None:
+            self._shadow_score(t.txn_id, features)  # after the clock stopped: not in latency_ms
 
         tier = decision.tier
         if tier == "hold":

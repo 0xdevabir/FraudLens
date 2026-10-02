@@ -72,6 +72,28 @@ class CustomerResponse(Body):
     step_up_passed: bool = False  # the channel re-authenticated the customer (PIN/OTP)
 
 
+class DemoPayment(Body):
+    sender_id: Identifier
+    receiver_id: Identifier
+    amount: float = Field(gt=0, le=10_000_000, allow_inf_nan=False)
+
+
+class DemoResponse(Body):
+    txn_id: int = Field(ge=0, lt=2**62)
+    action: Literal["proceed", "cancel"]
+    step_up_passed: bool = False
+
+
+class DemoClock(Body):
+    minutes: int = Field(ge=1, le=60)
+
+
+class Reveal(Body):
+    object_type: Literal["wallet", "device", "agent"]
+    object_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    case_id: int | None = Field(default=None, ge=1, le=2**31 - 1)
+
+
 class ScamReport(Body):
     reporter_id: Identifier
     reported_wallet_id: Identifier

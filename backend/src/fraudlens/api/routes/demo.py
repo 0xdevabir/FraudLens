@@ -2,12 +2,17 @@
 
 A real channel knows the customer's handset, balance and district and sends them
 with each payment. The demo phone does not, so these endpoints fill a payment in
-from what the platform has seen. They decide nothing and change nothing, and the
-router is not registered when the environment is production.
+from what the platform has seen. The second half plays the app itself: it sends
+the payment, the customer's answer and a scam report through exactly the code
+the service account's endpoints use, as the signed-in member of staff, and every
+one of those calls is audited as a demo action.
+
+The router is not registered when the environment is production.
 """
 
 from __future__ import annotations
 
+import time
 from typing import Annotated
 
 from fastapi import APIRouter, Query
@@ -15,10 +20,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...decision.policy import TIERS
-from ...platform.audit import WorkflowError
+from ...platform import cases as workflow
+from ...platform.audit import WorkflowError, audit
 from ...platform.events import Identifier, TxnIn
 from ...platform.models import Decision, Transaction
 from ..deps import Db, Plat, Platform, Staff
+from ..schemas import DemoClock, DemoPayment, DemoResponse, RecipientCheck, ScamReport
+from ..views import result_view
+from .customer import check_recipient
 
 router = APIRouter(prefix="/demo", tags=["demo"])
 
@@ -115,3 +124,65 @@ def scenarios(p: Plat, s: Db, ctx: Staff) -> dict:
             except (WorkflowError, KeyError):
                 continue
     return {"now": p.scorer.now(), "scenarios": found}
+
+
+# ------------------------------------------------- the customer's phone, played by staff
+
+
+@router.post("/pay")
+def pay(body: DemoPayment, p: Plat, s: Db, ctx: Staff) -> dict:
+    """Send a payment as the demo customer. It is scored and recorded like any other."""
+    if body.sender_id == body.receiver_id:
+        raise WorkflowError(422, "same_party", "sender and receiver are the same")
+    draft = _draft(p, s, body.sender_id, body.receiver_id, body.amount)
+    txn_id = time.time_ns() // 1_000  # unique enough for one person pressing a button
+    [result] = p.scorer.process([TxnIn(txn_id=txn_id, **draft).event()])
+    if result.status == "stale":
+        raise WorkflowError(409, "stale_event", "the event stream is ahead of this payment")
+    audit(
+        s, ctx, "demo.payment", "transaction", txn_id,
+        sender_id=body.sender_id, receiver_id=body.receiver_id, status=result.status,
+    )  # fmt: skip
+    s.commit()
+    return result_view(result)
+
+
+@router.post("/respond")
+def respond(body: DemoResponse, p: Plat, s: Db, ctx: Staff) -> dict:
+    """The demo customer's answer to a warning or a step-up."""
+    sender = s.scalar(select(Transaction.sender_id).where(Transaction.txn_id == body.txn_id))
+    if sender is None:
+        raise WorkflowError(404, "txn_not_found", "no such transaction")
+    txn = workflow.customer_respond(
+        p.scorer, ctx, sender, body.txn_id, body.action, body.step_up_passed
+    )
+    return {"txn_id": txn.txn_id, "status": txn.status, "status_reason": txn.status_reason}
+
+
+@router.post("/report", status_code=201)
+def report(body: ScamReport, p: Plat, ctx: Staff) -> dict:
+    """The demo customer's 'I think I was scammed'."""
+    made = workflow.report_scam(
+        p.scorer, ctx, body.reporter_id, body.reported_wallet_id, body.txn_id,
+        body.category, body.description,
+    )  # fmt: skip
+    return {"report_id": made.id, "case_id": made.case_id}
+
+
+@router.post("/recipient-check")
+def recipient_check(body: RecipientCheck, p: Plat, ctx: Staff) -> dict:
+    """What the app would show before the customer types an amount."""
+    return check_recipient(p, body.receiver_id)
+
+
+@router.post("/advance-clock")
+def advance_clock(body: DemoClock, p: Plat, s: Db, ctx: Staff) -> dict:
+    """Move the platform's clock forward, so a cooling-off period can be shown ending.
+
+    Deadlines move with it: review times on open cases come closer by the same amount.
+    """
+    with p.scorer.lock:
+        p.scorer.clock.observe(p.scorer.clock.now() + body.minutes * 60)
+    audit(s, ctx, "demo.clock_advanced", "clock", None, minutes=body.minutes)
+    s.commit()
+    return {"now": p.scorer.now()}

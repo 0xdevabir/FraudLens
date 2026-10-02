@@ -1,5 +1,7 @@
 .PHONY: help setup up down data features train policy insights pipeline test lint fmt \
-	migrate seed load api replay replay-live verify platform
+	migrate seed load api replay replay-live verify platform \
+	review retrain shadow models promote console console-build smoke \
+	demo demo-down demo-reset
 
 API_PORT ?= 8010
 API_URL ?= http://127.0.0.1:$(API_PORT)
@@ -7,14 +9,33 @@ API_URL ?= http://127.0.0.1:$(API_PORT)
 help:
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed -E 's/:.*## /\t/'
 
-setup: ## Install backend dependencies
+demo: backend/.env ## Everything in Docker: build, populate, serve. Console on http://localhost:3100
+	@echo "The first start builds the dataset and the models: about half an hour."
+	@echo "Then sign in on http://localhost:3100 as analyst1, supervisor1 or admin"
+	@echo "with the password in backend/.env (FRAUDLENS_SEED_PASSWORD)."
+	docker compose --profile demo up --build
+
+demo-down: ## Stop the demo and keep its data
+	docker compose --profile demo down
+
+demo-reset: ## Stop the demo and delete its database, dataset and models
+	docker compose --profile demo down --volumes
+
+# A password for the demo accounts and a signing key, generated once and never committed.
+backend/.env:
+	@umask 077 && printf 'FRAUDLENS_SEED_PASSWORD=%s\nFRAUDLENS_JWT_SECRET=%s\n' \
+		"$$(openssl rand -hex 12)" "$$(openssl rand -hex 32)" > $@
+	@echo "wrote backend/.env with a generated demo password and signing key"
+
+setup: ## Install backend and console dependencies
 	cd backend && uv sync
+	cd frontend && pnpm install --frozen-lockfile
 
 up: ## Start Postgres and Redis
 	docker compose up -d --wait
 
 down: ## Stop Postgres and Redis
-	docker compose down
+	docker compose --profile demo down
 
 data: ## Generate the synthetic dataset
 	cd backend && uv run python -m fraudlens.simulator.generate
@@ -56,11 +77,36 @@ verify: ## Check that what was served matches the offline evaluation
 
 platform: migrate seed load ## Database ready for `make api`
 
+review: ## Demo: close the older open cases with the simulation's ground truth (needs `make api`)
+	cd backend && uv run python -m fraudlens.mlops.review --api $(API_URL)
+
+retrain: ## Retrain with analyst verdicts as labels; registers a challenger, promotes nothing
+	cd backend && uv run python -m fraudlens.mlops.retrain
+
+shadow: ## Score past decisions with a challenger: make shadow VERSION=v3
+	cd backend && uv run python -m fraudlens.mlops.shadow --version $(VERSION)
+
+models: ## List the registered model versions
+	cd backend && uv run python -m fraudlens.models.registry
+
+promote: ## Serve a version after the next restart: make promote VERSION=v3
+	cd backend && uv run python -m fraudlens.models.registry promote $(VERSION)
+
+console: ## Run the analyst console on http://localhost:3100 (needs `make api`)
+	cd frontend && pnpm dev --port 3100
+
+console-build: ## Production build of the console
+	cd frontend && pnpm build
+
+smoke: ## Open every console page in a headless browser as each role (needs the API and the console)
+	cd frontend && pnpm exec playwright install chromium-headless-shell && node scripts/smoke.cjs
+
 test: ## Run backend tests (the platform tests need `make up`)
 	cd backend && uv run pytest -q
 
 lint: ## Lint and format check
 	cd backend && uv run ruff check src tests && uv run ruff format --check src tests
+	cd frontend && pnpm exec tsc --noEmit && pnpm exec eslint .
 
 fmt: ## Auto-format
 	cd backend && uv run ruff check --fix src tests && uv run ruff format src tests
