@@ -23,7 +23,9 @@ RECENT = timedelta(hours=48)  # how far back a payment is looked for when no ID 
 
 _BN_DIGITS = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
 _TXN_ID = re.compile(r"(?:Trx|Txn)\s?ID[:\s#]*([A-Z0-9]{1,20})", re.IGNORECASE)
-_AMOUNT = re.compile(r"(?:Tk\.?|BDT|৳)\s*([\d,]+(?:\.\d+)?)|([\d,]+(?:\.\d+)?)\s*(?:টাকা|taka|tk)\b", re.I)
+_AMOUNT = re.compile(
+    r"(?:Tk\.?|BDT|৳)\s*([\d,]+(?:\.\d+)?)|([\d,]+(?:\.\d+)?)\s*(?:টাকা|taka|tk)(?!\w)", re.IGNORECASE
+)
 _MAX_ID = 2**63 - 1  # the ledger's ID column is a signed 64-bit integer
 
 

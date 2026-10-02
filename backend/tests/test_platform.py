@@ -1348,6 +1348,171 @@ def test_a_scored_alert_is_published(client, tokens, p, settings, spare, replaye
     assert alert["txn_id"] == body["txn_id"] and alert["tier"] == "hold" and alert["case_id"]
 
 
+# ------------------------------------------------------- scam intelligence
+
+SCAM_TEXT = (
+    "Sir ami upay head office theke bolchi. Apnar account block hoye jabe, "
+    "ekhoni OTP code ta bolun."
+)
+
+
+@pytest.fixture(scope="module")
+def text_model(tmp_path_factory):
+    from fraudlens.intel.text import TextModel
+    from fraudlens.intel.train import train
+
+    directory = tmp_path_factory.mktemp("intel")
+    train(directory)
+    return TextModel.load(directory)
+
+
+def test_a_message_check_advises_and_keeps_nothing(
+    client, tokens, p, spare, text_model, monkeypatch
+):
+    monkeypatch.setattr(p, "intel", text_model)
+    service, analyst = tokens("upay-core"), tokens("analyst1")
+    wallet = spare()
+    found = client.post(
+        "/v1/customer/message-check", headers=service, json={"wallet_id": wallet, "text": SCAM_TEXT}
+    )
+    assert found.status_code == 200, found.text
+    found = found.json()
+    assert found["level"] == "high" and found["categories"] and found["advice"]["bn"]
+    assert "ask_secret" in {s["id"] for s in found["signals"]}
+
+    harmless = client.post(
+        "/v1/customer/message-check",
+        headers=service,
+        json={"wallet_id": wallet, "text": "Dupure ki khaba? Ami 1 tar dike ber hobo."},
+    ).json()
+    assert harmless["level"] == "none" and harmless["advice"] is None
+
+    # Without a trained classifier the link check still answers.
+    monkeypatch.setattr(p, "intel", None)
+    link_only = client.post(
+        "/v1/demo/message-check",
+        headers=analyst,
+        json={"wallet_id": wallet, "text": "Bill: http://upay-verify.xyz/login"},
+    ).json()
+    assert link_only["level"] == "high" and link_only["model_version"] is None
+    with p.sessions() as s:  # the demo call is audited by its outcome, never by its text
+        row = s.scalars(select(AuditLog).where(AuditLog.action == "demo.message_checked")).one()
+    assert row.object_id == wallet and row.detail["level"] == "high"
+    assert "upay-verify" not in json.dumps(row.detail)
+
+    for body in ({"wallet_id": wallet, "text": " "}, {"wallet_id": wallet, "text": "x" * 2001}):
+        assert (
+            client.post("/v1/customer/message-check", headers=service, json=body).status_code == 422
+        )
+    refused = client.post(
+        "/v1/customer/message-check", headers=analyst, json={"wallet_id": wallet, "text": "hi"}
+    )
+    assert refused.status_code == 403
+    for _ in range(p.message_limit.limit):
+        client.post(
+            "/v1/customer/message-check", headers=service, json={"wallet_id": wallet, "text": "hi"}
+        )
+    limited = client.post(
+        "/v1/customer/message-check", headers=service, json={"wallet_id": wallet, "text": "hi"}
+    )
+    assert limited.status_code == 429
+
+
+def test_a_payment_is_verified_from_the_ledger_for_its_receiver_only(client, tokens, p, spare):
+    service = tokens("upay-core")
+    buyer, seller, curious = spare(), spare(), spare()
+    body = send(p, buyer, seller, amount=1_250.0)
+    paid = client.post("/v1/score", headers=service, json=body).json()
+    assert paid["status"] == "completed"
+
+    def verify(wallet: str, **claim) -> dict:
+        response = client.post(
+            "/v1/customer/payment-verify", headers=service, json={"wallet_id": wallet, **claim}
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    real = verify(seller, txn_id=str(body["txn_id"]), amount=1_250.0)
+    assert real["status"] == "verified" and real["transaction"]["sender_id"] == buyer
+    assert real["message"]["en"] and real["message"]["bn"] and real["text"] is None
+    assert verify(seller, amount=1_250.0)["status"] == "verified"  # found by amount alone
+
+    # A screenshot of a real payment, edited to show more than was sent.
+    inflated = verify(seller, txn_id=str(body["txn_id"]), amount=12_500.0)
+    assert inflated["status"] == "mismatch" and inflated["checks"]["amount_matches"] is False
+
+    # A made-up SMS: no such transaction, and the amount never arrived.
+    forged = verify(seller, message="Cash In Tk 9,999.00 from 01711000000. TrxID 8QW2ZX91LM")
+    assert forged["status"] == "not_found" and forged["claimed"] == {
+        "txn_id": None,
+        "amount": 9999.0,
+    }
+    assert forged["text"]["links"] == []
+
+    # Somebody else's payment is indistinguishable from one that does not exist.
+    peek = verify(curious, txn_id=str(body["txn_id"]))
+    assert peek["status"] == "not_found" and peek["transaction"] is None
+    assert peek["checks"] == verify(curious, txn_id=str(2**40))["checks"]
+
+    assert (
+        client.post(
+            "/v1/customer/payment-verify", headers=service, json={"wallet_id": seller}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/v1/customer/payment-verify",
+            headers=tokens("analyst1"),
+            json={"wallet_id": seller, "amount": 5},
+        ).status_code
+        == 403
+    )
+    demo = client.post(
+        "/v1/demo/payment-verify",
+        headers=tokens("analyst1"),
+        json={"wallet_id": seller, "txn_id": str(body["txn_id"])},
+    )
+    assert demo.status_code == 200 and demo.json()["status"] == "verified"
+
+
+def test_alerts_and_reports_are_named_by_fraud_category(
+    client, tokens, p, spare, text_model, monkeypatch
+):
+    monkeypatch.setattr(p, "intel", text_model)
+    analyst = tokens("analyst1")
+    body, _ = held_payment(client, tokens, p, spare)
+    record = client.get(f"/v1/decisions/{body['txn_id']}", headers=analyst).json()
+    assert record["scenario"] and record["fraud_categories"]
+    assert all(c["basis"] and c["name"]["bn"] for c in record["fraud_categories"])
+
+    made = client.post(
+        "/v1/customer/reports",
+        headers=tokens("upay-core"),
+        json={
+            "reporter_id": spare(),
+            "reported_wallet_id": spare(),
+            "category": "phishing_link_or_app",
+            "description": SCAM_TEXT,
+        },
+    )
+    assert made.status_code == 201, made.text
+    detail = client.get(f"/v1/cases/{made.json()['case_id']}", headers=analyst).json()
+    named = {c["id"]: c["basis"] for c in detail["customer_reports"][0]["fraud_categories"]}
+    assert "customer_choice" in named["phishing_malware"]
+    assert any("description" in basis for basis in named.values())
+    # The label changed nothing: the case is an ordinary open one.
+    assert detail["status"] == "open"
+
+    taxonomy = client.get("/v1/intel/taxonomy", headers=analyst)
+    assert taxonomy.status_code == 200
+    taxonomy = taxonomy.json()
+    assert [c["number"] for c in taxonomy["categories"]] == list(range(1, 9))
+    assert taxonomy["model"]["serving"] is True
+    assert client.get("/v1/intel/taxonomy", headers=tokens("upay-core")).status_code == 403
+    assert client.get("/v1/intel/taxonomy").status_code == 401
+
+
 # ---------------------------------------------------------------- recovery
 
 

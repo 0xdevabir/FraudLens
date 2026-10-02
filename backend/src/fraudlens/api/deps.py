@@ -13,6 +13,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import Settings
+from ..intel.text import TextModel
 from ..platform.audit import Ctx, WorkflowError
 from ..platform.graph import Graph
 from ..platform.models import User
@@ -43,6 +44,9 @@ class Platform:
     login_ip_limit: RateLimiter
     check_limit: RateLimiter
     report_limit: RateLimiter
+    intel: TextModel | None  # the scam-message classifier, when it has been trained
+    message_limit: RateLimiter
+    proof_limit: RateLimiter
 
 
 def platform(request: Request) -> Platform:

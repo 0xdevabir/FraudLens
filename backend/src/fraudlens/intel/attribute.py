@@ -10,9 +10,9 @@ from __future__ import annotations
 from collections import defaultdict
 
 from .taxonomy import Taxonomy
+from .text import TextModel
 
 MULE_SCORE = 0.5  # the receiver model's score from which the receiver is called a likely mule
-MIN_SIMILARITY = 0.5  # weaker resemblances are not used to name a category
 
 
 def categorise(
@@ -29,9 +29,8 @@ def categorise(
     # The typology of the past cases this one resembles, weighted by how closely.
     weight: dict[str, float] = defaultdict(float)
     for case in similar_cases or []:
-        similarity = case.get("similarity") or 0.0
-        if similarity >= MIN_SIMILARITY and case.get("typology"):
-            weight[case["typology"]] += similarity
+        if case.get("typology"):
+            weight[case["typology"]] += case.get("similarity") or 0.0
     if weight:
         typology = max(weight, key=weight.__getitem__)
         for cid in taxonomy.typologies.get(typology, []):
@@ -40,6 +39,29 @@ def categorise(
     if ((scores or {}).get("mule") or 0.0) >= MULE_SCORE:
         basis["financial_network"].append("mule_score")
 
+    return _named(basis, taxonomy)
+
+
+def categorise_report(
+    category: str, description: str, model: TextModel | None, taxonomy: Taxonomy
+) -> list[dict]:
+    """Categories for a customer's scam report, for the analyst's eyes only.
+
+    The category the customer picked, plus what the classifier reads in their
+    description. It labels the report; it does not decide or prioritise anything.
+    """
+    basis: dict[str, list[str]] = defaultdict(list)
+    for cid in taxonomy.report_categories.get(category, []):
+        basis[cid].append("customer_choice")
+    if model is not None:
+        scores = model.score([description])[0]
+        for cid, p in zip(model.categories, scores[1:], strict=True):
+            if p >= model.thresholds["category"]:
+                basis[cid].append("description")
+    return _named(basis, taxonomy)
+
+
+def _named(basis: dict[str, list[str]], taxonomy: Taxonomy) -> list[dict]:
     return [
         {"id": c.id, "number": c.number, "name": c.name.model_dump(), "basis": basis[c.id]}
         for c in taxonomy.categories

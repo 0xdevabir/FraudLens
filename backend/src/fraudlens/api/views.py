@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from ..intel.attribute import categorise
+from ..intel.taxonomy import load_taxonomy
 from ..platform.models import Case, CaseEvent, Decision, FreezeRequest, Transaction, User
 from ..platform.scoring import Result
 
@@ -130,6 +132,10 @@ def decision_view(t: Transaction, d: Decision) -> dict:
         "responded_at": d.responded_at,
         "decided_at": d.decided_at,
         "latency_ms": round(d.latency_ms, 2),
+        # Named at read time from what the decision already recorded; see intel/attribute.py.
+        "fraud_categories": categorise(
+            d.scenario, d.scores, d.detail.get("similar_cases"), load_taxonomy()
+        ),
         **{
             key: d.detail.get(key)
             for key in (

@@ -53,6 +53,10 @@ const CATEGORIES: [string, string, string][] = [
   ["investment", "বিনিয়োগে লাভের লোভ দেখিয়েছে", "An investment offer"],
   ["account_takeover", "আমার অ্যাকাউন্ট অন্য কেউ ব্যবহার করেছে", "Someone used my account"],
   ["wrong_send", "ভুল নম্বরে পাঠিয়েছি", "I sent to the wrong number"],
+  ["fake_payment", "টাকা পাঠানোর ভুয়া প্রমাণ দেখিয়েছে", "A fake payment proof"],
+  ["merchant_or_marketplace", "অনলাইনে কিনে পণ্য পাইনি", "An online seller took my money"],
+  ["phishing_link_or_app", "সন্দেহজনক লিংক বা অ্যাপ", "A suspicious link or app"],
+  ["job_or_loan", "চাকরি বা ঋণের প্রলোভন", "A job or loan offer"],
   ["other", "অন্য কিছু", "Something else"],
 ];
 const WALLET_ID = /^[A-Za-z0-9_-]{1,32}$/;

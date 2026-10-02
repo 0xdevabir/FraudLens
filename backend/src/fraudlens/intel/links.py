@@ -28,12 +28,26 @@ URL = re.compile(
     re.IGNORECASE,
 )
 _SHORTENERS = frozenset(
-    "bit.ly tinyurl.com cutt.ly t.co rb.gy is.gd shorturl.at tiny.cc goo.gl ow.ly "
-    "rebrand.ly t.ly s.id shorturl.asia".split()
+    {
+        "bit.ly",
+        "tinyurl.com",
+        "cutt.ly",
+        "t.co",
+        "rb.gy",
+        "is.gd",
+        "shorturl.at",
+        "tiny.cc",
+        "goo.gl",
+        "ow.ly",
+        "rebrand.ly",
+        "t.ly",
+        "s.id",
+        "shorturl.asia",
+    }  # fmt: skip
 )
 _SECOND_LEVEL = frozenset({"com", "net", "org", "gov", "edu", "co", "ac", "info"})
 # Characters used to pass one name off as another: 0 for o, 1 for l, and so on.
-_LOOKALIKE = str.maketrans("01358", "olebs")
+_LOOKALIKE = str.maketrans("01358", "olesb")
 _HIGH = frozenset({"lookalike_domain", "apk_download", "ip_address", "hidden_host"})
 _RANK = {"none": 0, "caution": 1, "high": 2}
 

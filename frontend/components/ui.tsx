@@ -4,7 +4,7 @@ import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 
 import { ApiError, type Loaded } from "@/lib/api";
 import { TIER_LABEL, words } from "@/lib/format";
-import type { Tier } from "@/lib/types";
+import type { NamedCategory, Tier } from "@/lib/types";
 
 export function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(" ");
@@ -104,6 +104,24 @@ const STATUS_TONE: Record<string, Tone> = {
 export function StatusBadge({ status }: { status: string | null | undefined }) {
   if (!status) return <span className="text-fg-4">–</span>;
   return <Badge tone={STATUS_TONE[status] ?? "slate"}>{words(status)}</Badge>;
+}
+
+/** The fraud categories an alert, a report or a message was put in. The tooltip says on what evidence. */
+export function CategoryBadges({ categories }: { categories: NamedCategory[] | undefined }) {
+  if (!categories?.length) return <span className="text-fg-4">none named</span>;
+  return (
+    <span className="inline-flex flex-wrap gap-1">
+      {categories.map((category) => (
+        <Badge
+          key={category.id}
+          tone="violet"
+          title={[category.name.bn, category.basis?.length ? `from ${category.basis.map(words).join(", ")}` : ""].filter(Boolean).join(" · ")}
+        >
+          {category.number}. {category.name.en}
+        </Badge>
+      ))}
+    </span>
+  );
 }
 
 const BUTTON = {

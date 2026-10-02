@@ -118,6 +118,83 @@ export interface Decision {
   recommended_actions: { id: string; en: string; bn: string; needs_second_approver: boolean }[];
   similar_cases: SimilarCase[];
   headline: Text2;
+  fraud_categories: NamedCategory[];
+}
+
+/** A fraud category put on an alert, a report or a checked message, and what it rests on. */
+export interface NamedCategory {
+  id: string;
+  number: number;
+  name: Text2;
+  basis?: string[];
+  probability?: number | null;
+  source?: "model" | "link";
+}
+
+export type CheckLevel = "none" | "caution" | "high";
+
+export interface MessageCheck {
+  level: CheckLevel;
+  risk: number | null;
+  categories: NamedCategory[];
+  signals: { id: string; label: Text2 }[];
+  links: { host: string; flags: string[]; level: CheckLevel }[];
+  advice: Text2 | null;
+  model_version: string | null;
+}
+
+export interface PaymentProof {
+  status: "verified" | "mismatch" | "not_found";
+  checks: Record<string, boolean>;
+  transaction: { txn_id: number; ts: string; type: string; amount: number; status: string; sender_id: string } | null;
+  claimed: { txn_id: number | null; amount: number | null };
+  message: Text2;
+  text: MessageCheck | null;
+}
+
+export interface FraudCategory {
+  id: string;
+  number: number;
+  name: Text2;
+  summary: string;
+  bangladesh: string;
+  examples: string[];
+  detectors: string[];
+  signals: string[];
+  advice: Text2;
+}
+
+interface TextRate {
+  recall: number;
+  false_positive_rate: number;
+  false_positive_rate_hard?: number;
+}
+
+export interface TextSplit {
+  messages: number;
+  scam: number;
+  harmless: number;
+  auc: number;
+  caution: TextRate;
+  high: TextRate;
+  with_link_check: TextRate;
+  categories: Record<string, { support: number; precision: number | null; recall: number | null }>;
+  languages: Record<string, { messages: number; recall: number; false_positive_rate: number }>;
+  families?: Record<string, { scam: boolean; messages: number; flagged: number }>;
+}
+
+export interface FraudTaxonomy {
+  version: string;
+  categories: FraudCategory[];
+  general_advice: Text2;
+  model: { serving: boolean; version: string | null; thresholds: Record<string, number> | null };
+  report: {
+    model: string;
+    corpus: { families: number; held_out_families: number; templates: number; messages: Record<string, number> };
+    test: TextSplit;
+    unseen: TextSplit;
+    limits: string[];
+  } | null;
 }
 
 export interface Narrative {
@@ -189,6 +266,7 @@ export interface CustomerReport {
   txn_id: number | null;
   category: string;
   description: string | null;
+  fraud_categories: NamedCategory[];
   reported_at: string;
 }
 

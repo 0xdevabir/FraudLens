@@ -5,7 +5,7 @@ import { useState } from "react";
 
 import { Id, useSession } from "@/components/session";
 import { AlertTable, FreezeList } from "@/components/tables";
-import { Async, Badge, Button, Card, Empty, ErrorNote, Facts, inputClass, PageHeader, ReasonDialog, StatusBadge, TierBadge } from "@/components/ui";
+import { Async, Badge, Button, Card, CategoryBadges, Empty, ErrorNote, Facts, inputClass, PageHeader, ReasonDialog, StatusBadge, TierBadge } from "@/components/ui";
 import { FreezeButton, NetworkCard, RiskProfile } from "@/components/wallet";
 import { api, useApi } from "@/lib/api";
 import { taka, when, words } from "@/lib/format";
@@ -211,6 +211,9 @@ function Detail({ data, reload }: { data: CaseDetail; reload: () => void }) {
                       <span className="text-fg-2">from <Id value={report.reporter_id} caseId={data.id} /> · {when(report.reported_at)}</span>
                     </div>
                     {report.description && <p className="mt-1 text-fg">{report.description}</p>}
+                    {report.fraud_categories?.length > 0 && (
+                      <p className="mt-1 text-xs text-fg-3">Looks like: <CategoryBadges categories={report.fraud_categories} /></p>
+                    )}
                     {report.txn_id && <p className="text-xs text-fg-3">about payment #{report.txn_id}</p>}
                   </li>
                 ))}

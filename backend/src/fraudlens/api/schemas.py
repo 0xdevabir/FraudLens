@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, IPvAnyAddress, StringConstraints
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    IPvAnyAddress,
+    StringConstraints,
+    model_validator,
+)
 
 from ..platform.events import EventIn, Identifier
 
@@ -106,8 +113,31 @@ class ScamReport(Body):
     reported_wallet_id: Identifier
     txn_id: int | None = Field(default=None, ge=0, lt=2**62)
     category: Literal[
-        "impersonation", "prize_or_lottery", "investment", "account_takeover", "wrong_send", "other"
-    ]
+        "impersonation", "prize_or_lottery", "investment", "account_takeover", "wrong_send",
+        "fake_payment", "merchant_or_marketplace", "phishing_link_or_app", "job_or_loan", "other",
+    ]  # fmt: skip
     description: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)
     ]
+
+
+class MessageCheck(Body):
+    """A message the customer received and wants checked. It is read, never stored."""
+
+    wallet_id: Identifier
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+
+
+class PaymentVerify(Body):
+    """'Someone says they paid me.' At least one of the three must say which payment."""
+
+    wallet_id: Identifier  # the wallet that was told it received money
+    txn_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9]{1,32}$")
+    amount: float | None = Field(default=None, gt=0, le=10_000_000, allow_inf_nan=False)
+    message: str = Field(default="", max_length=2000)  # the SMS or caption they were shown
+
+    @model_validator(mode="after")
+    def _something_to_check(self) -> PaymentVerify:
+        if self.txn_id is None and self.amount is None and not self.message.strip():
+            raise ValueError("give a transaction ID, an amount or the message you were shown")
+        return self

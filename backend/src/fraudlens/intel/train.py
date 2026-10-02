@@ -23,9 +23,10 @@ import numpy as np
 from sklearn.metrics import average_precision_score, roc_auc_score
 
 from ..config import Settings
+from .analyze import check_message
 from .corpus import Sample, generate, load_families
 from .taxonomy import load_taxonomy
-from .text import SCAM, TextModel, build_pipeline, normalise
+from .text import SCAM, TextModel, build_pipeline, intel_dir, normalise
 
 VERSION = "v1"
 REPORT_FILE = "report.json"
@@ -47,10 +48,6 @@ LIMITS = [
     "Scripts that share no wording with the trained ones are caught less often; "
     "the `unseen` numbers are the estimate of that.",
 ]
-
-
-def intel_dir(settings: Settings) -> Path:
-    return settings.artifacts_dir / "intel"
 
 
 def _targets(samples: list[Sample], outputs: list[str]) -> np.ndarray:
@@ -101,6 +98,14 @@ def _split_report(
             "recall": round(hit / true.sum(), 4) if true.sum() else None,
         }
     out["categories"] = categories
+
+    # What a customer is actually told: the classifier and the link check together.
+    taxonomy = load_taxonomy()
+    told = np.array([check_message(s.text, model, taxonomy)["level"] != "none" for s in samples])
+    out["with_link_check"] = {
+        "recall": _rate(told[scam]),
+        "false_positive_rate": _rate(told[harmless]),
+    }
 
     langs = np.array([s.lang for s in samples])
     out["languages"] = {

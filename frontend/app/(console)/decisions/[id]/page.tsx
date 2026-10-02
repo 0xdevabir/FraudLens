@@ -7,7 +7,7 @@ import { useState } from "react";
 import { ScoreBar } from "@/components/charts";
 import { Id } from "@/components/session";
 import { DecidedBy } from "@/components/tables";
-import { Async, Badge, Button, Card, Chip, Empty, Facts, PageHeader, StatusBadge, Table, Td, TierBadge, cx } from "@/components/ui";
+import { Async, Badge, Button, Card, CategoryBadges, Chip, Empty, Facts, PageHeader, StatusBadge, Table, Td, TierBadge, cx } from "@/components/ui";
 import { useApi } from "@/lib/api";
 import { num, pct, taka, when, words } from "@/lib/format";
 import type { Decision, Lang, Narrative, Reason, RuleTrace, SimilarCase } from "@/lib/types";
@@ -209,6 +209,7 @@ function Detail({ id, data }: { id: string; data: Decision }) {
                 ["Model alone said", <TierBadge key="m" tier={data.model_tier} />],
                 ["Decided by", <DecidedBy key="d" value={data.decided_by} />],
                 ["Needs a reviewer", data.requires_review ? "Yes: a person must release or block it" : "No"],
+                ["Fraud type", <CategoryBadges key="c" categories={data.fraud_categories} />],
                 ...Object.entries(data.scores).map(([name, value]): [string, string] => [
                   SCORE_LABEL[name] ?? words(name),
                   value == null ? "not available" : num(value, 4),

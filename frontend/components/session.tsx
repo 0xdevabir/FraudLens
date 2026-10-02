@@ -61,6 +61,7 @@ const NAV: { heading: string; items: { href: string; label: string; roles: Role[
       { href: "/model", label: "Model monitoring", roles: ["analyst", "supervisor", "admin"] },
       { href: "/fairness", label: "Fairness report", roles: ["analyst", "supervisor", "admin"] },
       { href: "/policy", label: "Decision policy", roles: ["analyst", "supervisor", "admin"] },
+      { href: "/fraud-types", label: "Fraud types", roles: ["analyst", "supervisor", "admin"] },
       { href: "/audit", label: "Audit log", roles: ["supervisor", "admin"] },
     ],
   },

@@ -44,7 +44,7 @@ async function examples(password) {
 
 async function main() {
   const password = seedPassword();
-  const staff = ["/", "/impact", "/model", "/fairness", "/policy", "/phone"];
+  const staff = ["/", "/impact", "/model", "/fairness", "/policy", "/fraud-types", "/phone"];
   const review = ["/alerts", "/cases", "/approvals", "/network", "/rings", "/agents", ...(await examples(password))];
   const plan = {
     analyst1: [...staff, ...review],

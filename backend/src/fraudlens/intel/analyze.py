@@ -49,8 +49,7 @@ def check_message(text: str, model: TextModel | None, taxonomy: Taxonomy) -> dic
     for cid in order:
         category = taxonomy.category(cid)
         categories.append(
-            {"id": cid, "number": category.number, "name": category.name.model_dump()}
-            | named[cid]
+            {"id": cid, "number": category.number, "name": category.name.model_dump()} | named[cid]
         )
 
     advice = None

@@ -1,4 +1,4 @@
-.PHONY: help setup up redis down data features train policy insights pipeline test lint fmt \
+.PHONY: help setup up redis down data features train policy insights intel pipeline test lint fmt \
 	migrate seed load api replay replay-live verify platform \
 	review retrain shadow models promote console console-build smoke \
 	demo demo-reset
@@ -52,7 +52,10 @@ policy: ## Evaluate the decision policy and build the similar-case index
 insights: ## Threshold sweep, drift and fairness tables for the dashboards
 	cd backend && uv run python -m fraudlens.decision.insights
 
-pipeline: data features train policy insights ## Data, features, models and policy end to end
+intel: ## Train and evaluate the scam-message classifier (docs/FRAUD_TAXONOMY.md)
+	cd backend && uv run python -m fraudlens.intel.train
+
+pipeline: data features train policy insights intel ## Data, features, models and policy end to end
 
 migrate: ## Bring the database schema up to date
 	cd backend && uv run alembic upgrade head

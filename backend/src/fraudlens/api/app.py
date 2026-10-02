@@ -17,6 +17,7 @@ from sqlalchemy.exc import InterfaceError, OperationalError
 from starlette.exceptions import HTTPException
 
 from ..config import Settings
+from ..intel.text import load_text_model
 from ..platform.audit import WorkflowError
 from ..platform.db import make_engine, make_sessions
 from ..platform.graph import Graph
@@ -25,7 +26,7 @@ from ..platform.security import RateLimiter, check_production
 from ..platform.stream import Worker
 from .deps import Platform
 from .middleware import RequestContext, error_body
-from .routes import alerts, auth, cases, customer, demo, mlops, network, ops, scoring
+from .routes import alerts, auth, cases, customer, demo, intel, mlops, network, ops, scoring
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +75,10 @@ def build_platform(settings: Settings) -> Platform:
         ),
         check_limit=RateLimiter(redis, "recipient-check", 30, 60),
         report_limit=RateLimiter(redis, "report", 5, 3600),
+        intel=load_text_model(settings),
+        message_limit=RateLimiter(redis, "message-check", 20, 60),
+        # Tighter: each call is a question about the ledger.
+        proof_limit=RateLimiter(redis, "payment-verify", 10, 60),
     )
 
 
@@ -160,7 +165,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     for kind in (OperationalError, InterfaceError, RedisError):
         app.add_exception_handler(kind, unavailable)
 
-    for module in (auth, scoring, alerts, cases, network, customer, ops, mlops):
+    for module in (auth, scoring, alerts, cases, network, customer, intel, ops, mlops):
         app.include_router(module.router, prefix="/v1")
     if not settings.production:  # stand-ins for the customer app; see routes/demo.py
         app.include_router(demo.router, prefix="/v1")

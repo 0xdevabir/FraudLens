@@ -26,9 +26,17 @@ from ...platform.audit import WorkflowError, audit
 from ...platform.events import Identifier, TxnIn
 from ...platform.models import Decision, Transaction
 from ..deps import Db, Plat, Platform, Staff
-from ..schemas import DemoClock, DemoPayment, DemoResponse, RecipientCheck, ScamReport
+from ..schemas import (
+    DemoClock,
+    DemoPayment,
+    DemoResponse,
+    MessageCheck,
+    PaymentVerify,
+    RecipientCheck,
+    ScamReport,
+)
 from ..views import result_view
-from .customer import _limit, check_recipient
+from .customer import _limit, check_recipient, check_text, verify_payment
 
 router = APIRouter(prefix="/demo", tags=["demo"])
 
@@ -208,6 +216,29 @@ def report(body: ScamReport, p: Plat, ctx: Staff) -> dict:
 def recipient_check(body: RecipientCheck, p: Plat, ctx: Staff) -> dict:
     """What the app would show before the customer types an amount."""
     return check_recipient(p, body.receiver_id)
+
+
+@router.post("/message-check")
+def message_check(body: MessageCheck, p: Plat, s: Db, ctx: Staff) -> dict:
+    """The demo customer asks whether a message is a scam. The text is not recorded."""
+    _limit(p.message_limit, body.wallet_id)
+    found = check_text(p, body.text)
+    audit(
+        s, ctx, "demo.message_checked", "wallet", body.wallet_id,
+        level=found["level"], categories=[c["id"] for c in found["categories"]],
+    )  # fmt: skip
+    s.commit()
+    return found
+
+
+@router.post("/payment-verify")
+def payment_verify(body: PaymentVerify, p: Plat, s: Db, ctx: Staff) -> dict:
+    """The demo customer asks whether a payment they were shown proof of really arrived."""
+    _limit(p.proof_limit, body.wallet_id)
+    found = verify_payment(p, s, body)
+    audit(s, ctx, "demo.payment_verified", "wallet", body.wallet_id, status=found["status"])
+    s.commit()
+    return found
 
 
 @router.post("/advance-clock")

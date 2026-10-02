@@ -9,6 +9,8 @@ from sqlalchemy import case as sql_case
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ...intel.attribute import categorise_report
+from ...intel.taxonomy import load_taxonomy
 from ...platform import cases as workflow
 from ...platform.audit import WorkflowError
 from ...platform.events import Identifier
@@ -169,6 +171,10 @@ def get_case(case_id: RowId, p: Plat, s: Db, ctx: Reviewer) -> dict:
                 # Typed by a customer: numbers and addresses in it are masked, and
                 # nothing reads it to decide.
                 "description": redact(r.description),
+                # A label for the analyst. The model reads the text; it changes nothing.
+                "fraud_categories": categorise_report(
+                    r.category, r.description, p.intel, load_taxonomy()
+                ),
                 "reported_at": r.reported_at,
             }
             for r in reports
