@@ -1,7 +1,7 @@
 .PHONY: help setup up down data features train policy insights pipeline test lint fmt \
 	migrate seed load api replay replay-live verify platform \
 	review retrain shadow models promote console console-build smoke \
-	demo demo-down demo-reset
+	demo demo-reset
 
 API_PORT ?= 8010
 API_URL ?= http://127.0.0.1:$(API_PORT)
@@ -10,13 +10,10 @@ help:
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed -E 's/:.*## /\t/'
 
 demo: backend/.env ## Everything in Docker: build, populate, serve. Console on http://localhost:3100
-	@echo "The first start builds the dataset and the models: about half an hour."
+	@echo "The first start builds the dataset and the models and replays the traffic: about ten minutes."
 	@echo "Then sign in on http://localhost:3100 as analyst1, supervisor1 or admin"
 	@echo "with the password in backend/.env (FRAUDLENS_SEED_PASSWORD)."
 	docker compose --profile demo up --build
-
-demo-down: ## Stop the demo and keep its data
-	docker compose --profile demo down
 
 demo-reset: ## Stop the demo and delete its database, dataset and models
 	docker compose --profile demo down --volumes
@@ -34,7 +31,7 @@ setup: ## Install backend and console dependencies
 up: ## Start Postgres and Redis
 	docker compose up -d --wait
 
-down: ## Stop Postgres and Redis
+down: ## Stop everything (the demo too) and keep the data
 	docker compose --profile demo down
 
 data: ## Generate the synthetic dataset

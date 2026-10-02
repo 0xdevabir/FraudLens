@@ -24,7 +24,7 @@ What is in the box:
 
 ## Start it
 
-You need Docker with Compose v2 (about 6 GB of memory for Docker) and `make`.
+You need Docker with Compose v2 (give Docker at least 4 GB of memory) and `make`.
 
 ```
 make demo
@@ -32,8 +32,9 @@ make demo
 
 The first start builds the two images, generates the dataset, trains the models,
 replays 25 days of traffic through the running service and retrains a challenger
-on the analysts' verdicts. That takes **FIRST_START_MINUTES** on a recent laptop;
-progress is printed step by step. When the log shows the console as started, open
+on the analysts' verdicts. That takes **about ten minutes** on a recent laptop,
+plus a few minutes to build the images; most of it is the replay, and progress is
+printed step by step. When the log shows the console as started, open
 
 **http://localhost:3100**
 
@@ -49,7 +50,7 @@ the first `make demo` and written to `backend/.env` (`FRAUDLENS_SEED_PASSWORD`).
 Later starts skip everything that already exists and are ready in under a minute.
 
 ```
-make demo-down     # stop, keep the data            (Ctrl-C in the first terminal also stops it)
+make down          # stop, keep the data            (Ctrl-C in the first terminal also stops it)
 make demo-reset    # stop and delete the database, dataset and models
 ```
 

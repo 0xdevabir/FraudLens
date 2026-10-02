@@ -29,7 +29,7 @@ services:
       retries: 10
 
   # Builds the dataset, the models and the database contents on its first start
-  # (about half an hour), then serves. Later starts go straight to serving.
+  # (about ten minutes), then serves. Later starts go straight to serving.
   api:
     profiles: [demo]
     build: ./backend

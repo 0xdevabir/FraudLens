@@ -363,5 +363,5 @@ make test        # 175 tests; the platform and MLOps ones run against real Postg
 ```
 
 The demo accounts (`analyst1`, `analyst2`, `supervisor1`, `supervisor2`, `admin`,
-`upay-core`, and `review-sim` for `make review`) get the password in `FRAUDLENS_SEED_PASSWORD` (`backend/.env`, see
-`.env.example`).
+`upay-core`, and `review-sim` for `make review`) get the password in
+`FRAUDLENS_SEED_PASSWORD` (`backend/.env`, see `.env.example`).

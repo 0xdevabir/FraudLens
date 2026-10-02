@@ -104,8 +104,8 @@ check has actually been run and passed.
   shifted sample, and a generated fairness report.
 
 ## Phase 8 — Documentation and delivery
-- [ ] README with one-command start
-- [ ] Architecture, data assumptions, model card
-- [ ] CI workflow
-- [ ] Demo script following the judging criteria
+- [x] README with one-command start
+- [x] Architecture, data assumptions, model card
+- [x] CI workflow
+- [x] Demo script following the judging criteria
 - **Verified by:** a clean-clone start following only the README.

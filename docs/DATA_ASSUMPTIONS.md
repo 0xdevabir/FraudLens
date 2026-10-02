@@ -197,4 +197,7 @@ behaviour that was missing. But the test period is no longer strictly
 - Reports are the only source of confirmed labels and arrive for about half of
   cases. Training here uses ground-truth labels; with report-only labels a real
   deployment would learn from a biased subset.
-- Analysts, verdicts and customer responses in the demo are also simulated.
+- Analysts, verdicts and customer responses in the demo are also simulated. The
+  review simulator (`make review`) closes cases with the simulator's ground
+  truth, so the labels the feedback loop learns from are more accurate and more
+  complete than real verdicts would be (MODEL_CARD §13).

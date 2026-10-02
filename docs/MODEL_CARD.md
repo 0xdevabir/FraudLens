@@ -5,6 +5,12 @@ Every number below is read from `backend/artifacts/models/v2/report.json`, which
 synthetic ([DATA_ASSUMPTIONS.md](DATA_ASSUMPTIONS.md)); absolute values will not
 transfer to real traffic.
 
+Version numbers count registrations in one registry. This card was written on a
+machine where the first registered version was the model trained on the first
+simulator (§11), so the model described here is `v2` there. On a fresh checkout
+(`make demo`) the same model, with the same numbers, is registered as `v1` and
+the challenger trained on analyst verdicts (§13) as `v2`.
+
 ## 1. What the models are for
 
 Scam-to-cash-out interception for a mobile wallet. In an authorised-push-payment
@@ -224,26 +230,123 @@ has not been done yet.
 - **No adaptation.** Simulated scammers do not react to the controls.
 - **Young wallets and fast cash-out are risk signals.** New customers and
   remittance receivers legitimately show both. The data contains such customers
-  as hard negatives. This is the main fairness risk; a fairness report on false
-  alerts by region, wallet age, balance tier and channel is planned (Phase 7) and
-  not yet produced.
+  as hard negatives. This is the main fairness risk, and the fairness report
+  (§13) measures it: wallets under 30 days old are alerted on legitimate
+  payments several times more often than average.
 - **No protected attributes** are used as features: no name, gender, age, NID or
   religion exists in the data. District and urban/rural are used only relatively
   (away from home, same district as recipient), never as a raw location feature.
 - **Human oversight.** The models only produce scores. The decision engine
   ([DECISION_POLICY.md](DECISION_POLICY.md)) pauses a held transaction for
   analyst review and refuses to load a policy that removes that review. Freezing
-  a wallet is only ever a recommendation that needs two people (the approval
-  workflow itself is Phase 5). No model output blocks money by itself.
+  a wallet is only ever a request that a second person must approve (PLATFORM
+  §5). No model output blocks money by itself.
 - **Artifacts** are pickled/joblib files produced by this pipeline and must never
   be loaded from an untrusted source.
 
-## 13. Reproduce
+## 13. Fairness, feedback, shadow mode and drift
+
+These numbers are read from `insights.json` (`make insights`), from the
+retrained version's `manifest.json` (`make retrain`) and from the running service
+after the test period was replayed through it. The console shows all of them.
+
+### Who pays for false alarms
+
+False-alert rate: the share of a group's **legitimate** scored payments that were
+interrupted (warn or above). Overall it is 0.59%, and 0.05% are held. Groups under
+200 rows are not reported.
+
+| By the customer sending | False-alert rate | Times the overall rate |
+| --- | --- | --- |
+| Account under 30 days old | 3.39% | 5.8 |
+| Account 30–179 days | 0.48% | 0.8 |
+| Account 1 year or more | 0.51% | 0.9 |
+| Rural / urban | 0.58% / 0.59% | 1.0 / 1.0 |
+| App / USSD | 0.62% / 0.51% | 1.1 / 0.9 |
+| Balance under ৳1,000 / ৳10,000 or more | 0.30% / 0.69% | 0.5 / 1.2 |
+| Region, highest (Sylhet) and lowest (Barishal) | 0.91% / 0.22% | 1.6 / 0.4 |
+
+| By the wallet receiving | False-alert rate | Times the overall rate |
+| --- | --- | --- |
+| Account under 30 days old | 10.25% (1.63% held) | 17.5 |
+| Account 30–179 days | 0.20% | 0.3 |
+| USSD | 1.17% | 2.0 |
+| Seller | 0.10% | 0.2 |
+
+- **Account age is the gap that matters.** One legitimate payment in ten to a
+  wallet under a month old is interrupted, and one in sixty is held. A young
+  receiving wallet is also the strongest honest signal of a mule, so the gap
+  cannot be removed by dropping the feature without losing most of the recall.
+  What limits the harm is the form of the interruption: a warning the customer
+  can dismiss, and a hold with a 30-minute review deadline. A deployment should
+  watch this rate and consider a separate, higher threshold for new wallets.
+- Location, channel and balance gaps are within about a factor of two. No
+  protected attribute exists in the data, so nothing is known about gender, age
+  or religion, and nothing can be claimed.
+- These are rates on synthetic customers. The report is a method and a place on
+  the dashboard, not evidence about real people.
+
+### Verdicts as labels
+
+After the replay, 206 older cases were closed: 102 confirmed fraud, 93
+legitimate, 11 inconclusive (which label nothing). The retraining job added 957
+labelled alerts (821 fraud, 136 legitimate), with the features that were served
+for them, to the original training data and registered a challenger. It promotes
+nothing.
+
+Compared on the 34,349 test rows **after the last label** (the only rows neither
+model could have learnt from through feedback):
+
+| | Served model | Retrained on verdicts |
+| --- | --- | --- |
+| PR-AUC | 0.759 | 0.904 |
+| Precision at the 1% alert budget | 74.7% | 95.1% |
+| Victim transfers caught | 67.3% | 76.6% |
+| Money caught | 71.7% | 85.7% |
+
+Read this with three cautions:
+
+1. **The reviewers are simulated and always right.** `make review` closes cases
+   with the simulator's ground truth, which no analyst has. Real verdicts are
+   slower, sometimes wrong and sometimes missing. This is the upper bound of what
+   feedback can give, and it is demo scaffolding.
+2. **The gain is probably the unseen scam type.** The verdicts are the first
+   labelled examples of it any model has seen, and it is where the served model
+   is weakest (§6). The comparison has not been broken down by typology, so this
+   is the likely explanation, not a measured one. Without a new typology to
+   learn, expect a much smaller gain.
+3. **Feedback labels are a biased sample.** Only alerted payments are reviewed, so
+   the labels say where the model was right or wrong among its alerts and nothing
+   about the fraud it let through. They are added to the training data and never
+   replace it.
+
+### Shadow mode
+
+The challenger scored all 136,180 served decisions next to the served model. The
+two agree on the tier for 98.5% of them. The challenger would alert on 1.76% of
+traffic against 1.67%, and hold 1.07% against 0.80%: it is more willing to hold,
+which means more review work, and that is a decision for a person to weigh before
+promotion. Outcomes are known only for alerts an analyst has closed, so what the
+challenger alone would have caught is reported as a count without an outcome.
+
+### Drift
+
+Population stability index of each feature and of the score, test period against
+training period: 33 features stable (below 0.1), 9 to watch, 15 shifted (above
+0.25). The score itself stays stable (PSI 0.003 to 0.013 by week) while the weekly
+fraud rate moves between 0.97% and 1.46%. The most shifted inputs are lifetime
+counts and ages (handset age, payments sent, an agent's cash-outs), which grow
+with time by construction, so a shifted input is a prompt to look, not an alarm;
+the alert rate (1.54% on test against 1.24% on validation) is the signal to act
+on. The
+live endpoint measures the same on the latest decisions actually served.
+
+## 14. Reproduce
 
 ```
 make data features train     # about one minute; writes backend/artifacts/models/<version>/
-make policy                  # decision policy on the test period: policy_report.json
-make test                    # 115 tests, including leakage and round-trip checks
+make policy insights         # policy_report.json and insights.json (fairness, drift, threshold sweep)
+make test                    # 175 tests, including leakage and round-trip checks
 ```
 
 `report.json` holds every number above; `manifest.json` holds thresholds,
