@@ -163,7 +163,7 @@ export function Console({ children }: { children: ReactNode }) {
               const items = group.items.filter((item) => item.roles.includes(session.me.role));
               if (!items.length) return null;
               return (
-                <div key={group.heading} className="mt-5">
+                <div key={group.heading} className="mt-4">
                   <div className="px-3 pb-1.5 text-xs font-medium text-fg-4">{group.heading}</div>
                   {items.map((item) => (
                     <Link
@@ -172,7 +172,7 @@ export function Console({ children }: { children: ReactNode }) {
                       onClick={() => setMenu(false)}
                       aria-current={isActive(pathname, item.href) ? "page" : undefined}
                       className={cx(
-                        "block rounded-xl px-3 py-2 text-[0.9375rem] active:scale-[0.98]",
+                        "block rounded-xl px-3 py-1.5 text-[0.9375rem] active:scale-[0.98]",
                         isActive(pathname, item.href) ? "bg-accent/15 font-medium text-accent" : "text-fg-2 hover:bg-white/6",
                       )}
                     >

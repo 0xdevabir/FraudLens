@@ -121,7 +121,7 @@ export function Button({
       type="button"
       {...rest}
       className={cx(
-        "inline-flex items-center justify-center gap-1.5 rounded-full disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100",
+        "inline-flex items-center justify-center gap-1.5 rounded-full whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100",
         small ? "px-3 py-1 text-xs" : "px-4 py-2 text-sm",
         BUTTON[variant],
         className,

@@ -347,8 +347,8 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
           <form onSubmit={putCustom} className="grid grid-cols-2 gap-2 text-xs text-fg-2">
             <label>From wallet<input className={`${inputClass} mt-1 w-full`} value={custom.sender} maxLength={32} onChange={(e) => setCustom({ ...custom, sender: e.target.value })} /></label>
             <label>To wallet<input className={`${inputClass} mt-1 w-full`} value={custom.receiver} maxLength={32} onChange={(e) => setCustom({ ...custom, receiver: e.target.value })} /></label>
-            <label>Amount (taka)<input className={`${inputClass} mt-1 w-full`} inputMode="decimal" value={custom.amount} maxLength={10} onChange={(e) => setCustom({ ...custom, amount: e.target.value })} /></label>
-            <div className="flex items-end"><Button type="submit" disabled={busy}>Put on the phone</Button></div>
+            <label className="col-span-2">Amount (taka)<input className={`${inputClass} mt-1 w-full`} inputMode="decimal" value={custom.amount} maxLength={10} onChange={(e) => setCustom({ ...custom, amount: e.target.value })} /></label>
+            <Button type="submit" disabled={busy} className="col-span-2 mt-1">Put on the phone</Button>
           </form>
         </Card>
       </div>
