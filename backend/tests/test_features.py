@@ -3,14 +3,21 @@ import math
 import numpy as np
 import pytest
 
-from fraudlens.features import FEATURES, RECIPIENT_FEATURES, SCORED_TYPES, FeatureEngine, Txn
+from fraudlens.features import (
+    BEHAVIOUR_FIELDS,
+    FEATURES,
+    RECIPIENT_FEATURES,
+    SCORED_TYPES,
+    FeatureEngine,
+    Txn,
+)
 from fraudlens.features.build import LABEL_COLUMNS, Replayer, build_features, iter_txns, new_engine
 
 HOUR, DAY = 3600.0, 86_400.0
 T0 = 1_767_225_600.0  # 2026-01-01 00:00:00
 
 
-def make_txn(i, ts, typ, s, r, amount, bal=50_000.0, device="", district="Dhaka"):
+def make_txn(i, ts, typ, s, r, amount, bal=50_000.0, device="", district="Dhaka", network=""):
     kinds = {
         "SEND_MONEY": ("wallet", "wallet"),
         "CASH_OUT": ("wallet", "agent"),
@@ -18,7 +25,9 @@ def make_txn(i, ts, typ, s, r, amount, bal=50_000.0, device="", district="Dhaka"
         "PAYMENT": ("wallet", "merchant"),
     }[typ]
     channel = "agent" if typ == "CASH_IN" else ("app" if device else "ussd")
-    return Txn(i, T0 + ts, typ, s, kinds[0], r, kinds[1], amount, bal, device, channel, district)
+    return Txn(
+        i, T0 + ts, typ, s, kinds[0], r, kinds[1], amount, bal, device, channel, district, network
+    )
 
 
 def feats(engine, t):
@@ -83,6 +92,70 @@ def test_sender_amount_deviation_uses_own_history():
     assert usual["s_amount_z"] == 0 and usual["s_amount_vs_max"] == 1
     assert big["s_amount_z"] > 50 and big["s_amount_vs_max"] == 40
     assert big["s_new_recipients_24h"] == 0 and big["s_n_money_out"] == 5
+
+
+def habits(engine, t):
+    return dict(zip(BEHAVIOUR_FIELDS, engine.behaviour(t), strict=True))
+
+
+def test_usual_places_are_learned_from_the_wallets_own_history():
+    e = FeatureEngine()
+    probe = make_txn(99, 30 * DAY, "SEND_MONEY", "A", "B", 500, district="Chattogram")
+    assert math.isnan(habits(e, probe)["s_place_share"])  # a wallet nobody has seen
+    run(e, [make_txn(i, i * DAY, "SEND_MONEY", "A", "B", 500) for i in range(9)])
+    assert math.isnan(habits(e, probe)["s_place_share"])  # too little history to have habits
+    run(e, [make_txn(9, 9 * DAY, "SEND_MONEY", "A", "B", 500)])
+    assert habits(e, probe)["s_place_share"] == 0  # never used from there
+    assert habits(e, probe._replace(district="Dhaka"))["s_place_share"] == 1
+    # The district next door is the same place: people live in one and work in the other.
+    assert habits(e, probe._replace(district="Gazipur"))["s_place_share"] == 1
+    # A second regular place (an office, a campus) becomes usual as it is used.
+    away = [
+        make_txn(10 + i, (10 + i) * DAY, "PAYMENT", "A", "M", 200, district="Chattogram")
+        for i in range(5)
+    ]
+    run(e, away)
+    assert habits(e, probe)["s_place_share"] == pytest.approx(5 / 15)
+    assert habits(e, probe._replace(district="Sylhet"))["s_place_share"] == 0
+    # Receiving money somewhere says nothing about where the wallet's owner is.
+    assert habits(e, probe._replace(sender_id="B"))["s_place_share"] != habits(e, probe)
+    assert math.isnan(habits(e, probe._replace(sender_id="B"))["s_place_share"])
+
+
+def test_usual_networks_are_learned_only_from_transactions_that_carry_one():
+    e = FeatureEngine()
+    home, cafe = "203.0.113.0/24", "198.51.100.0/24"
+    probe = make_txn(99, 30 * DAY, "SEND_MONEY", "A", "B", 500, network=cafe)
+    run(e, [make_txn(i, i * DAY, "SEND_MONEY", "A", "B", 500) for i in range(12)])
+    assert math.isnan(habits(e, probe)["s_network_share"])  # history without any network
+    run(
+        e,
+        [
+            make_txn(20 + i, (20 + i) * DAY, "SEND_MONEY", "A", "B", 500, network=home)
+            for i in range(2)
+        ],
+    )
+    assert math.isnan(habits(e, probe)["s_network_share"])
+    run(e, [make_txn(22, 22 * DAY, "SEND_MONEY", "A", "B", 500, network=home)])
+    assert habits(e, probe)["s_network_share"] == 0
+    assert habits(e, probe._replace(network=home))["s_network_share"] == 1
+    assert math.isnan(habits(e, probe._replace(network=""))["s_network_share"])
+    # The profile is extra state: the model's features do not depend on it.
+    np.testing.assert_array_equal(e.features(probe), e.features(probe._replace(network="")))
+
+
+def test_the_network_memory_is_bounded():
+    e = FeatureEngine()
+    run(e, [make_txn(i, i * HOUR, "SEND_MONEY", "A", "B", 500, network="home") for i in range(5)])
+    run(
+        e,
+        [
+            make_txn(10 + i, (10 + i) * HOUR, "SEND_MONEY", "A", "B", 500, network=f"n{i}")
+            for i in range(100)
+        ],
+    )
+    networks = e.wallets["A"].networks
+    assert len(networks) == 32 and networks["home"] == 5  # the most used one is kept
 
 
 def test_device_features():
@@ -251,7 +324,10 @@ def test_one_row_per_scored_transaction(features, small_tables):
     t = small_tables["transactions"]
     scored = t[t["type"].isin(SCORED_TYPES)]
     assert features["txn_id"].tolist() == scored["txn_id"].tolist()
-    assert list(features.columns) == list(LABEL_COLUMNS) + list(FEATURES)
+    assert list(features.columns) == [*LABEL_COLUMNS, *FEATURES, *BEHAVIOUR_FIELDS]
+    # The synthetic history carries no network, and most wallets pay from where they live.
+    assert features["s_network_share"].isna().all()
+    assert features["s_place_share"].median() == 1
     x = _matrix(features)
     assert not np.isinf(x).any()
     # Recipient features exist exactly for wallet-to-wallet transfers.
@@ -307,6 +383,15 @@ def test_snapshot_restore_gives_identical_online_features(features, small_tables
     online = np.concatenate(rows)
     offline = _matrix(features[features["txn_id"] >= t["txn_id"].iloc[cut]])
     np.testing.assert_array_equal(online, offline)
+
+
+def test_snapshot_from_before_the_behaviour_profile_is_refused(tmp_path):
+    e = FeatureEngine()
+    run(e, [make_txn(0, 0, "SEND_MONEY", "A", "B", 100)])
+    del e.wallets["A"].places  # what an older snapshot's wallets look like
+    e.save(tmp_path / "old.pkl")
+    with pytest.raises(TypeError, match="behaviour profile"):
+        FeatureEngine.load(tmp_path / "old.pkl")
 
 
 def test_snapshot_load_rejects_other_objects(tmp_path):

@@ -118,6 +118,7 @@ def txn_from_row(row, ts: float | None = None) -> Txn:
         row.device_id,
         row.channel,
         row.district,
+        row.network,
     )
 
 
@@ -210,8 +211,8 @@ class Scorer:
             Transaction.txn_id, Transaction.ts, Transaction.type, Transaction.sender_id,
             Transaction.sender_type, Transaction.receiver_id, Transaction.receiver_type,
             Transaction.amount, Transaction.sender_balance_before, Transaction.device_id,
-            Transaction.channel, Transaction.district, Transaction.applied_at,
-            Transaction.applied_seq,
+            Transaction.channel, Transaction.district, Transaction.network,
+            Transaction.applied_at, Transaction.applied_seq,
         )  # fmt: skip
         applied = seq = 0
         with self.sessions() as s:
@@ -350,7 +351,8 @@ class Scorer:
             "amount": t.amount,
             "sender_balance_before": None if math.isnan(t.balance_before) else t.balance_before,
             "device_id": t.device_id, "channel": t.channel, "district": t.district,
-            "source": event.source, "status": "completed", "status_reason": None,
+            "network": t.network, "source": event.source,
+            "status": "completed", "status_reason": None,
             "applied_at": None, "applied_seq": None,
         }  # fmt: skip
         parties = ((t.sender_id, t.sender_type), (t.receiver_id, t.receiver_type))

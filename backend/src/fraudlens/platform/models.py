@@ -123,6 +123,8 @@ class Transaction(Base):
     device_id: Mapped[str] = mapped_column(String(64), server_default="")
     channel: Mapped[str] = mapped_column(String(16))
     district: Mapped[str] = mapped_column(String(40))
+    # Network prefix of the request's address (never the address); "" when not sent.
+    network: Mapped[str] = mapped_column(String(48), server_default="")
     status: Mapped[str] = mapped_column(String(20))
     status_reason: Mapped[str | None] = mapped_column(String(40))
     source: Mapped[str] = mapped_column(String(8))

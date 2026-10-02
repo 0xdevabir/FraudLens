@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...decision.policy import TIERS
+from ...features.engine import DISTRICT_COORDS, MIN_NETWORK_HISTORY
 from ...platform import cases as workflow
 from ...platform.audit import WorkflowError, audit
 from ...platform.events import Identifier, TxnIn
@@ -37,9 +38,19 @@ Amount = Annotated[float, Query(gt=0, le=10_000_000, allow_inf_nan=False)]
 
 
 def _draft(
-    p: Platform, s: Session, sender: str, receiver: str, amount: float, device: str | None = None
+    p: Platform,
+    s: Session,
+    sender: str,
+    receiver: str,
+    amount: float,
+    device: str | None = None,
+    district: str | None = None,
+    ip: str | None = None,
 ) -> dict:
-    """A send-money event as the app would post it now."""
+    """A send-money event as the app would post it now: from the customer's home
+    district unless the demo says they are somewhere else."""
+    if district is not None and district not in DISTRICT_COORDS:
+        raise WorkflowError(422, "unknown_district", "the demo knows only the listed districts")
     state = p.scorer.engine.wallets.get(sender)
     if state is None or receiver not in p.scorer.engine.wallets:
         raise WorkflowError(404, "unknown_party", "the demo needs wallets the platform has seen")
@@ -60,7 +71,8 @@ def _draft(
         "sender_balance_before": max(float(balance or DEFAULT_BALANCE), amount),
         "device_id": device if device is not None else state.last_device,
         "channel": "app",
-        "district": state.home,
+        "district": district or state.home,
+        "ip": ip,
         "source": "live",
     }
 
@@ -77,6 +89,25 @@ def payment_draft(
     if sender_id == receiver_id:
         raise WorkflowError(422, "same_party", "sender and receiver are the same")
     return _draft(p, s, sender_id, receiver_id, amount)
+
+
+@router.get("/habits")
+def habits(sender_id: Identifier, p: Plat, ctx: Staff) -> dict:
+    """The behaviour profile the platform holds for a wallet: where it usually
+    transacts from, and how many of its payments carried a network."""
+    state = p.scorer.engine.wallets.get(sender_id)
+    if state is None:
+        raise WorkflowError(404, "unknown_party", "the demo needs wallets the platform has seen")
+    places = sorted(state.places.items(), key=lambda place: -place[1])
+    return {
+        "home": state.home,
+        "transactions": state.n_init,
+        "places": [{"district": d, "transactions": n} for d, n in places],
+        "networks_seen": len(state.networks),
+        "network_transactions": sum(state.networks.values()),
+        "network_history_needed": MIN_NETWORK_HISTORY,
+        "districts": sorted(DISTRICT_COORDS),
+    }
 
 
 @router.get("/scenarios")
@@ -134,7 +165,10 @@ def pay(body: DemoPayment, p: Plat, s: Db, ctx: Staff) -> dict:
     """Send a payment as the demo customer. It is scored and recorded like any other."""
     if body.sender_id == body.receiver_id:
         raise WorkflowError(422, "same_party", "sender and receiver are the same")
-    draft = _draft(p, s, body.sender_id, body.receiver_id, body.amount)
+    draft = _draft(
+        p, s, body.sender_id, body.receiver_id, body.amount,
+        district=body.district, ip=str(body.ip) if body.ip else None,
+    )  # fmt: skip
     txn_id = time.time_ns() // 1_000  # unique enough for one person pressing a button
     [result] = p.scorer.process([TxnIn(txn_id=txn_id, **draft).event()])
     if result.status == "stale":

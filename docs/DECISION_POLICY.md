@@ -1,4 +1,4 @@
-# Decision policy — FraudLens policy v1 on model v4
+# Decision policy — FraudLens policy v2 on model v4
 
 The models rank transactions by risk ([MODEL_CARD.md](MODEL_CARD.md)). This
 document covers the layer that turns a score into an action: what happens at each
@@ -12,7 +12,9 @@ previous model, and was not repeated for v4. The data is synthetic
 ([DATA_ASSUMPTIONS.md](DATA_ASSUMPTIONS.md)).
 
 Code: `backend/src/fraudlens/decision/`. Policy file:
-`backend/src/fraudlens/decision/policies/v1.yaml`.
+`backend/src/fraudlens/decision/policies/v2.yaml`, which is v1 plus the three
+behaviour rules of §3 (R05–R07). `v1.yaml` is kept unchanged, so decisions recorded
+under it can still be reproduced.
 
 ## 1. What a decision answers
 
@@ -71,6 +73,34 @@ hard rule.
 | R02_SENDER_CONFIRMED_FRAUD | both | sending wallet is a confirmed-fraud wallet | hold (hard) |
 | R03_FRAUD_HANDSET_NEW_ON_WALLET | both | first use of this handset on the wallet, and the handset is linked to confirmed fraud | step-up |
 | R04_RECIPIENT_LOOKS_LIKE_MULE | send-money | mule model scores the receiving wallet above its wallet threshold | warn |
+| R05_LARGE_PAYMENT_FROM_UNUSUAL_PLACE | both | at most 2% of the wallet's payments were made from this place, and the amount is 3 or more deviations above its usual | warn |
+| R06_LARGE_PAYMENT_FROM_UNFAMILIAR_NETWORK | both | the wallet has never paid over this network, and the same amount test | warn |
+| R07_LARGE_PAYMENT_FROM_UNUSUAL_PLACE_AND_NETWORK | both | R05 and R06 together | step-up |
+
+### The customer's own habits (v2)
+
+R05–R07 compare a payment with the history of the wallet that makes it, not with
+other customers. The feature engine keeps two counts per wallet, next to the state
+the model reads:
+
+- **Places.** How many of the wallet's own transactions were made from each
+  district. `s_place_share` is the share made from the current district or one
+  bordering it, so home, office and campus are all usual, and so is the next
+  district over. It is missing until the wallet has made 10 transactions.
+- **Networks.** The same count per network the request came over.
+  `s_network_share` is missing when the channel sends no address, and until 3 of
+  the wallet's payments have carried one. At most 32 networks are remembered per
+  wallet; the least used is dropped first.
+
+A missing value means the rule is recorded as `not_evaluated`: a new customer, or
+a channel that sends no address, is never penalised for having no history.
+
+Being somewhere new is not suspicious by itself, so every rule also needs an
+amount far above what the wallet normally sends. These two values are inputs to
+rules only. They are not model features: the model was not retrained and its 61
+features are unchanged. A rule that fires gives the customer the `unusual_access`
+message ("from a place or a network your wallet is not normally used from") and
+gives the analyst `CONFIRM_PLACE` / `CONFIRM_NETWORK` as next steps.
 
 ### How the rules were chosen
 
@@ -86,6 +116,10 @@ Candidates were measured on the validation folds (val_a and val_b), never on tes
 | Fraud-linked handset that is also new on the wallet | 19 hits, all fraud, all already held by the model | kept as R03: a guarantee, not a gain |
 | Mule alert on the receiver | 9 extra alerts, all false | kept as R04 at the lowest tier only: it is the signal that generalises to an unseen scam (MODEL_CARD §4) |
 | Confirmed-fraud sender or receiver | never fires: in the simulator a flagged wallet stops transacting | kept as R01 and R02: policy guarantees that must hold even if the model fails |
+| Unusual place alone (`s_place_share` ≤ 0.02) | 673 hits, 8.6% fraud | rejected: mostly customers who are travelling |
+| Unusual place and an amount at or above the wallet's largest ever | 61 hits, 45.9% fraud | rejected for the next row |
+| Unusual place and an amount 3 deviations above usual (model v4) | 41 hits in 20 days, 65.9% fraud; all 27 frauds are account takeovers the model already holds; 14 honest payments raised from allow | kept as R05 at the lowest tier only |
+| Unfamiliar network | cannot be measured: the synthetic history carries no address | kept as R06 at the lowest tier; step-up only together with R05 (R07), whose cost R05 bounds |
 
 Conclusion, stated as it is: **on this data the model already contains everything
 the hand-written rules know.** The rules are in the policy as guarantees and as
@@ -99,7 +133,8 @@ Tier counts:
 | --- | --- | --- | --- | --- |
 | Model only | 132,541 | 653 | 322 | 1,029 |
 | Model + policy v1 | 132,533 | 661 | 322 | 1,029 |
-| Rules-only fallback | 134,232 | 246 | 67 | 0 |
+| Model + policy v2 | 132,520 | 674 | 322 | 1,029 |
+| Rules-only fallback (v2) | 134,217 | 261 | 67 | 0 |
 
 What each rule did:
 
@@ -109,12 +144,16 @@ What each rule did:
 | R02 | 0 | — | 0 | — |
 | R03 | 21 | 100% | 0 | — |
 | R04 | 505 | 90.7% | 8 | 2 (two extra victim transfers warned) |
+| R05 | 34 | 58.8% | 13 | 0 (thirteen honest payments warned) |
+| R06 | 0 | — | 0 | — |
+| R07 | 0 | — | 0 | — |
 
 Outcomes, everything at or above each tier:
 
 | | Alerts/day | Precision | Scams caught | Taka stopped | Taka incl. exit holds |
 | --- | --- | --- | --- | --- | --- |
-| Policy, warn | 80.5 | 65.2% | 87.5% | 85.2% | 96.6% |
+| Policy v2, warn | 81.0 | 64.7% | 87.5% | 85.2% | 96.6% |
+| Policy v1, warn | 80.5 | 65.2% | 87.5% | 85.2% | 96.6% |
 | Policy, step-up | 54.0 | 84.5% | 80.0% | 78.1% | 90.1% |
 | Policy, hold | 41.2 | 94.5% | 73.6% | 72.8% | 83.1% |
 | Model only, warn | 80.2 | 65.3% | 86.9% | 85.1% | 96.6% |
@@ -122,6 +161,14 @@ Outcomes, everything at or above each tier:
 The policy differs from the model in eight transactions out of 134,545: six false
 warnings and two true ones. For the scam type that was never in training
 (`investment_scam`), scams caught at warn go from 70.4% to 71.7%.
+
+v2 adds thirteen more warnings, about one every two days, and none of them is a
+fraud: every fraud R05 fires on (20 of its 34 hits) is an account takeover the
+model already holds. On this data the behaviour rules cost a few warnings shown
+to customers who are travelling and catch nothing new. They are there for what
+the data cannot show: a takeover the model does not recognise, and rules-only
+mode, where R05 is 15 of the 261 warnings. R06 and R07 never fire offline because
+no recorded transaction carries a network.
 
 ## 5. Rules-only fallback
 
@@ -215,6 +262,14 @@ check.
   numbers, or an unsupported claim with no number in it. It is a guard against
   invented figures, not a proof of faithfulness.
 - **R01 and R02 never fired**, so their effect is shown by unit tests, not by data.
+  The same holds for the network rules R06 and R07.
+- **A place is a district**, the finest location the data has. A wallet used from
+  the other side of its own district looks no different from one used at home.
+- **A network is an address prefix** (/24 for IPv4, /48 for IPv6). Mobile carriers
+  move customers between prefixes, so on real traffic "never seen" will be more
+  common than a change of connection. Grouping by carrier (ASN) would be steadier
+  and needs a lookup database this prototype does not ship. The 3-payment minimum
+  and the amount test are the only guards, and neither was fitted on real data.
 - **Thresholds and fallback points were fitted on synthetic validation data** and
   must be re-fitted on real traffic.
 - **Bangla text** was written by the developers and has not been reviewed by a
@@ -224,8 +279,8 @@ check.
 
 ## 9. Changing the policy
 
-1. Copy `policies/v1.yaml` to `v2.yaml`, set `version: v2`, edit.
-2. `uv run python -m fraudlens.decision.evaluate --policy v2` reports what the
+1. Copy `policies/v2.yaml` to `v3.yaml`, set `version: v3`, edit.
+2. `uv run python -m fraudlens.decision.evaluate --policy v3` reports what the
    change does to every tier before anything is served.
 3. A file that is malformed, has an unknown field, removes human review from
    holds, or declares a different version than its file name is refused at load.
@@ -234,5 +289,5 @@ check.
 
 ```
 make policy     # writes policy_report.json and similar_cases.npz next to the model
-make test       # 180 tests; 68 cover this layer
+make test       # 203 tests; 79 cover this layer
 ```

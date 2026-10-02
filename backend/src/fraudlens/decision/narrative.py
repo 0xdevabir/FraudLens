@@ -21,7 +21,8 @@ from .reasons import bn_digits
 log = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "claude-opus-5-5"
-MAX_NOTE_CHARS = 2500
+# Room for the longest template note (every rule firing, every recommendation) and no more.
+MAX_NOTE_CHARS = 3000
 
 _FROM_BN = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
 _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")

@@ -413,7 +413,7 @@ def test_template_note_answers_the_three_questions_and_is_grounded():
         ("Sent to W***9999.", "identifier not in evidence: W***9999"),
         ("Risk is 96.5 out of 100.", "number not in evidence: 96.5"),
         ("   ", "empty text"),
-        ("word " * 600, "longer than 2500 characters"),
+        ("word " * 700, "longer than 3000 characters"),
     ],
 )
 def test_grounding_rejects_text_that_goes_beyond_the_evidence(text, problem):
@@ -504,6 +504,80 @@ def test_mask_id_hides_the_middle_of_an_identifier():
     assert mask_id("W12") == "W***" and mask_id("12345678") == "***5678"
 
 
+# ------------------------------------------- v2: the customer's behaviour profile
+
+UNUSUAL = {"amount": 20_000.0, "s_amount_z": 6.0, "s_place_share": 0.0}
+
+
+def test_v2_keeps_v1_and_adds_the_behaviour_rules(policy):
+    v2 = load_policy("v2")
+    assert load_policy().version == "v2"  # what is served unless a version is named
+    assert v2.rules[: len(policy.rules)] == policy.rules
+    assert [r.id[:3] for r in v2.rules[len(policy.rules) :]] == ["R05", "R06", "R07"]
+    assert not any(rule.hard for rule in v2.rules[len(policy.rules) :])
+    assert v2.tiers == policy.tiers and v2.fallback == policy.fallback
+
+
+@pytest.mark.parametrize(
+    ("fields", "tier", "decided_by"),
+    [
+        (UNUSUAL, "warn", "rule:R05_LARGE_PAYMENT_FROM_UNUSUAL_PLACE"),
+        # An ordinary amount from somewhere new is a customer who is travelling.
+        (UNUSUAL | {"s_amount_z": 0.5}, "allow", "model"),
+        # A large payment from one of the wallet's usual places.
+        (UNUSUAL | {"s_place_share": 0.4}, "allow", "model"),
+        # No history yet: nothing can be said, so nothing is.
+        (UNUSUAL | {"s_place_share": math.nan}, "allow", "model"),
+        (
+            UNUSUAL | {"s_place_share": 1.0, "s_network_share": 0.0},
+            "warn",
+            "rule:R06_LARGE_PAYMENT_FROM_UNFAMILIAR_NETWORK",
+        ),
+        (UNUSUAL | {"s_place_share": 1.0, "s_network_share": 0.6}, "allow", "model"),
+        (
+            UNUSUAL | {"s_network_share": 0.0},
+            "step_up",
+            "rule:R07_LARGE_PAYMENT_FROM_UNUSUAL_PLACE_AND_NETWORK",
+        ),
+    ],
+)
+def test_a_large_payment_from_an_unusual_place_or_network_is_raised(fields, tier, decided_by):
+    outcome = apply_policy(load_policy("v2"), "SEND_MONEY", fields, LOW, THRESHOLDS)
+    assert (outcome.tier, outcome.decided_by) == (tier, decided_by)
+
+
+def test_the_behaviour_rules_never_lower_what_the_model_decided():
+    outcome = apply_policy(load_policy("v2"), "CASH_OUT", UNUSUAL, HIGH, THRESHOLDS)
+    assert outcome.tier == "hold" and outcome.decided_by == "model"
+    assert [rule.id[:3] for rule in outcome.fired] == ["R05"]
+
+
+def test_a_rule_cannot_name_a_scenario_the_policy_has_no_words_for():
+    raw = _variant(rules=[_rule(scenario="unusual_access")])
+    with pytest.raises(ValueError, match="messages.unusual_access"):
+        Policy.model_validate(raw)
+
+
+def test_the_customer_is_told_where_the_doubt_comes_from(world):
+    v2 = load_policy("v2")
+    engine = DecisionEngine(v2, world.bundle, world.index)
+    calm = world.frame[(world.frame["type"] == "SEND_MONEY") & (world.frame["y"] == 0)]
+    row = calm.sort_values("risk").iloc[0].copy()
+    assert _decide(world, row, engine)[1].tier == "allow"
+    row["s_amount_z"], row["s_place_share"] = 6.0, 0.0
+    _, decision = _decide(world, row, engine)
+    assert decision.policy_version == "v2" and decision.scenario == "unusual_access"
+    assert decision.tier != "allow"
+    assert decision.customer_message == v2.messages["unusual_access"][decision.tier].model_dump()
+    assert "UNUSUAL_PLACE" in [reason["code"] for reason in decision.reasons]
+    trace = {step["id"]: step for step in decision.rule_trace}
+    assert trace["R05_LARGE_PAYMENT_FROM_UNUSUAL_PLACE"]["inputs"]["s_place_share"] == 0
+    # No network came with the payment, so the network rules could not be checked.
+    assert trace["R06_LARGE_PAYMENT_FROM_UNFAMILIAR_NETWORK"]["status"] == "not_evaluated"
+    for lang in ("en", "bn"):
+        assert check_grounding(template(decision.evidence, lang), decision.evidence).ok
+
+
 # -------------------------------------------- the engine on a trained small world
 
 
@@ -528,7 +602,7 @@ def world(trained, policy):
 
 def _decide(world, row, engine=None):
     txn = next(iter_txns(world.txns.loc[[row["txn_id"]]].reset_index()))
-    context = {k: row[k] for k in ("sender_flagged", "recipient_flagged")}
+    context = {k: row[k] for k in policy_eval.CONTEXT_COLUMNS}
     return txn, (engine or world.engine).decide(txn, row[list(FEATURES)].to_numpy(float), context)
 
 
@@ -638,9 +712,13 @@ def test_display_score_is_anchored_to_the_tier_thresholds():
 def test_context_comes_from_the_confirmed_fraud_flags(world):
     engine = FeatureEngine()
     txn = next(iter_txns(world.txns[world.txns["type"] == "SEND_MONEY"].iloc[[0]].reset_index()))
-    assert context_from_engine(engine, txn) == {"sender_flagged": 0.0, "recipient_flagged": 0.0}
+    context = context_from_engine(engine, txn)
+    assert set(context) == set(policy_eval.CONTEXT_COLUMNS)
+    assert context["sender_flagged"] == 0 and context["recipient_flagged"] == 0
+    # A wallet with no history has no habits to compare against.
+    assert math.isnan(context["s_place_share"]) and math.isnan(context["s_network_share"])
     engine.flagged[txn.receiver_id] = txn.ts - 60
-    assert context_from_engine(engine, txn) == {"sender_flagged": 0.0, "recipient_flagged": 1.0}
+    assert context_from_engine(engine, txn)["recipient_flagged"] == 1
 
 
 # -------------------------------------------------------------- similar cases
@@ -685,7 +763,8 @@ def test_policy_evaluation_runs_end_to_end(trained):
     data_dir, root, model_report = trained
     report = policy_eval.run(data_dir, models_root=root)
     saved = json.loads((root / "v1" / policy_eval.REPORT_FILE).read_text())
-    assert saved["policy_version"] == "v1" and saved["model_version"] == "v1"
+    assert saved["policy_version"] == "v2" and saved["model_version"] == "v1"
+    assert {"R05_LARGE_PAYMENT_FROM_UNUSUAL_PLACE"} <= set(saved["rules"])
     assert (root / "v1" / "similar_cases.npz").is_file()
 
     counts = report["tier_counts"]
@@ -702,6 +781,6 @@ def test_policy_evaluation_runs_end_to_end(trained):
 
     single = report["single_decisions"]
     assert single["decisions"] > 0 and single["tier_differs_from_batch"] == 0
-    assert single["case_notes_failing_grounding"] == 0
+    assert single["case_notes_failing_grounding"] == 0, single["grounding_failures"]
     assert single["alerts_without_a_raising_reason"] == 0
     assert not math.isnan(single["decide_ms"]["p95"])

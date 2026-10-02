@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    IPvAnyAddress,
+    StringConstraints,
+    TypeAdapter,
+    model_validator,
+)
 
 from ..features import SCORED_TYPES, Txn
 
@@ -31,6 +40,20 @@ def epoch(moment: datetime) -> float:
 
 def moment(ts: float) -> datetime:
     return datetime.fromtimestamp(ts, UTC)
+
+
+# How much of an address identifies "the same network": a home or office line keeps
+# its /24 (IPv6: its /48) while the last part changes from day to day.
+_NETWORK_BITS = {4: 24, 6: 48}
+
+
+def network_of(ip: IPvAnyAddress | None) -> str:
+    """The network an address belongs to. The address itself is not kept anywhere."""
+    if ip is None:
+        return ""
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return str(ipaddress.ip_network((ip, _NETWORK_BITS[ip.version]), strict=False))
 
 
 @dataclass(frozen=True)
@@ -67,6 +90,8 @@ class TxnIn(_In):
     device_id: str = Field(default="", max_length=64, pattern=r"^[A-Za-z0-9_-]*$")
     channel: Literal["app", "ussd", "agent", "bank"]
     district: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z' .-]+$")
+    # The address the customer's request came from, when the channel knows it.
+    ip: IPvAnyAddress | None = None
     source: Literal["live", "replay"] = "live"
 
     @model_validator(mode="after")
@@ -94,6 +119,7 @@ class TxnIn(_In):
             self.device_id,
             self.channel,
             self.district,
+            network_of(self.ip),
         )
         return TxnEvent(txn, self.source)
 

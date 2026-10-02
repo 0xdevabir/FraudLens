@@ -8,6 +8,7 @@ development ones. The tests share one replayed world and run in file order.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import itertools
 import json
 import shutil
@@ -26,12 +27,13 @@ from fraudlens.api.middleware import MAX_BODY_BYTES
 from fraudlens.config import DEV_JWT_SECRET, Settings
 from fraudlens.decision import evaluate, insights
 from fraudlens.features import FEATURES, Txn
+from fraudlens.features.engine import DISTRICT_COORDS, travel_km
 from fraudlens.mlops import drift, feedback, review
 from fraudlens.mlops import shadow as shadow_mode
 from fraudlens.models.train import FEEDBACK_COLUMNS
 from fraudlens.platform import replay, verify
 from fraudlens.platform.db import make_engine, make_sessions, migrate
-from fraudlens.platform.events import moment
+from fraudlens.platform.events import moment, network_of
 from fraudlens.platform.load import load
 from fraudlens.platform.models import (
     AuditLog,
@@ -95,6 +97,7 @@ def settings(trained, tmp_path_factory):
         run_worker=False,  # the tests drive the worker themselves
         seed_password=PASSWORD,
         llm_notes=False,
+        demo_login=False,
     )
 
 
@@ -341,6 +344,7 @@ def test_production_refuses_development_defaults():
         "database_url": "postgresql+psycopg://fraudlens:a-private-password@db:5432/fraudlens",
         "redis_url": "redis://:a-private-password@cache:6379/0",
         "cors_origins": ["https://console.example"],
+        "demo_login": False,
     }
     check_production(Settings(**safe))
     for unsafe in (
@@ -530,6 +534,123 @@ def test_a_wallet_seen_for_the_first_time_survives_a_restart(client, tokens, p, 
         assert s.get(Wallet, "W_brand_new").segment == "unknown"
     p.scorer.recover()
     assert "W_brand_new" in p.scorer.engine.wallets
+
+
+# ------------------------------------------------- the customer's usual places and networks
+
+
+@pytest.mark.parametrize(
+    ("ip", "network"),
+    [
+        (None, ""),
+        ("203.0.113.24", "203.0.113.0/24"),
+        ("::ffff:203.0.113.24", "203.0.113.0/24"),  # an IPv4 client behind a dual-stack proxy
+        ("2001:db8:12:3456::9", "2001:db8:12::/48"),
+    ],
+)
+def test_only_the_network_prefix_of_an_address_is_kept(ip, network):
+    assert network_of(ipaddress.ip_address(ip) if ip else None) == network
+
+
+def test_a_large_payment_from_an_unusual_place_and_network_needs_proof(
+    client, tokens, p, replayed, spare
+):
+    engine, service, analyst = p.scorer.engine, tokens("upay-core"), tokens("analyst2")
+    sender = next(w for w in iter(spare, None) if engine.wallets[w].n_init >= 20)
+    receiver, state = spare(), engine.wallets[sender]
+    away = next(
+        d for d in sorted(DISTRICT_COORDS) if all(travel_km(d, seen) > 0 for seen in state.places)
+    )
+    large = {"amount": 60_000.0, "sender_balance_before": 90_000.0}
+
+    def rules(**over) -> dict:
+        body = send(p, sender, receiver, **over)
+        response = client.post("/v1/score/what-if", headers=analyst, json=body)
+        assert response.status_code == 200, response.text
+        trace = response.json()["explanation"]["rule_trace"]
+        return {rule["id"][:3]: rule["status"] for rule in trace}
+
+    # Nothing has told the platform which networks this wallet uses, so that rule is silent.
+    fired = rules(**large, district=away, ip="198.51.100.77")
+    assert fired["R05"] == "fired" and fired["R06"] == fired["R07"] == "not_evaluated"
+
+    for host in (24, 25, 131):  # the same network: the last part of an address is not kept
+        body = send(p, sender, receiver, amount=120.0, ip=f"203.0.113.{host}")
+        assert client.post("/v1/score", headers=service, json=body).status_code == 200
+    with p.sessions() as s:
+        assert s.get(Transaction, body["txn_id"]).network == "203.0.113.0/24"
+    if state.networks != {"203.0.113.0/24": 3}:
+        pytest.skip("the model stopped these small payments, so no network was learned")
+
+    usual = rules(**large, ip="203.0.113.7")
+    assert usual["R05"] == usual["R06"] == usual["R07"] == "not_fired"
+    # A small payment from somewhere new is a customer who is travelling.
+    trip = rules(amount=120.0, district=away, ip="198.51.100.77")
+    assert trip["R05"] == trip["R06"] == trip["R07"] == "not_fired"
+    elsewhere = rules(**large, ip="198.51.100.77")
+    assert (elsewhere["R05"], elsewhere["R06"], elsewhere["R07"]) == (
+        "not_fired",
+        "fired",
+        "not_fired",
+    )
+
+    body = send(p, sender, receiver, **large, district=away, ip="198.51.100.77")
+    result = client.post("/v1/score", headers=service, json=body).json()
+    assert result["decision"]["tier"] in ("step_up", "hold")
+    record = client.get(f"/v1/decisions/{body['txn_id']}", headers=analyst).json()
+    assert record["policy_version"] == "v2"
+    assert {r["id"][:3] for r in record["rule_trace"] if r["status"] == "fired"} >= {"R05", "R07"}
+    assert {"UNUSUAL_PLACE", "UNFAMILIAR_NETWORK"} <= {r["code"] for r in record["reasons"]}
+    assert "CONFIRM_PLACE" in [a["id"] for a in record["recommended_actions"]]
+    assert "198.51.100.77" not in json.dumps(record)  # the address itself is never stored
+
+    # The profile is rebuilt from the database after a restart.
+    probe = Txn(1, engine.last_ts + 60, "SEND_MONEY", sender, "wallet", receiver, "wallet",
+                500.0, 10_000.0, "", "app", state.home, "203.0.113.0/24")  # fmt: skip
+    before = engine.behaviour(probe)
+    assert before[1] == 1
+    p.scorer.recover()
+    assert p.scorer.engine.behaviour(probe) == before
+
+
+def test_a_malformed_address_is_refused(client, tokens, p, replayed, spare):
+    body = send(p, spare(), spare(), ip="not-an-address")
+    response = client.post("/v1/score", headers=tokens("upay-core"), json=body)
+    assert response.status_code == 422 and "not-an-address" not in response.text
+
+
+def test_the_demo_phone_can_pay_from_another_place_and_network(client, tokens, p, replayed, spare):
+    staff, engine = tokens("supervisor2"), p.scorer.engine
+    sender = next(w for w in iter(spare, None) if engine.wallets[w].n_init >= 20)
+    receiver, state = spare(), engine.wallets[sender]
+    habits = client.get("/v1/demo/habits", headers=staff, params={"sender_id": sender})
+    assert habits.status_code == 200, habits.text
+    found = habits.json()
+    assert found["home"] == state.home and found["transactions"] == state.n_init
+    assert sum(place["transactions"] for place in found["places"]) == state.n_init
+    assert found["network_history_needed"] == 3 and state.home in found["districts"]
+    away = next(d for d in found["districts"] if all(travel_km(d, k) > 0 for k in state.places))
+
+    body = {"sender_id": sender, "receiver_id": receiver, "amount": 150.0}
+    paid = client.post(
+        "/v1/demo/pay", headers=staff, json=body | {"district": away, "ip": "198.51.100.77"}
+    )
+    assert paid.status_code == 200, paid.text
+    with p.sessions() as s:
+        row = s.get(Transaction, paid.json()["txn_id"])
+        assert (row.district, row.network) == (away, "198.51.100.0/24")
+
+    nowhere = client.post("/v1/demo/pay", headers=staff, json=body | {"district": "Atlantis"})
+    assert nowhere.status_code == 422 and nowhere.json()["error"]["code"] == "unknown_district"
+    bad = client.post("/v1/demo/pay", headers=staff, json=body | {"ip": "1.2.3"})
+    assert bad.status_code == 422
+    service = tokens("upay-core")
+    assert (
+        client.get("/v1/demo/habits", headers=service, params={"sender_id": sender}).status_code
+        == 403
+    )
+    unknown = client.get("/v1/demo/habits", headers=staff, params={"sender_id": "W_nobody"})
+    assert unknown.status_code == 404
 
 
 # ------------------------------------------------- holds, cases, verdicts

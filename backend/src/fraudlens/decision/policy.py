@@ -19,7 +19,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from ..features import FEATURES, SCORED_TYPES
+from ..features import BEHAVIOUR_FIELDS, FEATURES, SCORED_TYPES
 from .reasons import RULE_CODES
 
 Tier = Literal["allow", "warn", "step_up", "hold"]
@@ -27,12 +27,18 @@ TIERS: tuple[Tier, ...] = ("allow", "warn", "step_up", "hold")
 RANK = {tier: i for i, tier in enumerate(TIERS)}
 ALERT_TIERS = TIERS[1:]
 
-# Facts that are not model features: they come from the case system and the mule model.
-CONTEXT_FIELDS = ("sender_flagged", "recipient_flagged", "recipient_mule_alert")
+# Facts that are not model features: they come from the case system, the mule model
+# and the sender's behaviour profile (usual places and networks).
+CONTEXT_FIELDS = (
+    "sender_flagged",
+    "recipient_flagged",
+    "recipient_mule_alert",
+    *BEHAVIOUR_FIELDS,
+)
 FIELDS = frozenset(FEATURES) | frozenset(CONTEXT_FIELDS)
 
 POLICY_DIR = Path(__file__).parent / "policies"
-DEFAULT_POLICY = "v1"
+DEFAULT_POLICY = "v2"
 
 _OPS = {
     "==": operator.eq,
@@ -89,7 +95,8 @@ class Rule(_Model):
     tier: Tier
     hard: bool = False  # a hard rule cannot be lowered by a cap
     reason: str
-    scenario: Literal["scam", "takeover"] | None = None  # which customer message it implies
+    # which customer message it implies
+    scenario: Literal["scam", "takeover", "unusual_access"] | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> Rule:
@@ -153,7 +160,8 @@ class Recommendation(_Model):
     needs_second_approver: bool = False
 
 
-Scenario = Literal["scam", "takeover", "cash_out"]
+Scenario = Literal["scam", "takeover", "cash_out", "unusual_access"]
+# Every policy words these three; any other is needed only by the rules that name it.
 SCENARIOS: tuple[Scenario, ...] = ("scam", "takeover", "cash_out")
 
 
@@ -183,7 +191,8 @@ class Policy(_Model):
         rec_ids = [r.id for r in self.recommendations]
         if len(rec_ids) != len(set(rec_ids)):
             raise ValueError("recommendation ids must be unique")
-        for scenario in SCENARIOS:
+        named = (rule.scenario for rule in self.rules if rule.scenario)
+        for scenario in dict.fromkeys((*SCENARIOS, *named)):
             if set(self.messages.get(scenario, {})) != set(ALERT_TIERS):
                 raise ValueError(f"messages.{scenario} needs a text for each of {ALERT_TIERS}")
         overrides = self.thresholds.overrides

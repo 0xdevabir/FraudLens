@@ -16,7 +16,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
 ![Redis Streams](https://img.shields.io/badge/Redis-Streams-DC382D?logo=redis&logoColor=white)
 ![Tailwind](https://img.shields.io/badge/Tailwind-v4-06B6D4?logo=tailwindcss&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-180-success)
+![Tests](https://img.shields.io/badge/tests-203-success)
 ![Served = evaluated](https://img.shields.io/badge/served%20vs%20offline-0%20differences-success)
 
 [Quick start](#-run-it-in-one-command) · [How it works](#-how-it-works) · [Results](#-results) · [Console tour](#%EF%B8%8F-console-tour) · [Three-minute demo](#-three-minute-demo) · [Limits](#%EF%B8%8F-what-this-is-not)
@@ -72,7 +72,7 @@ flowchart LR
     A["📱 Customer<br/>presses send"] --> B["⚡ POST /v1/score"]
     B --> C["🧮 Feature engine<br/>61 point-in-time features"]
     C --> D["🧠 Models<br/>transaction risk · mule wallet · anomaly"]
-    D --> E{"📜 Policy v1<br/>thresholds + 4 rules"}
+    D --> E{"📜 Policy v2<br/>thresholds + 7 rules"}
     E -- "98.5%" --> F["✅ Allow<br/>nothing shown"]
     E --> G["⚠️ Warn<br/>scam warning in Bangla"]
     E --> H["🔐 Step-up<br/>verify again + 30 min wait"]
@@ -332,7 +332,7 @@ FraudLens/
 │   │   ├── platform/    # scorer, cases, freezes, stream worker, audit
 │   │   ├── mlops/       # verdicts as labels, retraining, shadow, drift
 │   │   └── api/         # HTTP routes, schemas, middleware
-│   └── tests/           # 180 tests
+│   └── tests/           # 203 tests
 ├── frontend/            # the analyst console
 ├── docs/                # architecture, model card, policy, platform, demo script
 ├── docker-compose.yml
@@ -401,7 +401,7 @@ To run a challenger in shadow mode, set `FRAUDLENS_SHADOW_MODEL_VERSION` to its 
 <summary><b>Check it</b></summary>
 
 ```bash
-make test     # 180 backend tests; the platform tests need `make up`
+make test     # 203 backend tests; the platform tests need `make up`
 make lint     # ruff, tsc, eslint
 make smoke    # opens every console page as each role in a headless browser
 ```

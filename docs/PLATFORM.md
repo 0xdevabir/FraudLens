@@ -68,6 +68,7 @@ served at `/docs` outside production.
 | Area | Endpoint | Role |
 | --- | --- | --- |
 | Auth | `POST /auth/login`, `GET /auth/me`, `POST /auth/logout` | anyone / signed in / signed in |
+| Demo sign-in (§7, off by default) | `GET /auth/demo`, `POST /auth/demo-login` | anyone, when enabled |
 | Scoring | `POST /score`, `POST /events` (up to 500 per call, queued), `POST /wallet-flags` | service |
 | | `POST /score/what-if` | service, analyst, supervisor |
 | Alerts | `GET /alerts`, `GET /decisions/{txn_id}`, `GET /decisions/{txn_id}/narrative?lang=en\|bn`, `GET /stream/alerts` (server-sent events) | analyst, supervisor |
@@ -105,6 +106,15 @@ repeat the value that was sent.
 4. Everything that needs no answer (cash-ins, bill payments, back-office flags):
    `POST /v1/events`. They keep the feature state current.
 5. When your own investigation confirms a wallet as fraud: `POST /v1/wallet-flags`.
+
+A transaction may carry `ip`, the address the customer's request came from
+(optional, IPv4 or IPv6). The platform reduces it to its network at the edge (the
+/24 of an IPv4 address, the /48 of an IPv6 one) and keeps only that, in
+`transactions.network` (migration `0003`). The address itself is never stored,
+logged or returned. With it, the policy can tell a large payment made over a
+network the wallet has never used ([DECISION_POLICY.md](DECISION_POLICY.md) §3);
+without it, those rules stay silent. Send the customer's address, not your
+server's.
 
 ## 4. Cases
 
@@ -194,8 +204,15 @@ and each request still needs its own approval by a second person.
   script and the token.
 - **Production guard.** With `FRAUDLENS_ENVIRONMENT=production` the API refuses to
   start with the development signing secret, the development database password,
-  a Redis URL without a password, or `*` as a CORS origin, and the interactive
-  docs are off.
+  a Redis URL without a password, `*` as a CORS origin, or demo sign-in enabled,
+  and the interactive docs are off.
+- **Demo sign-in.** Off by default. `FRAUDLENS_DEMO_LOGIN=true` makes
+  `POST /auth/demo-login` sign in as one of the five seeded console accounts
+  without a password, and the login page shows a button for each. Anyone who can
+  reach the API can then be any of them, so it is for a demo on a machine only
+  you can reach. Service accounts are never offered, each use is audited as
+  `auth.login` with `demo: true`, and the endpoint answers 404 when the setting
+  is off or the environment is production.
 - **Redis password.** Optional in development: `REDIS_PASSWORD` in a `.env` next
   to `docker-compose.yml` turns it on, and `FRAUDLENS_REDIS_URL` carries the same
   password. Without it Redis relies on its port being bound to 127.0.0.1.
@@ -224,7 +241,9 @@ historical period and re-applies everything after it in that order, each
 transaction with the time at which it was applied (a released hold is applied at
 its release, not at its arrival). The integration tests check that, after holds,
 releases, customer answers, late flags and freezes, the rebuilt state gives
-bit-identical features to the one that lived through it.
+bit-identical features to the one that lived through it. A wallet's usual places
+and networks are part of that state and are rebuilt the same way; a snapshot
+written before they existed is refused at load (`make features` rebuilds it).
 
 ## 10. Limits, stated plainly
 
@@ -369,6 +388,12 @@ audited as a demo action under the name of the signed-in member of staff. The
 router, like the seed accounts, does not exist when
 `FRAUDLENS_ENVIRONMENT=production`.
 
+The phone can also pay from somewhere else: `POST /v1/demo/pay` takes an optional
+`district` and `ip`, and `GET /v1/demo/habits` shows where the platform has seen
+the wallet used and whether it knows its network yet. The recorded history has no
+addresses, so a wallet's network is learned in the demo itself: three payments
+from the usual connection, then a large one from a different connection.
+
 The platform's clock is the time of the newest event it has seen, because the
 data is a recorded period. Review deadlines and cooling-off periods are measured
 on it. `POST /v1/demo/advance-clock` moves it forward by 1 to 60 minutes so a
@@ -391,7 +416,7 @@ make verify      # served decisions against the offline evaluation
 make review      # close the older cases with the simulation's ground truth (demo scaffolding)
 make retrain     # a challenger trained on those verdicts
 make console     # the console on http://localhost:3100
-make test        # 180 tests; the platform and MLOps ones run against real Postgres and Redis
+make test        # 203 tests; the platform and MLOps ones run against real Postgres and Redis
 ```
 
 The demo accounts (`analyst1`, `analyst2`, `supervisor1`, `supervisor2`, `admin`,

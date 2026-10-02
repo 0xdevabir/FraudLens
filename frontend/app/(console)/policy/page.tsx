@@ -29,7 +29,7 @@ const ACTION: Record<string, string> = {
   step_up_auth: "The customer verifies again, then waits",
   hold_for_review: "Paused until a reviewer decides",
 };
-const SCENARIO: Record<string, string> = { scam: "Paying a scammer", takeover: "Account taken over", cash_out: "Cash-out" };
+const SCENARIO: Record<string, string> = { scam: "Paying a scammer", takeover: "Account taken over", unusual_access: "Unusual place or network", cash_out: "Cash-out" };
 
 function When({ conditions }: { conditions: Condition[] }) {
   if (!conditions.length) return <span className="text-fg-4">always</span>;

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { type ReactNode, useEffect, useState } from "react";
 
@@ -10,15 +11,34 @@ import { api, ApiError, qs, useApi } from "@/lib/api";
 import { maskId, num, taka, when, words } from "@/lib/format";
 import type { PayResult, Scenario, Text2, Tier } from "@/lib/types";
 
+// upay's app icon. The name and the mark belong to UCB Fintech Company Limited.
+import upayLogo from "./upay-logo.png";
+
 interface Payment {
   sender_id: string;
   receiver_id: string;
   amount: number;
   sender_balance_before: number;
 }
+/** What the platform has learned about where a wallet is normally used from. */
+interface Habits {
+  home: string;
+  transactions: number;
+  places: { district: string; transactions: number }[];
+  network_transactions: number;
+  network_history_needed: number;
+  districts: string[];
+}
 interface Check { level: "none" | "caution" | "high"; message: Text2 | null }
 interface Outcome { status: string; status_reason: string | null }
 interface Reported { report_id: number; case_id: number }
+
+// Addresses from the ranges reserved for documentation: they belong to nobody.
+const NETWORKS = [
+  { ip: "", label: "Not sent by the app" },
+  { ip: "203.0.113.24", label: "The usual connection (203.0.113.x)" },
+  { ip: "198.51.100.77", label: "A different connection (198.51.100.x)" },
+];
 
 const SCENARIO: Record<string, { title: string; text: string }> = {
   allow: { title: "An ordinary payment", text: "Goes straight through; the customer never sees FraudLens." },
@@ -37,15 +57,100 @@ const CATEGORIES: [string, string, string][] = [
 ];
 const WALLET_ID = /^[A-Za-z0-9_-]{1,32}$/;
 
-function Screen({ tone, title, children }: { tone: Tier | "plain"; title: ReactNode; children: ReactNode }) {
-  const bar = {
-    plain: "bg-fill text-fg", allow: "bg-good text-accent-ink", warn: "bg-warn text-accent-ink",
-    step_up: "bg-alert text-accent-ink", hold: "bg-bad text-accent-ink",
-  }[tone];
+// The phone is drawn the way upay's app looks: its yellow bar, blue buttons and white pages,
+// whatever the console around it looks like. What FraudLens adds is the strip under the bar.
+const STRIP: Record<Tier, string> = {
+  allow: "border-green-300 bg-green-50 text-green-900",
+  warn: "border-amber-300 bg-amber-50 text-amber-900",
+  step_up: "border-orange-300 bg-orange-50 text-orange-900",
+  hold: "border-red-300 bg-red-50 text-red-900",
+};
+// The services on upay's home screen. Only send money does anything here.
+const SERVICES: [string, string, string][] = [
+  ["সেন্ড মানি", "Send money", "M3 11.5 21 3l-6.5 18-3-7.5z"],
+  ["মোবাইল রিচার্জ", "Mobile recharge", "M8 2.5h8A1.5 1.5 0 0 1 17.5 4v16a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 20V4A1.5 1.5 0 0 1 8 2.5zM10.5 18.5h3"],
+  ["ক্যাশ আউট", "Cash out", "M12 3v12m0 0-4-4m4 4 4-4M4 20h16"],
+  ["মেক পেমেন্ট", "Make payment", "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 18h2v2h-2zM18 14h2M14 18v2"],
+  ["অ্যাড মানি", "Add money", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 8v8M8 12h8"],
+  ["পে বিল", "Pay bill", "M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6"],
+  ["রিকোয়েস্ট মানি", "Request money", "M12 21V9m0 0-4 4m4-4 4 4M4 4h16"],
+  ["ফান্ড ট্রান্সফার", "Fund transfer", "M3 9.5 12 4l9 5.5M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"],
+];
+
+function Icon({ d, className }: { d: string; className?: string }) {
   return (
-    <div className="flex h-full flex-col">
-      <div className={cx("px-4 pt-5 pb-3 text-sm font-semibold transition-colors duration-500", bar)}>{title}</div>
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4 text-sm text-fg">{children}</div>
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d={d} />
+    </svg>
+  );
+}
+
+function StatusBar() {
+  return (
+    <div aria-hidden="true" className="flex items-center justify-between bg-upay-yellow px-6 pt-3 text-[13px] font-semibold text-black">
+      <span>9:41</span>
+      <svg viewBox="0 0 42 12" fill="currentColor" className="h-3">
+        <path d="M0 8h3v4H0zM5 5.5h3V12H5zM10 3h3v9h-3zM15 0h3v12h-3z" />
+        <rect x="24.5" y="1" width="15" height="10" rx="2.5" fill="none" stroke="currentColor" />
+        <rect x="26.5" y="3" width="11" height="6" rx="1" />
+        <path d="M40.5 4.5h1.5v3h-1.5z" />
+      </svg>
+    </div>
+  );
+}
+
+// The buttons stay at the bottom of the screen while a long message scrolls behind them.
+const FOOT = "sticky -bottom-4 -mx-4 -mb-4 mt-auto space-y-2 border-t border-neutral-200 bg-white p-4";
+
+function Screen({
+  title, tone = "plain", heading, onBack, children,
+}: { title: ReactNode; tone?: Tier | "plain"; heading?: ReactNode; onBack?: () => void; children: ReactNode }) {
+  return (
+    <div className="flex h-full flex-col bg-white text-neutral-900">
+      <StatusBar />
+      <div className="relative bg-upay-yellow px-12 pt-2 pb-3 text-center text-[15px] font-bold text-black">
+        {onBack && (
+          <button type="button" aria-label="Back" onClick={onBack} className="absolute top-1 left-2 rounded-full p-2 hover:bg-black/10">
+            <Icon d="M15 5l-7 7 7 7" className="size-5" />
+          </button>
+        )}
+        {title}
+      </div>
+      {tone !== "plain" && heading && (
+        <div role="status" className={cx("border-b px-4 py-2 text-sm font-semibold", STRIP[tone])}>{heading}</div>
+      )}
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4 text-sm">{children}</div>
+    </div>
+  );
+}
+
+function Home() {
+  return (
+    <div className="flex h-full flex-col bg-white text-neutral-900">
+      <StatusBar />
+      <div className="flex items-center gap-3 bg-upay-yellow px-4 pt-2 pb-4 text-black">
+        <Image src={upayLogo} alt="upay" unoptimized className="size-11 rounded-full bg-white" />
+        <div className="min-w-0 flex-1 leading-tight">
+          <div className="text-sm font-semibold">Demo customer</div>
+          <div className="text-xs text-black/70">01XXXXXXXXX</div>
+        </div>
+        <span lang="bn" className="rounded-full bg-upay-blue px-3 py-1 text-xs font-semibold text-white">ব্যালেন্স</span>
+      </div>
+      <ul className="grid grid-cols-4 gap-x-1 gap-y-4 px-2 py-5 text-center">
+        {SERVICES.map(([bn, en, d], index) => (
+          <li key={en} title={en} className={cx("flex flex-col items-center gap-1.5", index > 0 && "opacity-60")}>
+            <span className="grid size-11 place-items-center rounded-2xl bg-upay-blue/10 text-upay-blue"><Icon d={d} className="size-6" /></span>
+            <span lang="bn" className="text-[11px] leading-tight font-medium">{bn}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="mx-4 rounded-2xl border border-upay-blue/20 bg-upay-blue/5 px-3 py-3 text-sm text-neutral-700">
+        <div lang="bn" className="font-semibold text-upay-blue">সেন্ড মানি</div>
+        Choose a payment on the left to begin.
+      </div>
+      <p className="mt-auto px-4 pb-4 text-center text-[11px] text-neutral-500">
+        <span lang="bn">হেল্পলাইন ১৬২৬৮</span> · Helpline 16268
+      </p>
     </div>
   );
 }
@@ -54,19 +159,19 @@ function Message({ text }: { text: Text2 | null | undefined }) {
   if (!text) return null;
   return (
     <div>
-      <p lang="bn" className="text-[15px] leading-relaxed text-fg">{text.bn}</p>
-      <p className="mt-2 text-xs leading-relaxed text-fg-3">{text.en}</p>
+      <p lang="bn" className="text-[15px] leading-relaxed text-neutral-900">{text.bn}</p>
+      <p className="mt-2 text-xs leading-relaxed text-neutral-600">{text.en}</p>
     </div>
   );
 }
 
 function PhoneButton({ tone = "dark", ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: "dark" | "light" | "red" }) {
   const look = {
-    dark: "bg-accent font-semibold text-accent-ink disabled:opacity-40",
-    light: "bg-white/8 text-fg hover:bg-white/14",
-    red: "border border-bad/30 bg-bad/10 text-bad",
+    dark: "bg-upay-blue font-semibold text-white hover:brightness-110 disabled:opacity-40",
+    light: "border border-upay-blue bg-white font-medium text-upay-blue hover:bg-upay-blue/5",
+    red: "border border-red-300 bg-red-50 font-medium text-red-700 hover:bg-red-100",
   }[tone];
-  return <button type="button" {...rest} className={cx("w-full rounded-2xl px-3 py-2.5 text-sm font-medium disabled:cursor-not-allowed", look)} />;
+  return <button type="button" {...rest} className={cx("w-full rounded-full px-3 py-2.5 text-sm disabled:cursor-not-allowed", look)} />;
 }
 
 function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: string }) {
@@ -84,13 +189,18 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [custom, setCustom] = useState({ sender: "", receiver: "", amount: "" });
+  // Where the customer is while paying: empty means at home, with no network sent.
+  const [where, setWhere] = useState({ district: "", ip: "" });
+  const habits = useApi<Habits>(payment ? `/v1/demo/habits${qs({ sender_id: payment.sender_id })}` : null);
 
   const decision = result?.decision ?? null;
+  const profile = habits.data;
   const status = outcome?.status ?? result?.status ?? null;
 
   function start(next: Payment, id: string | null) {
     setPayment(next);
     setPicked(id);
+    setWhere({ district: "", ip: "" });
     setCheck(null);
     setResult(null);
     setOutcome(null);
@@ -145,8 +255,15 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
   const send = () =>
     run(async () => {
       if (!payment) return;
-      const paid = await api<PayResult>("/v1/demo/pay", { sender_id: payment.sender_id, receiver_id: payment.receiver_id, amount: payment.amount });
+      const paid = await api<PayResult>("/v1/demo/pay", {
+        sender_id: payment.sender_id,
+        receiver_id: payment.receiver_id,
+        amount: payment.amount,
+        ...(where.district && { district: where.district }),
+        ...(where.ip && { ip: where.ip }),
+      });
       setResult(paid);
+      habits.reload(); // a payment that went through is part of the wallet's habits now
       // Tell the customer about the wait up front; the server still has the last word when they try to send.
       if (paid.decision?.tier === "step_up" && paid.decision.cooling_off_minutes) setWait(paid.decision.cooling_off_minutes * 60);
     });
@@ -185,78 +302,102 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
       <span lang="bn">প্রতারণার অভিযোগ করুন</span> · Report a scam
     </PhoneButton>
   );
-  const party = payment && (
-    <div className="rounded-2xl bg-wash px-3 py-2">
-      <div className="text-xs text-fg-3">To</div>
-      <div className="font-mono">{maskId(payment.receiver_id)}</div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums">{taka(payment.amount)}</div>
-    </div>
+  const label = "text-xs font-semibold text-neutral-500";
+  const avatar = (
+    <span className="grid size-10 shrink-0 place-items-center rounded-full bg-upay-blue/10 text-upay-blue">
+      <Icon d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.5 20a7.5 7.5 0 0 1 15 0" className="size-5" />
+    </span>
   );
+  // One row once there is a decision to read, so the message and the buttons get the room.
+  const party = payment && (result ? (
+    <div className="flex items-center gap-3 rounded-2xl border border-neutral-200 px-3 py-2">
+      {avatar}
+      <span className="min-w-0 flex-1">
+        <span className={cx(label, "block")}><span lang="bn">প্রাপক</span> · To</span>
+        <span className="font-mono">{maskId(payment.receiver_id)}</span>
+      </span>
+      <span className="text-xl font-bold tabular-nums text-upay-blue">{taka(payment.amount)}</span>
+    </div>
+  ) : (
+    <div>
+      <div className={label}><span lang="bn">প্রাপক</span> · To</div>
+      <div className="mt-1 flex items-center gap-3">
+        {avatar}
+        <span className="font-mono text-[15px]">{maskId(payment.receiver_id)}</span>
+      </div>
+      <div className={cx(label, "mt-3 border-t border-neutral-200 pt-3")}><span lang="bn">অ্যামাউন্ট</span> · Amount</div>
+      <div className="text-3xl font-bold tabular-nums text-upay-blue">{taka(payment.amount)}</div>
+    </div>
+  ));
+  const sendMoney = <><span lang="bn">সেন্ড মানি</span> · Send money</>;
+  // Back to the home screen. Not offered while a warning waits for the customer's answer.
+  const home = busy ? undefined : () => { setPayment(null); setPicked(null); setResult(null); setOutcome(null); setReported(null); setError(null); };
 
   let screen: ReactNode;
   if (!payment) {
-    screen = <Screen tone="plain" title="Send money"><p className="text-fg-3">Choose a payment on the left to begin.</p></Screen>;
+    screen = <Home />;
   } else if (reporting) {
     screen = (
-      <Screen tone="plain" title={<><span lang="bn">কী হয়েছিল?</span> · What happened?</>}>
+      <Screen title={<><span lang="bn">কী হয়েছিল?</span> · What happened?</>} onBack={() => setReporting(false)}>
         {CATEGORIES.map(([id, bn, en]) => (
           <button
             key={id}
             type="button"
             disabled={busy}
             onClick={() => report(id, en)}
-            className="rounded-2xl border border-line px-3 py-2 text-left hover:bg-wash disabled:opacity-50"
+            className="rounded-2xl border border-neutral-200 px-3 py-2 text-left hover:bg-neutral-50 disabled:opacity-50"
           >
             <div lang="bn">{bn}</div>
-            <div className="text-xs text-fg-3">{en}</div>
+            <div className="text-xs text-neutral-500">{en}</div>
           </button>
         ))}
-        <PhoneButton tone="light" onClick={() => setReporting(false)}>Back</PhoneButton>
       </Screen>
     );
   } else if (!result) {
     screen = (
-      <Screen tone="plain" title="Send money">
+      <Screen title={sendMoney} onBack={home}>
         {party}
-        <div className="text-xs text-fg-3">Balance {taka(payment.sender_balance_before)} · from {maskId(payment.sender_id)}</div>
+        <div className="text-xs text-neutral-600">
+          <span lang="bn">বর্তমান ব্যালেন্সঃ</span> {taka(payment.sender_balance_before)} · from {maskId(payment.sender_id)}
+        </div>
         {check && check.level !== "none" && (
-          <div className={cx("rounded-2xl border px-3 py-2", check.level === "high" ? "border-bad/30 bg-bad/10" : "border-warn/30 bg-warn/10")}>
-            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-fg-2">
+          <div className={cx("rounded-2xl border px-3 py-2", check.level === "high" ? "border-red-300 bg-red-50" : "border-amber-300 bg-amber-50")}>
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-700">
               <span lang="bn">পাঠানোর আগে দেখুন</span> · Before you send
             </div>
             <Message text={check.message} />
           </div>
         )}
-        <div className="mt-auto">
-          <PhoneButton onClick={send} disabled={busy}>{busy ? "Sending…" : <><span lang="bn">পাঠান</span> · Send</>}</PhoneButton>
+        <div className={FOOT}>
+          <PhoneButton onClick={send} disabled={busy}>{busy ? "Sending…" : <><span lang="bn">সেন্ড মানি করুন</span> · Send</>}</PhoneButton>
         </div>
       </Screen>
     );
   } else if (status === "pending_customer" && decision?.tier === "step_up") {
     const minutes = wait === null ? null : Math.ceil(wait / 60);
     screen = (
-      <Screen tone="step_up" title={<><span lang="bn">আবার যাচাই করুন</span> · Verify again</>}>
+      <Screen title={sendMoney} tone="step_up" heading={<><span lang="bn">আবার যাচাই করুন</span> · Verify again</>}>
         {party}
         <Message text={decision.customer_message} />
-        <label className="block text-xs text-fg-2">
-          <span lang="bn">পিন দিন</span> · Enter your PIN
-          <input
-            inputMode="numeric"
-            autoComplete="off"
-            maxLength={4}
-            value={pin}
-            onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
-            className={`${inputClass} mt-1 w-full text-center tracking-[0.5em]`}
-            type="password"
-          />
-        </label>
         {minutes !== null && minutes > 0 && (
-          <div className="rounded-2xl border border-alert/30 bg-alert/10 px-3 py-2 text-xs text-alert">
+          <div className="rounded-2xl border border-orange-300 bg-orange-50 px-3 py-2 text-xs text-orange-900">
             <span lang="bn">এই লেনদেনটি আরও {num(minutes)} মিনিট পর পাঠানো যাবে।</span> You can send this in {num(minutes)} more minutes. Use the wait
             to check who asked you to pay.
           </div>
         )}
-        <div className="mt-auto space-y-2">
+        <div className={FOOT}>
+          <label className="flex items-center justify-between gap-3 text-xs font-semibold text-neutral-600">
+            <span><span lang="bn">পিন দিন</span> · Enter your PIN</span>
+            <input
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={4}
+              value={pin}
+              onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
+              className="w-32 rounded-xl border border-neutral-300 bg-white px-3 py-1.5 text-center text-lg tracking-[0.5em] text-neutral-900 outline-none focus:border-upay-blue focus:ring-2 focus:ring-upay-blue/30"
+              type="password"
+            />
+          </label>
           <PhoneButton onClick={() => respond("proceed", true)} disabled={busy || pin.length !== 4}>
             <span lang="bn">যাচাই করে পাঠান</span> · Verify and send
           </PhoneButton>
@@ -267,10 +408,10 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
     );
   } else if (status === "pending_customer") {
     screen = (
-      <Screen tone="warn" title={<><span lang="bn">একটু থামুন</span> · Pause a moment</>}>
+      <Screen title={sendMoney} tone="warn" heading={<><span lang="bn">একটু থামুন</span> · Pause a moment</>}>
         {party}
         <Message text={decision?.customer_message} />
-        <div className="mt-auto space-y-2">
+        <div className={FOOT}>
           <PhoneButton onClick={() => respond("cancel")} disabled={busy}><span lang="bn">বাতিল করুন</span> · Cancel the payment</PhoneButton>
           <PhoneButton tone="light" onClick={() => respond("proceed")} disabled={busy}><span lang="bn">তবুও পাঠান</span> · Send anyway</PhoneButton>
           {reportButton}
@@ -279,13 +420,14 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
     );
   } else if (status === "held") {
     screen = (
-      <Screen tone="hold" title={<><span lang="bn">লেনদেন স্থগিত</span> · Payment paused</>}>
+      <Screen title={sendMoney} tone="hold" heading={<><span lang="bn">লেনদেন স্থগিত</span> · Payment paused</>} onBack={home}>
         {party}
         <Message text={decision?.customer_message} />
         {decision?.review_sla_minutes != null && (
-          <p className="text-xs text-fg-3">Your money has not left your account. A person will review this within {decision.review_sla_minutes} minutes.</p>
+          <p className="text-xs text-neutral-600">Your money has not left your account. A person will review this within {decision.review_sla_minutes} minutes.</p>
         )}
-        <div className="mt-auto">{reportButton}</div>
+        <p className="text-xs text-neutral-600"><span lang="bn">হেল্পলাইন ১৬২৬৮</span> · Helpline 16268</p>
+        <div className={FOOT}>{reportButton}</div>
       </Screen>
     );
   } else {
@@ -296,16 +438,22 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
         ? <><span lang="bn">বাতিল হয়েছে</span> · Cancelled</>
         : <><span lang="bn">লেনদেন হয়নি</span> · Not sent</>;
     screen = (
-      <Screen tone={sent ? "allow" : "plain"} title={title}>
+      <Screen title={sendMoney} onBack={home}>
+        <div className="flex flex-col items-center gap-2 pt-2 text-center">
+          <span className={cx("grid size-14 place-items-center rounded-full text-white", sent ? "bg-green-600" : "bg-neutral-400")}>
+            <Icon d={sent ? "M5 12.5l4.5 4.5L19 7.5" : "M6 6l12 12M18 6L6 18"} className="size-7" />
+          </span>
+          <div className="text-base font-bold">{title}</div>
+        </div>
         {party}
-        <p className="text-fg-2">
+        <p className="text-neutral-700">
           {sent
             ? "The payment went through."
             : status === "cancelled"
               ? "Nothing was sent. Your money is still in your account."
               : `This payment was refused (${words(outcome?.status_reason ?? result.status_reason ?? status)}).`}
         </p>
-        <div className="mt-auto space-y-2">
+        <div className={FOOT}>
           {reportButton}
           <PhoneButton tone="light" onClick={() => start(payment, picked)}>New payment</PhoneButton>
         </div>
@@ -351,10 +499,35 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
             <Button type="submit" disabled={busy} className="col-span-2 mt-1">Put on the phone</Button>
           </form>
         </Card>
+        {payment && profile && (
+          <Card title="Where the customer is" hint="A payment far above the wallet's usual amounts, from a place or a connection it is not normally used from, is raised.">
+            <div className="grid grid-cols-2 gap-2 text-xs text-fg-2">
+              <label>Paying from
+                <select className={`${inputClass} mt-1 w-full`} value={where.district} disabled={!!result} onChange={(e) => setWhere({ ...where, district: e.target.value })}>
+                  <option value="">{profile.home} (home)</option>
+                  {profile.districts.filter((district) => district !== profile.home).map((district) => (
+                    <option key={district} value={district}>{district}</option>
+                  ))}
+                </select>
+              </label>
+              <label>Connection
+                <select className={`${inputClass} mt-1 w-full`} value={where.ip} disabled={!!result} onChange={(e) => setWhere({ ...where, ip: e.target.value })}>
+                  {NETWORKS.map((network) => <option key={network.ip} value={network.ip}>{network.label}</option>)}
+                </select>
+              </label>
+            </div>
+            <p className="mt-2 text-xs text-fg-3">
+              Usually used from {profile.places.slice(0, 3).map((place) => `${place.district} (${place.transactions})`).join(", ") || "nowhere yet"}.{" "}
+              {profile.network_transactions >= profile.network_history_needed
+                ? "Its usual connection is known."
+                : `Its connection is not known yet: ${profile.network_transactions} of the ${profile.network_history_needed} payments needed have carried one, so send a few from the usual connection first.`}
+            </p>
+          </Card>
+        )}
       </div>
 
       <div>
-        <div className="mx-auto h-[36rem] w-full max-w-[22rem] overflow-hidden rounded-[2.75rem] border-[10px] border-black bg-base shadow-2xl shadow-black/60 ring-1 ring-white/15">
+        <div className="mx-auto h-[38rem] w-full max-w-[22rem] overflow-hidden rounded-[2.75rem] border-[10px] border-black bg-white shadow-2xl shadow-black/60 ring-1 ring-white/15 [color-scheme:light]">
           {screen}
         </div>
         {reported && (
@@ -417,6 +590,9 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
         <p className="text-xs text-fg-3">
           In production upay’s own app shows these screens and checks the PIN; it calls the same endpoints with a service account. Here a member of staff
           plays the customer, any four digits pass the PIN check, and every action is audited as a demo action.
+        </p>
+        <p className="text-xs text-fg-3">
+          The phone is a mock-up in upay’s colours, not the upay app. The upay name and logo belong to UCB Fintech Company Limited.
         </p>
       </div>
     </div>

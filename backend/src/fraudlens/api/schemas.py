@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, IPvAnyAddress, StringConstraints
 
 from ..platform.events import EventIn, Identifier
 
@@ -80,6 +80,9 @@ class DemoPayment(Body):
     sender_id: Identifier
     receiver_id: Identifier
     amount: float = Field(gt=0, le=10_000_000, allow_inf_nan=False)
+    # Where the demo customer is and how they are connected; the app would know both.
+    district: str | None = Field(default=None, min_length=1, max_length=40)
+    ip: IPvAnyAddress | None = None
 
 
 class DemoResponse(Body):

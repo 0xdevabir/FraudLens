@@ -396,7 +396,7 @@ the same on the latest decisions actually served.
 ```
 make data features train     # about one minute; writes backend/artifacts/models/<version>/
 make policy insights         # policy_report.json and insights.json (fairness, drift, threshold sweep)
-make test                    # 180 tests, including leakage and round-trip checks
+make test                    # 203 tests, including leakage and round-trip checks
 ```
 
 `report.json` holds every number above; `manifest.json` holds thresholds,

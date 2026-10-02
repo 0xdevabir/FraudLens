@@ -1,0 +1,245 @@
+# What a scam message does, as patterns: asks for a code, threatens to close the
+# account, wants a fee before a prize. The classifier learns how much each cue and
+# each pair of cues counts; this file only says how to recognise them.
+#
+# Patterns are regular expressions matched on normalised text: lower case, every
+# digit written as 0, every link written as `urltoken`. They cover Bangla script,
+# Bangla in Latin letters (spelling varies, so the patterns are loose) and English.
+#
+# `benign: true` marks a cue that points away from a scam (a warning not to share
+# a code, a transaction receipt). Those are features too, but never shown as a reason.
+# `unless` names a cue that cancels this one when both match.
+
+cues:
+  - id: ask_secret
+    label:
+      en: Asks for a code, PIN or password
+      bn: কোড, পিন বা পাসওয়ার্ড চাইছে
+    unless: warn_secret
+    patterns:
+      - '(?:otp|\bpin\b|passw|passcode|\bc[o0]de?\b|\bkod\b|confirmation number|0 digit|\bid shown)[^.!?।]{0,60}(?:bol[ue]n|bolben|\bbolo\b|\bd[ie]n\b|diben|\bdao\b|janan|forward|share|\btell\b|\bgive\b|reply|read me|enter|provide|approve)'
+      - '(?:\btell\b|\bgive\b|share|forward|reply with|read me|confirm your|enter your|provide)[^.!?।]{0,40}(?:otp|\bpin\b|passw|passcode|\bcode\b|digit|\bid\b)'
+      - '(?:ওটিপি|পিন|কোড|পাসওয়ার্ড|নম্বর আসবে)[^.!?।]{0,50}(?:বলুন|বলবেন|দিন|জানান|পাঠান|বলো|দাও)'
+
+  - id: warn_secret
+    benign: true
+    label:
+      en: Warns against sharing a code
+      bn: কোড না দিতে সতর্ক করছে
+    patterns:
+      - '(?:never|do not|don.?t|not)\b[^.!?।]{0,25}(?:share|give|tell|ask|install|click)'
+      - 'never (?:ask|call)|ignore this|did not request|beware|security tip|reminder\b|stay safe|is not proof'
+      - 'karo sathe|kauke [^.!?।]{0,20}(?:diben|bolben|korben) na|share korben na|chay na|sotorko|sabdhan|protarok|upekkha'
+      - 'কাউকে[^.!?।]{0,30}(?:দেবেন না|বলবেন না)|চায় না|সতর্ক|সাবধান|সচেতন|উপেক্ষা|করবেন না|প্রতারণা'
+
+  - id: threat
+    label:
+      en: Threatens to block or close the account
+      bn: অ্যাকাউন্ট বন্ধ বা ব্লক করার ভয় দেখাচ্ছে
+    patterns:
+      - 'block|suspen|\blocked\b|deactivat|\bfrozen\b|freez|will be closed|\bcancel|expired?\b'
+      - 'bond?ho ho|bandho|\boff\b|atke'
+      - 'বন্ধ হয়ে|বন্ধ করা|ব্লক|স্থগিত|বাতিল|আটকে'
+
+  - id: urgency
+    label:
+      en: Pushes you to act immediately
+      bn: এখনই করতে তাড়া দিচ্ছে
+    patterns:
+      - 'immediately|right now|\bnow\b|urgent|today only|\btoday\b|hurry|last chance|instant|within 0+ ?(?:min|hour|day)|in 0+ minutes'
+      - 'ekh[ou]n ?i|taratari|joldi|druto|ajk?e?r? (?:moddhe|jonno)|ghontar moddhe|sathe sathe|sudhu aj|0 minute'
+      - 'এখনই|এখনি|দ্রুত|জরুরি|আজই|তাড়াতাড়ি|সাথে সাথে|ঘণ্টার মধ্যে|শুধু আজ'
+
+  - id: authority
+    label:
+      en: Claims to be an office, an agent or support staff
+      bn: অফিস, এজেন্ট বা কাস্টমার কেয়ার পরিচয় দিচ্ছে
+    patterns:
+      - 'head office|customer care|helpline|support team|official|\bofficer\b|representative|\bnotice\b|operator|bangladesh bank|customs|i am the agent|technical'
+      - 'office th|th[ae]i?ke? bol|ami [a-z ]{0,12}agent|agent bol|protinidhi|board th|pokkho th'
+      - 'হেড অফিস|অফিস থেকে|থেকে বলছি|কাস্টমার কেয়ার|হেল্পলাইন|গ্রাহক সেবা|প্রতিনিধি|অধিদপ্তর|এজেন্ট বলছি|কাস্টমস|পক্ষ থেকে'
+
+  - id: windfall
+    label:
+      en: Promises a prize, bonus or other unexpected money
+      bn: পুরস্কার, বোনাস বা হঠাৎ টাকার লোভ দেখাচ্ছে
+    patterns:
+      - 'lottery|\bprize|winner|\bwon\b|congratulation|bonus|\bgift\b|cashback|double|stipend|remittance|eligible for|refund of|is approved|waiting in your name'
+      - 'lotari|ovinondon|obhinondon|puros?h?kar|jite(?:ch|s)|digun|upobritti|bhata\b|peyech'
+      - 'লটারি|পুরস্কার|জিতেছে|জিতেছেন|অভিনন্দন|বোনাস|উপহার|ক্যাশব্যাক|দ্বিগুণ|উপবৃত্তি|ভাতা|রেমিট্যান্স'
+
+  - id: pay_first
+    label:
+      en: Wants a fee or deposit before you receive anything
+      bn: কিছু পাওয়ার আগে ফি বা জামানত চাইছে
+    patterns:
+      - '(?:\bfee\b|charge|\btax\b|\bvat\b|deposit|advance|booking|recharge|clearance|\bduty\b|insurance)[^.!?।]{0,60}(?:pathan|pathao|pathale|pathiye|pathay|\bsend\b|\bpay\b|\bd[ie]n\b|diben|dite hobe|korte hobe|koren|korun|lagbe|first|\bage\b|required|to 0{11})'
+      - '(?:\bpay\b|\bsend\b|\bage\b|first)[^.!?।]{0,45}(?:\bfee\b|charge|\btax\b|\bvat\b|deposit|advance|booking|full (?:price|amount|payment))'
+      - 'agrim|jamanot ?(?:hisebe|den|din)|full payment'
+      - '(?:ফি|চার্জ|ট্যাক্স|ভ্যাট|অগ্রিম|জমা|ডিউটি)[^.!?।]{0,50}(?:পাঠান|পাঠাতে|পাঠালে|পাঠিয়ে|দিতে হবে|দিন|দিয়ে|লাগবে)'
+      - 'আগে[^.!?।]{0,40}(?:টাকা|চার্জ|ফি)[^.!?।]{0,30}(?:পাঠ|দিতে|জমা)'
+
+  - id: return_money
+    label:
+      en: Says money reached you by mistake and wants it sent back
+      bn: ভুল করে টাকা গেছে বলে ফেরত চাইছে
+    patterns:
+      - '(?:mistake|\bextra\b|twice|failed|on hold)[^!?]{0,90}(?:return|send it back|send back|send the same|\bback\b|again)'
+      - '(?:\bvul\b|\bbhul\b|\bbul\b|beshi|duibar|fail|atke)[^!?]{0,90}(?:fer[oa]t|\bback\b|abar)'
+      - '(?:ভুল|বেশি|দুইবার|অসম্পূর্ণ|ব্যর্থ)[^!?]{0,90}(?:ফেরত|আবার)'
+
+  - id: send_request
+    label:
+      en: Tells you to send money to a number
+      bn: একটি নম্বরে টাকা পাঠাতে বলছে
+    patterns:
+      - '(?:send|pay|lend|transfer|deposit|recharge)[^.!?।]{0,50}(?:to 0{11}|on 0{11}|number 0{11}|\btaka\b|\btk\b|amount|money)'
+      - '(?:taka|tk|takaa|taaka)[^.!?।]{0,40}(?:pathan|pathao|pathiye d|pathay d|send kor|bkash kor|ferot d|back kor|\bd[ie]n\b)'
+      - '0{11}[^.!?।]{0,30}(?:pathan|pathao|pathiye|pathay|send|cash in|bkash)|(?:number e|nambar e)[^.!?।]{0,30}(?:pathan|pathao|send|cash in|bkash)'
+      - 'টাকা[^.!?।]{0,40}(?:পাঠান|পাঠাও|পাঠিয়ে দিন|ফেরত দিন)|নম্বরে[^.!?।]{0,40}(?:পাঠান|পাঠাও|সেন্ড মানি)'
+
+  - id: earnings
+    label:
+      en: Promises easy income, profit or commission
+      bn: সহজ আয়, লাভ বা কমিশনের লোভ দেখাচ্ছে
+    patterns:
+      - 'invest|profit|\bearn|income|commission|part.?time|work from home|from home|daily|guaranteed|trading|crypto|forex|betting|\bbet\b|casino|\btasks?\b|withdraw'
+      - 'ghore bos|protidin|proti (?:like|transaction)|\blav\b|\blabh\b|mashe 0'
+      - 'বিনিয়োগ|লাভ|আয়|কমিশন|ঘরে বসে|পার্ট টাইম|প্রতিদিন|টাস্ক|ডিপোজিট|উইথড্র'
+
+  - id: loan
+    label:
+      en: Offers a loan
+      bn: ঋণের প্রস্তাব দিচ্ছে
+    patterns:
+      - '\bloan\b|\brin\b|ঋণ|লোন'
+
+  - id: install
+    label:
+      en: Asks you to install an app or share your screen
+      bn: অ্যাপ ইনস্টল বা স্ক্রিন শেয়ার করতে বলছে
+    unless: warn_secret
+    patterns:
+      - 'install|download|\bapk\b|anydesk|teamviewer|quicksupport|screen shar|unknown sources|app file|remotely'
+      - 'ইনস্টল|ডাউনলোড|নামান|স্ক্রিন শেয়ার'
+
+  - id: link
+    label:
+      en: Carries a link
+      bn: একটি লিংক আছে
+    patterns:
+      - 'urltoken'
+
+  - id: verify_identity
+    label:
+      en: Asks you to verify, update or log in
+      bn: যাচাই, হালনাগাদ বা লগইন করতে বলছে
+    patterns:
+      - '\bkyc\b|verif|\bnid\b|log ?in\b|biometric|re-?registration|update (?:your|korte)|upgrade|identity|date of birth'
+      - 'jonmo tarikh|tothho'
+      - 'হালনাগাদ|ভেরিফাই|যাচাই|লগইন|বায়োমেট্রিক|নিবন্ধন|জন্ম তারিখ|তথ্য'
+
+  - id: phone_number
+    label:
+      en: Gives a phone number to call or pay
+      bn: কল বা টাকা পাঠানোর জন্য একটি নম্বর দিচ্ছে
+    patterns:
+      - '0{11}'
+
+  - id: secrecy
+    label:
+      en: Asks you to keep it secret or not to call back
+      bn: গোপন রাখতে বা ফোন না করতে বলছে
+    patterns:
+      - 'don.?t (?:tell|call)|keep (?:it|this) secret|explain later|kauke bol(?:o|ben|is) na|pore (?:sob )?bol'
+      - 'গোপন|কাউকে বলো না|কাউকে বলবেন না|পরে সব বলব'
+
+  - id: emergency
+    label:
+      en: Tells a story of an emergency or a lost phone
+      bn: বিপদ বা ফোন হারানোর গল্প বলছে
+    patterns:
+      - 'hospital|accident|emergency|in trouble|new number|lost my phone|medicine'
+      - 'bipod|notun n[ua]m?b[ae]?r|phone (?:nosto|hara|hariye)'
+      - 'হাসপাতাল|বিপদ|দুর্ঘটনা|নতুন নম্বর|ফোন হারিয়ে|ফোন নষ্ট|বন্ধুর নম্বর'
+
+  - id: qr
+    label:
+      en: Asks you to scan a QR code to receive money
+      bn: টাকা পেতে কিউআর কোড স্ক্যান করতে বলছে
+    patterns:
+      - '\bqr\b|\bscan\b|স্ক্যান|কিউআর'
+
+  - id: account_use
+    label:
+      en: Wants to use your account or SIM to move money
+      bn: টাকা সরাতে আপনার অ্যাকাউন্ট বা সিম ব্যবহার করতে চাইছে
+    patterns:
+      - '(?:account|acc|wallet|sim)[^.!?।]{0,25}(?:bhara|vara|rent|lagbe)|personal (?:account|number)|forward (?:them|it|kore)|keep 0+ ?%|receive payments?'
+      - 'ভাড়া দিন|পার্সোনাল নম্বর|রেখে বাকি|পাঠিয়ে দেবেন'
+
+  - id: sim
+    label:
+      en: Talks about your SIM being replaced, upgraded or re-registered
+      bn: সিম বদল, আপগ্রেড বা পুনর্নিবন্ধনের কথা বলছে
+    patterns:
+      - '\be?sim\b|সিম'
+
+  - id: proof_pressure
+    label:
+      en: Offers a screenshot as proof and explains why your balance has not changed
+      bn: স্ক্রিনশট দেখিয়ে ব্যালেন্সে টাকা না আসার অজুহাত দিচ্ছে
+    patterns:
+      - 'screenshot|server (?:problem|issue|somossa|down)|network slow|pore add|sms asbe pore|take an hour|show (?:up )?later'
+      - 'স্ক্রিনশট|সার্ভার সমস্যা|একটু পরে যোগ'
+
+  - id: goods_now
+    label:
+      en: Wants the goods handed over before the payment shows
+      bn: টাকা দেখা যাওয়ার আগেই পণ্য দিতে বলছে
+    patterns:
+      - '(?:hand over|give|send|release)[^.!?।]{0,30}(?:goods|product|item|parcel)[^.!?।]{0,20}now|(?:product|mal|ponno)[^.!?।]{0,40}(?:ekhoni|taratari|pathiye d|diye d)'
+      - 'এখনই পণ্য|পণ্য দিয়ে দিন'
+
+  - id: no_cod
+    label:
+      en: Refuses cash on delivery and wants full payment in advance
+      bn: ক্যাশ অন ডেলিভারি না দিয়ে পুরো টাকা আগে চাইছে
+    patterns:
+      - 'no cash on delivery|cash on delivery (?:hobe na|nei|nai)|advance payment required|full (?:price|amount|payment)'
+      - 'ক্যাশ অন ডেলিভারি নেই|পুরো টাকা অগ্রিম'
+
+  - id: receipt
+    benign: true
+    label:
+      en: Reads like a transaction receipt
+      bn: লেনদেনের রসিদের মতো
+    patterns:
+      - 'trxid|txnid|balance (?:tk|bdt)|successful|fee tk|debited|credited|receipt|disbursed|is due on'
+      - 'ব্যালেন্স|সফল হয়েছে|porishodh hoyeche|pathano hoyeche'
+
+  - id: pay_on_delivery
+    benign: true
+    label:
+      en: Lets you pay on delivery or check first
+      bn: হাতে পেয়ে বা যাচাই করে টাকা দিতে বলছে
+    patterns:
+      - 'pay the rider|rider ke|shop e as|dokane e?se|when you receive|whichever you prefer|check (?:your|kore)|once you see|no hurry|no rush|whenever you can|before you ship'
+      - '(?<!no )cash on delivery(?! (?:hobe na|nei|nai))'
+      - 'হাতে পেয়ে|দোকানে এসে|দেখে নিশ্চিত|দেখে জানাবেন|dekhe? janab|check kore janab|dekhen to'
+
+  - id: no_fee
+    benign: true
+    label:
+      en: Says plainly that nothing has to be paid
+      bn: কোনো টাকা লাগবে না বলে জানাচ্ছে
+    patterns:
+      - 'no fee|no charge|conditions apply|taka lagbe na|কোনো টাকা লাগবে না|শর্ত প্রযোজ্য|বিস্তারিত অ্যাপে'
+
+  - id: question
+    benign: true
+    label:
+      en: Asks a question rather than giving an instruction
+      bn: নির্দেশ নয়, প্রশ্ন করছে
+    patterns:
+      - '\?|how (?:do|can)|where can|ki korle|kivabe|কীভাবে|কোথায়'

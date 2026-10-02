@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import settings
-from ..features import FEATURES
+from ..features import BEHAVIOUR_FIELDS, FEATURES
 from ..features.build import epoch_seconds, iter_txns
 from ..models import registry
 from ..models.bundle import ModelBundle
@@ -34,10 +34,17 @@ from .similar import SimilarCases
 REPORT_FILE = "policy_report.json"
 SAMPLE_ALERTS, SAMPLE_ALLOWED = 400, 200
 SEED = 7
+# The context facts of `context_from_engine`, as columns of the offline frame.
+CONTEXT_COLUMNS = ("sender_flagged", "recipient_flagged", *BEHAVIOUR_FIELDS)
 
 
 def add_context(frame: pd.DataFrame, flags: pd.DataFrame) -> pd.DataFrame:
-    """Confirmed-fraud facts as the case system would know them at each transaction."""
+    """Confirmed-fraud facts as the case system would know them at each transaction.
+
+    The behaviour facts are already in the frame: the feature build writes them.
+    """
+    if missing := [c for c in BEHAVIOUR_FIELDS if c not in frame.columns]:
+        raise ValueError(f"features.parquet has no {missing}; rebuild it (`make features`)")
     flagged_at = dict(zip(flags["wallet_id"], epoch_seconds(flags["flagged_at"]), strict=True))
     ts = epoch_seconds(frame["ts"])
     out = frame.copy()
@@ -52,7 +59,7 @@ def decide_batch(
 ) -> tuple[list, np.ndarray | None]:
     """Policy outcome per row. With no bundle, every row is decided on rules only."""
     x = frame[list(FEATURES)].to_numpy(dtype=np.float64)
-    context = frame[["sender_flagged", "recipient_flagged"]].to_numpy()
+    context = frame[list(CONTEXT_COLUMNS)].to_numpy(dtype=np.float64)
     risk = thresholds = mule_alert = None
     if bundle is not None:
         scores = bundle.score(x)
@@ -65,7 +72,7 @@ def decide_batch(
     outcomes = []
     for i, txn_type in enumerate(frame["type"].tolist()):
         fields = dict(zip(FEATURES, x[i].tolist(), strict=True))
-        fields["sender_flagged"], fields["recipient_flagged"] = context[i].tolist()
+        fields.update(zip(CONTEXT_COLUMNS, context[i].tolist(), strict=True))
         if mule_alert is not None:
             fields["recipient_mule_alert"] = float(mule_alert[i])
         row_risk = float(risk[i]) if risk is not None else None
@@ -125,7 +132,7 @@ def _sample_check(
     sample = frame.iloc[picked]
     rows = txns.set_index("txn_id").loc[sample["txn_id"]].reset_index()
     x = sample[list(FEATURES)].to_numpy(dtype=np.float64)
-    context = sample[["sender_flagged", "recipient_flagged"]].to_dict("records")
+    context = sample[list(CONTEXT_COLUMNS)].to_dict("records")
 
     millis, mismatches, no_reasons, ungrounded = [], 0, 0, []
     alerts = 0

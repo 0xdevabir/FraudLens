@@ -1,0 +1,544 @@
+# Message scripts the scam-message classifier is trained and tested on.
+#
+# Every line is written for this project. None is a real message from a real
+# person: they are modelled on the scripts fraud teams and news reports describe
+# in Bangladesh, in the three ways people actually write (bn: Bangla script,
+# bl: Bangla in Latin letters, en: English).
+#
+# A family is one script. `labels` are taxonomy category ids; a family without
+# labels is ordinary, harmless text. `hard: true` marks harmless text that
+# shares words with scams (a real OTP notice, a parent asked for money).
+# `held_out: true` families are never trained on: they measure what the model
+# does with a script it has not met.
+#
+# Slots in braces are filled by fraudlens.intel.corpus.
+
+families:
+  # ------------------------------------------------------------------ scams
+  - id: otp_call_block
+    labels: [social_engineering, impersonation, account_takeover]
+    templates:
+      - [bl, "{brand} office theke bolchi. apnar account e somossa hoyeche, block hoye jabe. apnar phone e ekta OTP geche, seta bolun"]
+      - [bl, "Sir ami {brand} head office theke {name} bolchi, apnar account update korte hobe, sms e je 6 digit code ta gese oita bolen taratari"]
+      - [bn, "{brand_bn} হেড অফিস থেকে বলছি। আপনার অ্যাকাউন্টটি সাময়িকভাবে বন্ধ করা হয়েছে। চালু করতে আপনার ফোনে যাওয়া ওটিপি কোডটি বলুন।"]
+      - [bn, "আপনার {brand_bn} অ্যাকাউন্টে সমস্যা হয়েছে, এখনই ভেরিফাই না করলে ব্লক হয়ে যাবে। মেসেজে আসা ৬ সংখ্যার কোডটি দিন।"]
+      - [en, "This is {brand} customer service. Your account will be blocked today. Tell me the verification code we just sent to your phone to keep it active."]
+      - [en, "Dear customer, your {brand} wallet is under review. Share the OTP you received within 5 minutes or the account will be closed permanently."]
+      - [bl, "apnar {brand} account ta block hoye gese, thik korte hole ekhon je code jabe oita amake bolun, na hole taka sob kete jabe"]
+
+  - id: pin_verify
+    labels: [social_engineering, impersonation, account_takeover]
+    templates:
+      - [bl, "{brand} theke bolchi, apnar account verify korar jonno PIN number ta bolun, na hole account bondho hoye jabe"]
+      - [bn, "আপনার {brand_bn} অ্যাকাউন্টের তথ্য হালনাগাদ করতে হবে। আপনার পিন নম্বর এবং জন্ম তারিখ বলুন।"]
+      - [en, "We are updating our system. Confirm your {brand} PIN and NID number now to avoid suspension of your wallet."]
+      - [bl, "sir apnar account e {amt} taka bonus add hobe, confirm korte apnar pin ta ekbar bolen"]
+      - [bn, "{brand_bn} কাস্টমার কেয়ার থেকে বলছি। আপনার অ্যাকাউন্ট সচল রাখতে পিন নম্বরের সাথে {otp} যোগ করে যে সংখ্যা হয় সেটি বলুন।"]
+      - [en, "For security verification please type your {brand} PIN followed by the code {otp} and send it to this number."]
+      - [bl, "apnar pin er sathe {otp} jog kore je sonkha hoy seta bolun, tahole apnar account abar chalu hoye jabe"]
+
+  - id: refund_code
+    labels: [social_engineering, impersonation]
+    templates:
+      - [bl, "apnar {brand} account e {amt} taka refund asbe, refund pete phone e asa code ta amake din"]
+      - [bn, "আপনার একটি লেনদেন ব্যর্থ হয়েছে, {amt_bn} টাকা ফেরত দেওয়া হবে। ফেরত পেতে আপনার মোবাইলে আসা কোডটি জানান।"]
+      - [en, "You are eligible for a refund of Tk {amt}. To process it, reply with the code sent to your number."]
+      - [bl, "sir apnar cashback {amt} tk pending ase, ami pathiye dicchi, sudhu sms er code ta bolen"]
+      - [bn, "{brand_bn} থেকে আপনার ক্যাশব্যাকের {amt_bn} টাকা আটকে আছে। ছাড়াতে এখনই কোডটি বলুন, নইলে বাতিল হয়ে যাবে।"]
+      - [en, "Your cashback of BDT {amt} is on hold. Our officer will call you, give him the 6 digit code to release it."]
+
+  - id: relative_emergency
+    labels: [social_engineering]
+    templates:
+      - [bl, "Ammu ami {name}, amar phone nosto, eta notun number. khub bipode asi, ei number e {amt} taka bkash koro ekhoni"]
+      - [bn, "আব্বা আমি {name_bn}, আমার ফোন হারিয়ে গেছে, এটা বন্ধুর নম্বর। হাসপাতালে আছি, এখনই {num_bn} নম্বরে {amt_bn} টাকা পাঠান, পরে সব বলব।"]
+      - [en, "Hi it's me, I lost my phone and this is a new number. I'm in trouble, please send {amt} taka to {num} right now, don't call, I'll explain later."]
+      - [bl, "vai ami accident korsi hospital e, kauke bolo na, {num} ei number e {amt} tk pathao joldi"]
+      - [bn, "মামা আমি পুলিশের কাছে আটকা পড়েছি, কাউকে বলবেন না। {amt_bn} টাকা এই নম্বরে এখনই পাঠান, নইলে বড় বিপদ হবে।"]
+      - [en, "Mom my number changed. I need {amt} urgently for a hospital bill, send it to {num}, this is my friend's {brand}. Please hurry."]
+
+  - id: romance_gift
+    labels: [social_engineering]
+    templates:
+      - [en, "My love, I have sent you a gift box with gold and dollars. The courier needs {amt} taka clearance, please send it to {num} today."]
+      - [bl, "jaan ami tomar jonno bidesh theke gift pathiyechi, customs e atke ase, charate {amt} taka lagbe, ei number e pathao {num}"]
+      - [bn, "প্রিয়, তোমার জন্য বিদেশ থেকে দামি উপহার পাঠিয়েছি। কাস্টমসে আটকে আছে, ছাড়াতে {amt_bn} টাকা {num_bn} নম্বরে পাঠাও।"]
+      - [en, "Dear, I am a doctor working abroad. I want to visit you but my account is frozen, lend me {amt} taka on {brand} and I will return double."]
+      - [bl, "ami tomake onek valobashi, ekta problem e porsi, {amt} tk dhar dao, kal e ferot dibo, {num} e pathao"]
+      - [bn, "তোমাকে ছাড়া আর কাউকে বলতে পারছি না। আমার মায়ের অপারেশন, {amt_bn} টাকা দরকার, বিকাশ করে দাও, আমি এসে ফেরত দেব।"]
+
+  - id: fake_helpline
+    labels: [impersonation, social_engineering]
+    templates:
+      - [bn, "{brand_bn} কাস্টমার কেয়ার হেল্পলাইন {num_bn}। যেকোনো সমস্যায় ২৪ ঘণ্টা এই নম্বরে কল করুন অথবা ইনবক্স করুন।"]
+      - [bl, "{brand} customer care number {num}. taka ferot, account unblock, pin reset sob somossar somadhan, call korun"]
+      - [en, "{brand} Official Support Team. Wrong transaction? Account locked? Call or WhatsApp our agent at {num} for instant help."]
+      - [bn, "আপনার অভিযোগটি আমরা দেখেছি। দ্রুত সমাধানের জন্য আমাদের {brand_bn} প্রতিনিধির সাথে {num_bn} নম্বরে যোগাযোগ করুন।"]
+      - [en, "We saw your complaint about {brand}. Please inbox your wallet number and contact our help desk officer on {num}."]
+      - [bl, "apnar complain ta peyechi. {brand} support officer er sathe kotha bolte {num} e call din, inbox e wallet number din"]
+
+  - id: fake_agent
+    labels: [impersonation, social_engineering, fake_payment]
+    templates:
+      - [bl, "vai ami agent, apni ektu age amar dokan theke cash in korsilen. vul kore {amt} taka beshi chole geche, taka ta ferot pathan"]
+      - [bn, "আমি এজেন্ট বলছি। আপনি একটু আগে ক্যাশ ইন করেছেন, কিন্তু সার্ভার সমস্যায় টাকাটা ঝুলে আছে। ঠিক করতে আপনার ফোনে যাওয়া কোডটি বলুন।"]
+      - [en, "I am the agent from the shop where you cashed in. By mistake I sent {amt} extra to your wallet, please return it to {num}."]
+      - [bl, "ami {brand} agent bolchi, apnar cash in ta duibar hoye gese, {amt} taka back koren, na hole apnar account block kore dibo"]
+      - [bn, "ভাই আমি এজেন্ট, আপনার নম্বরে ভুলে {amt_bn} টাকা ঢুকে গেছে। গরিব মানুষ, টাকাটা এই নম্বরে ফেরত দিন {num_bn}।"]
+      - [en, "Agent here. Your cash in is stuck in the system. To release it I need the code that just came to your phone."]
+
+  - id: govt_stipend
+    labels: [impersonation, scam_campaign, social_engineering]
+    templates:
+      - [bn, "শিক্ষা বোর্ড থেকে বলছি। আপনার সন্তানের উপবৃত্তির {amt_bn} টাকা এসেছে। টাকা পেতে আপনার {brand_bn} নম্বর ও পিন বলুন।"]
+      - [bl, "shikkha board theke bolchi, apnar meyer upobrittir {amt} taka asche, taka pete apnar {brand} pin ar code ta bolun"]
+      - [bn, "সমাজসেবা অধিদপ্তর থেকে আপনার বয়স্ক ভাতার টাকা পাঠানো হবে। নিশ্চিত করতে মোবাইলে আসা কোডটি এখনই জানান।"]
+      - [en, "Education board notice: your stipend of Tk {amt} is ready. To receive it send a registration fee of Tk {fee} to {num}."]
+      - [bl, "apnar boyosko vatar taka asche, receive korte {fee} taka charge ei number e pathan {num}"]
+      - [bn, "সরকারি ত্রাণ তহবিল থেকে আপনি {amt_bn} টাকা অনুদান পেয়েছেন। টাকা তুলতে {fee_bn} টাকা ফি এই নম্বরে পাঠান।"]
+      - [en, "Govt allowance department: Tk {amt} has been approved for you. Share your wallet PIN with our officer to receive the money."]
+
+  - id: wrong_send
+    labels: [fake_payment, social_engineering]
+    templates:
+      - [bl, "vai vul kore apnar number e {amt} taka chole geche, doya kore ferot din ei number e {num}"]
+      - [bn, "ভাই ভুল করে আপনার নম্বরে {amt_bn} টাকা চলে গেছে। আমি গরিব মানুষ, দয়া করে টাকাটা ফেরত পাঠান।"]
+      - [en, "Hello, I sent {amt} taka to your number by mistake. It was for my mother's medicine. Please send it back to {num}."]
+      - [en, "You have received Tk {amt}.00 from {num}. Balance updated. TrxID {trx}. Sent by mistake, kindly return to sender now."]
+      - [bl, "apnar {brand} e {amt} tk vul kore pathiye disi, msg dekhen, taka ta back koren pls, na hole thanay jabo"]
+      - [bn, "Cash In Tk {amt} সফল হয়েছে। TrxID {trx}। ভাই এটা ভুলে গেছে, এখনই এই নম্বরে ফেরত দিন, নইলে মামলা করব।"]
+      - [bl, "apu amar baba r oshudh er taka vul e apnar nambar e chole gese {amt} taka, ektu ferot den na pls"]
+
+  - id: screenshot_pressure
+    labels: [fake_payment, merchant_fraud]
+    templates:
+      - [bl, "vai payment kore disi, screenshot dekhen. balance e ektu pore add hobe, server problem. product ta ekhoni pathiye din"]
+      - [bn, "পেমেন্ট করে দিয়েছি, স্ক্রিনশট পাঠালাম। আপনার ব্যালেন্সে একটু পরে যোগ হবে, এখনই পণ্য দিয়ে দিন, আমার গাড়ি ছেড়ে দিচ্ছে।"]
+      - [en, "Payment done, see the screenshot. It may take an hour to show in your balance because of a server issue, please hand over the goods now."]
+      - [bl, "taka pathano hoye gese, sms asbe pore, network slow. apni mal ta rider er kase diye den taratari"]
+      - [en, "I already paid {amt} by {brand}, the SMS is delayed. Don't check the app, just trust the screenshot and release the order."]
+      - [bn, "টাকা পাঠিয়ে দিয়েছি, মেসেজ আসতে দেরি হবে। অ্যাপে চেক করার দরকার নেই, স্ক্রিনশটই প্রমাণ, মাল ছেড়ে দিন।"]
+
+  - id: fake_reversal
+    labels: [fake_payment, social_engineering]
+    templates:
+      - [en, "Your transaction {trx} of Tk {amt} has failed and the amount is on hold. To reverse it, send the same amount again to {num}."]
+      - [bl, "apnar transaction fail hoyeche, taka atke ase. taka ferot pete abar {amt} taka ei number e send korun, duita eksathe ferot paben"]
+      - [bn, "আপনার লেনদেনটি অসম্পূর্ণ রয়েছে। টাকা ফেরত পেতে আবার {amt_bn} টাকা পাঠান, দুই লেনদেনের টাকা একসাথে ফেরত দেওয়া হবে।"]
+      - [en, "Refund notice: Tk {amt} will be returned to your wallet after you pay a reversal charge of Tk {fee} to {num}."]
+      - [bl, "apnar taka vul account e chole gese, reverse korte {fee} tk charge lagbe, ei number e pathan"]
+      - [bn, "আপনার টাকা ভুল নম্বরে চলে গেছে বলে অভিযোগ পেয়েছি। ফেরত আনতে {fee_bn} টাকা সার্ভিস চার্জ পাঠান।"]
+
+  - id: sim_upgrade
+    labels: [account_takeover, social_engineering, impersonation]
+    templates:
+      - [bl, "apnar SIM ta 4G te upgrade korte hobe, na hole bondho hoye jabe. phone e je code jabe seta bolun"]
+      - [bn, "গ্রাহক সেবা থেকে বলছি। আপনার সিমের বায়োমেট্রিক নিবন্ধনে সমস্যা আছে, সিম বন্ধ হয়ে যাবে। চালু রাখতে কোডটি বলুন।"]
+      - [en, "Telecom operator notice: your SIM registration has expired. Dial the code we tell you and share the confirmation number to keep your SIM active."]
+      - [bl, "apnar sim re-registration korte hobe, NID number ar sms e asa code ta den, na hole 2 ghontar moddhe sim off"]
+      - [bn, "আপনার সিমটি ফোরজি থেকে ফাইভজি করা হচ্ছে। কিছুক্ষণ ফোন বন্ধ রাখুন এবং তার আগে এসএমএসে আসা কোডটি জানান।"]
+      - [en, "We are replacing your SIM with a new one for free. Keep your phone switched off for two hours and tell us the code you received."]
+
+  - id: code_by_mistake
+    labels: [account_takeover, social_engineering]
+    templates:
+      - [bl, "vai vul kore amar ekta code apnar number e chole gese, 6 digit er, ektu bolen na pls"]
+      - [bn, "ভাই আমার একটা ভেরিফিকেশন কোড ভুল করে আপনার নম্বরে চলে গেছে, কোডটা একটু বলবেন?"]
+      - [en, "Sorry, I typed your number by mistake while registering and the code went to you. Can you forward me the 6 digit code?"]
+      - [bl, "apu amar {brand} er code ta apnar phone e gese vul e, forward kore den pls khub dorkar"]
+      - [en, "A login code was sent to your phone in error. Please forward that message to this number so I can open my account."]
+      - [bn, "আমার নতুন ফোনে অ্যাকাউন্ট চালু করছি, কোডটা ভুলে আপনার কাছে গেছে। মেসেজটা আমাকে ফরওয়ার্ড করে দিন।"]
+
+  - id: advance_payment_shop
+    labels: [merchant_fraud]
+    templates:
+      - [bn, "অর্ডার কনফার্ম করতে পুরো টাকা অগ্রিম {brand_bn} পার্সোনাল নম্বরে পাঠাতে হবে। ক্যাশ অন ডেলিভারি নেই।"]
+      - [bl, "order confirm korte full payment advance korte hobe {num} personal number e. cash on delivery hobe na apu"]
+      - [en, "To confirm your {item} order, send the full price in advance to our personal {brand} number {num}. No cash on delivery."]
+      - [bl, "stock sesh hoye jacche, ekhoni {amt} taka advance send money koren {num} e, na hole order cancel"]
+      - [bn, "{item_bn} বুকিং দিতে {amt_bn} টাকা অগ্রিম সেন্ড মানি করুন। টাকা না পাঠালে অর্ডার নেওয়া হবে না, স্টক সীমিত।"]
+      - [en, "Limited stock! Pay Tk {amt} booking money now by send money to {num}. Delivery after full payment only."]
+
+  - id: courier_fee_first
+    labels: [merchant_fraud]
+    templates:
+      - [bl, "{item} ta ami courier e pathiye dibo, age courier charge {fee} taka pathan, ami onno jelay thaki"]
+      - [bn, "{item_bn} বিক্রি হবে, আমি ঢাকার বাইরে থাকি। কুরিয়ারে পাঠাব, আগে কুরিয়ার চার্জ {fee_bn} টাকা পাঠিয়ে দিন।"]
+      - [en, "The {item} is still available. I am posted out of town, so pay the delivery charge of Tk {fee} first and I will courier it today."]
+      - [bl, "bike ta dekhte chaile age {fee} tk booking den, onek customer ase, na dile onno jon ke diye dibo"]
+      - [en, "I am an army officer being transferred, selling my {item} cheap. Send Tk {fee} transport cost first and it will reach you tomorrow."]
+      - [bn, "আমি সেনাবাহিনীতে চাকরি করি, বদলি হয়ে যাচ্ছি তাই {item_bn} কম দামে দিচ্ছি। পরিবহন খরচ {fee_bn} টাকা আগে পাঠান।"]
+
+  - id: deep_discount
+    labels: [merchant_fraud, scam_campaign]
+    templates:
+      - [bn, "ধামাকা অফার! {item_bn} মাত্র অর্ধেক দামে। আজই পুরো টাকা অগ্রিম দিয়ে অর্ডার করুন, ৪৫ দিনে ডেলিভারি।"]
+      - [en, "Mega cyclone offer: {item} at 70% discount! Pay the full amount today, delivery in 45 working days. Hurry!"]
+      - [bl, "{item} 60% discount e! aaj rat 12 tar moddhe full payment korle paben, delivery 30 din por"]
+      - [en, "Flash sale for the first 100 buyers only. {item} for Tk {amt}. Advance payment required to {num}."]
+      - [bn, "প্রথম ১০০ জনের জন্য {item_bn} {pct}% ছাড়ে। অগ্রিম টাকা পাঠিয়ে বুকিং নিশ্চিত করুন, অফার আজই শেষ।"]
+      - [bl, "eid offer! {item} ordhek dame, age taka pathan pore product, limited time"]
+
+  - id: phishing_kyc_link
+    labels: [phishing_malware, impersonation, account_takeover]
+    templates:
+      - [en, "Your {brand} account will be suspended. Update your KYC now: {bad}"]
+      - [bn, "আপনার {brand_bn} অ্যাকাউন্ট বন্ধ হয়ে যাচ্ছে। চালু রাখতে এই লিংকে গিয়ে তথ্য হালনাগাদ করুন: {bad}"]
+      - [bl, "apnar {brand} account verify kora hoy nai, ei link e giye number ar pin diye login korun {bad}"]
+      - [en, "Security alert: unusual login on your {brand} wallet. Verify your identity here {bad} within 24 hours."]
+      - [bn, "{brand_bn} গ্রাহক, আপনার এনআইডি যাচাই বাকি আছে। লিংকে ক্লিক করে পিন দিয়ে লগইন করুন {bad}"]
+      - [bl, "{brand} notice: apnar account limited kora hoyeche. unlock korte ekhane click korun {bad}"]
+
+  - id: apk_install
+    labels: [phishing_malware, impersonation]
+    templates:
+      - [bl, "{brand} er notun app update asche, ei link theke download kore install korun {apk}"]
+      - [en, "Install the new {brand} Offer app to get Tk {amt} bonus. Download here: {apk} and allow unknown sources."]
+      - [bn, "{brand_bn} এর নতুন ভার্সন ইনস্টল না করলে অ্যাকাউন্ট বন্ধ হয়ে যাবে। এখান থেকে ডাউনলোড করুন {apk}"]
+      - [en, "Your wedding invitation card is attached, open the app file to view: {apk}"]
+      - [bl, "play store e pawa jabe na, ei apk ta install koren {apk}, unknown source allow kore din"]
+      - [bn, "বিদ্যুৎ বিলের নতুন অ্যাপ, এখান থেকে নামিয়ে ইনস্টল করুন {apk}, প্লে স্টোরে নেই।"]
+
+  - id: remote_access
+    labels: [phishing_malware, social_engineering, account_takeover]
+    templates:
+      - [bl, "apnar somossa thik korte AnyDesk app ta install korun, tarpor je code dekhabe seta amake bolun"]
+      - [bn, "আপনার অ্যাকাউন্ট ঠিক করতে প্লে স্টোর থেকে AnyDesk নামান এবং স্ক্রিনে যে নম্বর আসবে তা আমাকে বলুন।"]
+      - [en, "Our technical officer will fix your wallet remotely. Please install TeamViewer QuickSupport and tell me the ID shown."]
+      - [en, "Download AnyDesk, open it and read me the 9 digit address so I can verify your {brand} app from our office."]
+      - [bl, "screen share on koren whatsapp e, ami dekhe dekhe apnar {brand} thik kore dicchi"]
+      - [bn, "হোয়াটসঅ্যাপে স্ক্রিন শেয়ার চালু করুন, তারপর আপনার {brand_bn} অ্যাপ খুলুন, আমি দেখে ঠিক করে দিচ্ছি।"]
+
+  - id: fake_qr
+    labels: [phishing_malware, fake_payment]
+    templates:
+      - [bl, "taka receive korte ei QR code ta scan kore pin din, sathe sathe taka dhuke jabe"]
+      - [bn, "আপনার টাকা পেতে এই কিউআর কোডটি স্ক্যান করুন এবং পিন দিন, সাথে সাথে টাকা চলে আসবে।"]
+      - [en, "I am paying you now. Scan this QR code and enter your PIN to receive the money in your wallet."]
+      - [en, "To accept the refund, scan the attached QR and approve the request with your PIN."]
+      - [bl, "ami payment request pathaisi, apni approve kore pin dile taka peye jaben"]
+      - [bn, "আমি টাকা পাঠাচ্ছি, আপনার কাছে একটা রিকোয়েস্ট যাবে, পিন দিয়ে অ্যাপ্রুভ করলে টাকা পেয়ে যাবেন।"]
+
+  - id: mule_recruit
+    labels: [financial_network]
+    templates:
+      - [bl, "apnar {brand} account ta bhara din, mashe {amt} taka paben. sudhu sim ar pin dile hobe"]
+      - [bn, "ঘরে বসে আয় করুন। আপনার {brand_bn} নম্বরে টাকা আসবে, ১০% রেখে বাকিটা আমাদের নম্বরে পাঠিয়ে দেবেন।"]
+      - [en, "Earn commission from home: receive payments in your {brand} wallet and forward them to our number. Keep 10% of every transfer."]
+      - [bl, "amader company r payment receive korar jonno personal account lagbe, proti transaction e 5% commission, taka ele forward kore diben"]
+      - [en, "We buy registered {brand} accounts and SIMs. Tk {amt} per account, payment on delivery. Inbox us."]
+      - [bn, "আপনার এনআইডি দিয়ে খোলা {brand_bn} অ্যাকাউন্ট আমাদের ভাড়া দিন, প্রতি মাসে {amt_bn} টাকা পাবেন।"]
+
+  - id: betting_agent
+    labels: [financial_network, scam_campaign]
+    templates:
+      - [bl, "betting site e deposit korte ei personal number e cash in koren {num}, 5 minute e balance add"]
+      - [bn, "অনলাইন গেমে ডিপোজিট করতে এই নম্বরে সেন্ড মানি করুন {num_bn}। উইথড্র ৫ মিনিটে, ১০০% বোনাস।"]
+      - [en, "Deposit to your betting ID through our agent number {num} by {brand} send money. Instant withdraw, 100% welcome bonus."]
+      - [bl, "casino / cricket bet e taka lagaile double! deposit agent {num}, {brand} personal"]
+      - [en, "Become a master agent for our gaming site. Receive player deposits in your wallet and earn commission daily."]
+      - [bn, "ক্রিকেট বেটিংয়ে টাকা লাগান, দ্বিগুণ জিতুন। ডিপোজিট এজেন্ট নম্বর {num_bn}, শুধু সেন্ড মানি।"]
+
+  - id: lottery
+    labels: [scam_campaign, social_engineering]
+    templates:
+      - [bl, "ovinondon! apni {big} taka lottery jitechen. taka pete registration fee {fee} taka ei number e pathan {num}"]
+      - [bn, "অভিনন্দন! আপনার নম্বরটি লটারিতে {big_bn} টাকা জিতেছে। টাকা পেতে {fee_bn} টাকা ভ্যাট এই নম্বরে পাঠান।"]
+      - [en, "Congratulations! Your number has won Tk {big} in the {brand} anniversary lottery. Pay Tk {fee} processing fee to {num} to claim."]
+      - [bl, "apnar sim number ta {big} takar puroshkar peyeche, tax babod {fee} tk pathale taka apnar account e jabe"]
+      - [bn, "আপনি একটি মোটরসাইকেল ও নগদ {big_bn} টাকা পুরস্কার জিতেছেন। রেজিস্ট্রেশন ফি {fee_bn} টাকা পাঠিয়ে পুরস্কার বুঝে নিন।"]
+      - [en, "Lucky draw winner! You won a car and cash prize. Send the registration charge of Tk {fee} today or the prize goes to the next winner."]
+
+  - id: investment_app
+    labels: [scam_campaign]
+    templates:
+      - [bl, "amader app e {amt} taka invest korle protidin {pct}% profit, jokhon khushi withdraw. join korun"]
+      - [bn, "মাত্র {amt_bn} টাকা বিনিয়োগ করে প্রতিদিন {pct}% লাভ নিন। যত বেশি সদস্য আনবেন তত বেশি কমিশন।"]
+      - [en, "Invest Tk {amt} in our AI trading platform and earn {pct}% daily profit guaranteed. Refer friends for extra commission."]
+      - [bl, "forex / crypto trading e taka din, 30 din e double. amader team leader sob kore dibe, sudhu deposit koren"]
+      - [en, "Join our VIP investment group. Deposit today, get double in 30 days. Withdraw anytime, no risk."]
+      - [bn, "আমাদের ট্রেডিং অ্যাপে টাকা রাখলে ৩০ দিনে দ্বিগুণ। আজই ডিপোজিট করুন, টিম লিডার সব শিখিয়ে দেবে।"]
+
+  - id: task_job
+    labels: [scam_campaign]
+    templates:
+      - [en, "Part-time job: like and subscribe YouTube videos and earn Tk {amt} daily. Message us on Telegram to start."]
+      - [bl, "ghore boshe kaj: video te like dile proti like e 50 taka. VIP task er jonno {fee} taka deposit korte hobe"]
+      - [bn, "অনলাইনে পার্ট টাইম কাজ। প্রতিদিন {amt_bn} টাকা আয়। বড় টাস্ক পেতে আগে {fee_bn} টাকা জমা দিতে হবে।"]
+      - [en, "You completed 3 tasks and earned Tk 150. To unlock the premium tasks, recharge Tk {fee} to our receptionist's number {num}."]
+      - [bl, "telegram e join korun, hotel review dile daily {amt} tk income, age {fee} tk recharge kore account active korte hobe"]
+      - [bn, "ডাটা এন্ট্রির চাকরি, কোনো অভিজ্ঞতা লাগবে না। রেজিস্ট্রেশন ফি {fee_bn} টাকা পাঠিয়ে আজই শুরু করুন।"]
+
+  - id: loan_fee
+    labels: [scam_campaign]
+    templates:
+      - [bl, "5 minute e {big} taka loan, kono jamanot lagbe na. processing fee {fee} taka age pathan"]
+      - [bn, "জামানত ছাড়া {big_bn} টাকা ঋণ। অনুমোদন হয়ে গেছে, প্রসেসিং ফি {fee_bn} টাকা পাঠালেই টাকা আপনার অ্যাকাউন্টে।"]
+      - [en, "Your loan of Tk {big} is approved. Pay the insurance fee of Tk {fee} to {num} and the money will be disbursed in 10 minutes."]
+      - [en, "Instant loan without documents. Send file opening charge Tk {fee} first."]
+      - [bl, "apnar loan approve hoyeche, taka charte vat {fee} tk lagbe, ei number e pathan {num}"]
+      - [bn, "সহজ কিস্তিতে ঋণ নিন। ফাইল খোলার চার্জ {fee_bn} টাকা এই নম্বরে আগে পাঠাতে হবে {num_bn}।"]
+
+  - id: cashback_bait
+    labels: [scam_campaign, impersonation]
+    templates:
+      - [bl, "{brand} er pokkho theke apni {amt} taka cashback peyechen, pete hole age {fee} taka send money korun"]
+      - [bn, "{brand_bn} বর্ষপূর্তি অফার! {fee_bn} টাকা পাঠালে সাথে সাথে {amt_bn} টাকা ক্যাশব্যাক পাবেন এই নম্বরে {num_bn}।"]
+      - [en, "{brand} double money offer: send Tk {fee} to {num} and receive Tk {amt} back instantly. Today only!"]
+      - [bl, "offer! {fee} taka pathale {amt} taka ferot, {brand} eid bonus, sudhu ajker jonno"]
+      - [en, "You have been selected for a Tk {amt} bonus. Activate it by sending Tk {fee} to our offer number."]
+      - [bn, "আপনি {amt_bn} টাকা বোনাসের জন্য নির্বাচিত হয়েছেন। বোনাস চালু করতে {fee_bn} টাকা অফার নম্বরে পাঠান।"]
+
+  - id: remittance_bonus
+    labels: [scam_campaign, impersonation]
+    templates:
+      - [bn, "বিদেশ থেকে আপনার নামে {big_bn} টাকা রেমিট্যান্স এসেছে। টাকা ছাড়াতে {fee_bn} টাকা ট্যাক্স পাঠাতে হবে।"]
+      - [bl, "apnar name bidesh theke {big} taka remittance asche, bank charge {fee} taka pathale taka release hobe"]
+      - [en, "A remittance of Tk {big} from Saudi Arabia is waiting in your name. Pay the clearance tax of Tk {fee} to {num} to receive it."]
+      - [en, "Bangladesh Bank notice: your foreign remittance is on hold. Send the service charge to release the funds."]
+      - [bl, "apnar probashi vai taka pathaiche, kintu limit er jonno atke ase, {fee} tk diye limit barate hobe"]
+      - [bn, "বাংলাদেশ ব্যাংক থেকে বলছি, আপনার প্রবাসী আত্মীয়ের পাঠানো টাকা আটকে আছে। ছাড়াতে সার্ভিস চার্জ পাঠান।"]
+
+  # ------------------------------------------ scams the model never trains on
+  - id: customs_parcel
+    held_out: true
+    labels: [social_engineering, scam_campaign]
+    templates:
+      - [en, "Customs office: a parcel in your name is held at the airport. Pay Tk {fee} duty to {num} to release it today."]
+      - [bn, "বিমানবন্দর কাস্টমস থেকে বলছি। আপনার নামে একটি পার্সেল আটক আছে, শুল্ক বাবদ {fee_bn} টাকা পাঠালে ছেড়ে দেওয়া হবে।"]
+      - [bl, "apnar name ekta parcel asche airport e, charate {fee} taka duty lagbe, ei number e pathan {num}"]
+      - [en, "Courier notice: your package could not be delivered. Pay the redelivery charge now or it will be returned."]
+
+  - id: bank_card
+    held_out: true
+    labels: [impersonation, social_engineering, account_takeover]
+    templates:
+      - [bl, "ami bank theke bolchi, apnar ATM card block hoye gese, card er 16 digit number ar pichoner 3 digit bolun"]
+      - [bn, "ব্যাংকের কার্ড বিভাগ থেকে বলছি। আপনার কার্ডটি বন্ধ হয়ে গেছে, চালু করতে কার্ড নম্বর ও মেয়াদের তারিখ বলুন।"]
+      - [en, "This is your bank's card division. Your debit card has been blocked. Read me the 16 digit card number and the CVV to reactivate."]
+      - [en, "Bank security desk: a suspicious purchase was made on your card. Tell me the password sent by SMS to cancel it."]
+
+  - id: overpayment
+    held_out: true
+    labels: [fake_payment]
+    templates:
+      - [bl, "vai ami 500 er jaygay {amt} pathiye disi vul e, baki taka ta back kore den"]
+      - [en, "I paid you too much for the order, I typed an extra zero. Please return the difference of Tk {amt} to {num}."]
+      - [bn, "ভাই দাম ছিল কম, আমি ভুলে {amt_bn} টাকা বেশি দিয়ে ফেলেছি। বাড়তি টাকাটা এই নম্বরে ফিরিয়ে দিন।"]
+      - [en, "Double payment made for my bill, see the slip. Refund one of them to my other number right away."]
+
+  - id: esim_porting
+    held_out: true
+    labels: [account_takeover]
+    templates:
+      - [en, "eSIM conversion request received for your number. If this was you, share the activation code with our agent."]
+      - [bl, "apnar number ta onno operator e nite request asche, cancel korte chaile code ta bolun"]
+      - [bn, "আপনার নম্বরটি ই-সিমে রূপান্তরের আবেদন এসেছে। বাতিল করতে চাইলে এসএমএসে আসা নম্বরটি বলুন।"]
+      - [en, "Your mobile number is being ported to another operator. To stop it, confirm the PIN you received."]
+
+  - id: rental_ticket
+    held_out: true
+    labels: [merchant_fraud]
+    templates:
+      - [bl, "basa ta bhara hobe, onek jon dekhte chay, age {amt} taka advance pathale apnar jonno rekhe dibo"]
+      - [bn, "ঈদের ট্রেনের টিকিট আছে, আগে টাকা পাঠান, টিকিটের ছবি হোয়াটসঅ্যাপে দিয়ে দেব।"]
+      - [en, "Flat for rent, many people are interested. Send one month advance of Tk {amt} to hold it before you visit."]
+      - [en, "Bus tickets for Eid available. Pay first on {brand}, I will send the ticket photo after payment."]
+
+  - id: utility_link
+    held_out: true
+    labels: [phishing_malware]
+    templates:
+      - [en, "Your electricity connection will be cut tonight for unpaid bill. Pay immediately here: {bad}"]
+      - [bn, "আপনার গ্যাস বিল বকেয়া, আজ রাতে সংযোগ বিচ্ছিন্ন হবে। এখনই এই লিংকে পরিশোধ করুন {bad}"]
+      - [bl, "apnar internet bill baki, line kete dibe. ei link e giye pay korun {bad}"]
+      - [en, "Traffic fine pending against your vehicle. Settle it online today to avoid a case: {bad}"]
+
+  - id: p2p_mule
+    held_out: true
+    labels: [financial_network]
+    templates:
+      - [bl, "dollar buy sell kori, apnar wallet e customer taka dibe, apni amake pathiye diben, proti bar 200 tk paben"]
+      - [en, "P2P USDT trading team needs local wallets. Buyers pay into your account, you pass it on and keep a fee."]
+      - [bn, "আমাদের গ্রাহকদের টাকা আপনার ওয়ালেটে জমা হবে, আপনি শুধু আমাদের দেওয়া নম্বরে ক্যাশ আউট করে দেবেন, দিনে {amt_bn} টাকা আয়।"]
+      - [en, "Need people with active wallets to cash out transfers at their local agent. Daily payment."]
+
+  - id: charity_visa
+    held_out: true
+    labels: [scam_campaign]
+    templates:
+      - [bn, "বন্যার্তদের সাহায্যে এগিয়ে আসুন। আপনার দান এই ব্যক্তিগত নম্বরে পাঠান {num_bn}, আজই শেষ দিন।"]
+      - [en, "Malaysia work visa available, salary Tk {big}. Send the medical and processing fee of Tk {fee} to confirm your seat."]
+      - [bl, "ekta bacchar operation er jonno taka dorkar, ei personal number e pathan {num}, share korun"]
+      - [en, "Scholarship approved for your child. Deposit the admission charge today to this number to keep the seat."]
+      - [bl, "bidesh e chakri, visa ready, sudhu {fee} tk medical fee pathan aaj-i"]
+
+  # --------------------------------------------------------------- harmless
+  - id: real_otp
+    hard: true
+    labels: []
+    templates:
+      - [en, "Your {brand} verification code is {otp}. Never share your code or PIN with anyone, {brand} never asks for it."]
+      - [bn, "আপনার {brand_bn} ওটিপি {otp}। এই কোড বা পিন কাউকে দেবেন না। {brand_bn} কখনো এগুলো চায় না।"]
+      - [en, "{otp} is your one time password. It expires in 3 minutes. Do not share it."]
+      - [bl, "apnar {brand} OTP {otp}. ei code karo sathe share korben na."]
+      - [en, "Use {otp} to log in to your account. If you did not request this, ignore this message."]
+      - [bn, "{otp} আপনার লগইন কোড। আপনি অনুরোধ না করে থাকলে এই বার্তা উপেক্ষা করুন।"]
+
+  - id: real_txn_sms
+    labels: []
+    templates:
+      - [en, "Cash In Tk {amt}.00 from {num} successful. Fee Tk 0.00. Balance Tk {amt}.50. TrxID {trx}"]
+      - [en, "You have received Tk {amt}.00 from {num}. Ref salary. Fee Tk 0.00. Balance Tk {amt}.00. TrxID {trx}"]
+      - [bn, "আপনি {num_bn} থেকে {amt_bn} টাকা পেয়েছেন। ব্যালেন্স {amt_bn} টাকা। TrxID {trx}"]
+      - [en, "Send Money Tk {amt}.00 to {num} successful. Ref {name}. Balance Tk {fee}.00. TrxID {trx}"]
+      - [en, "Payment Tk {amt}.00 to merchant successful. Balance Tk {fee}.20. TrxID {trx}"]
+      - [bn, "ক্যাশ আউট {amt_bn} টাকা সফল হয়েছে। চার্জ {fee_bn} টাকা। TrxID {trx}"]
+      - [en, "Cash Out Tk {amt}.00 to agent {num} successful. Fee Tk {fee}.00. TrxID {trx}"]
+
+  - id: awareness
+    hard: true
+    labels: []
+    templates:
+      - [bn, "সতর্ক থাকুন: {brand_bn} কখনো আপনার পিন বা ওটিপি জানতে চায় না। কাউকে এই তথ্য দেবেন না।"]
+      - [en, "Security tip: {brand} will never call you to ask for your PIN, OTP or to send money. Stay safe."]
+      - [bl, "sotorko thakun: {brand} kokhono pin ba otp jante chay na. protarok der theke sabdhan"]
+      - [bn, "লটারি বা পুরস্কারের নামে কেউ টাকা চাইলে দেবেন না, এগুলো প্রতারণা। সচেতন হোন।"]
+      - [en, "Beware of fake calls claiming to be from customer care. Never install apps like AnyDesk at a stranger's request."]
+      - [bl, "keu vul kore taka pathaise bolle age nijer balance check korun, tarpor siddhanto nin"]
+      - [en, "Reminder: check your own balance before returning any money sent by mistake. A screenshot is not proof."]
+      - [bn, "অপরিচিত লিংকে ক্লিক করবেন না এবং অচেনা কাউকে কোড বলবেন না। নিরাপদ থাকুন।"]
+
+  - id: family_money
+    hard: true
+    labels: []
+    templates:
+      - [bl, "abbu mash sesh, mess er bhara dite hobe, {amt} taka pathao"]
+      - [bn, "মা, এই মাসের টিউশন ফি দিতে হবে, {amt_bn} টাকা পাঠিয়ে দিও।"]
+      - [en, "Dad, can you send me {amt} taka for the semester fee this week? No rush, whenever you can."]
+      - [bl, "vaiya bazar korar taka nai, {amt} tk bkash kore dio amar number e"]
+      - [bn, "আপা, আম্মুর ওষুধ কিনতে হবে, সন্ধ্যায় {amt_bn} টাকা পাঠাতে পারবে?"]
+      - [en, "Hey, I sent you the rent share, {amt} taka. Check when you're free."]
+      - [bl, "dost kal je {amt} taka dhar nisilam ajke pathiye dilam, dekhis"]
+
+  - id: chat
+    labels: []
+    templates:
+      - [bl, "kal class e asbi? assignment ta joma dite hobe"]
+      - [bn, "আজ রাতে বাসায় আসতে দেরি হবে, তোমরা খেয়ে নিও।"]
+      - [en, "Are we still meeting at 5? I'll be near the bus stand."]
+      - [bl, "ki obostha? onek din kotha hoy na, basay sobai kemon ase"]
+      - [bn, "ঈদ মোবারক! পরিবারের সবাইকে আমার সালাম দিও।"]
+      - [en, "Happy birthday! Hope you have a great day with the family."]
+      - [bl, "khela dekhsos? bangladesh jitse aaj"]
+      - [en, "The meeting is moved to Sunday morning, please bring the printed report."]
+
+  - id: promo
+    hard: true
+    labels: []
+    templates:
+      - [en, "Recharge Tk 100 or more from the {brand} app and get Tk 10 cashback. Conditions apply. Details: {ok}"]
+      - [bn, "{brand_bn} অ্যাপ থেকে বিদ্যুৎ বিল দিলে ২০ টাকা ক্যাশব্যাক। শর্ত প্রযোজ্য। বিস্তারিত অ্যাপে।"]
+      - [bl, "{brand} app diye mobile recharge e 5% cashback, offer cholbe ei mash porjonto. bistarito {ok}"]
+      - [en, "Pay at partner supermarkets with {brand} and enjoy 10% instant discount this weekend."]
+      - [bn, "এই ঈদে {brand_bn} পেমেন্টে কেনাকাটায় ১০% ছাড়। নির্দিষ্ট আউটলেটে প্রযোজ্য।"]
+      - [en, "New in the {brand} app: pay your tuition fees with no charge. Update from the app store."]
+
+  - id: shop_order
+    hard: true
+    labels: []
+    templates:
+      - [bl, "apnar order ta confirm hoyeche, cash on delivery. delivery charge 60 taka rider ke diben"]
+      - [bn, "আপনার অর্ডারটি কনফার্ম হয়েছে। পণ্য হাতে পেয়ে মূল্য পরিশোধ করবেন। ডেলিভারি ২-৩ দিনের মধ্যে।"]
+      - [en, "Thanks for your order of {item}. Cash on delivery, total Tk {amt}. Our rider will call before arriving."]
+      - [bl, "apu {item} stock e ase, dam {amt} taka, cash on delivery te niben naki shop e asben?"]
+      - [en, "Your order has been shipped. Track it here: {web}. Pay the rider when you receive it."]
+      - [bn, "{item_bn} স্টকে আছে, দাম {amt_bn} টাকা। দোকানে এসে দেখে নিতে পারেন, ঠিকানা ইনবক্সে দিচ্ছি।"]
+      - [en, "You can pay through our merchant account at checkout or choose cash on delivery, whichever you prefer."]
+
+  - id: job_post
+    hard: true
+    labels: []
+    templates:
+      - [en, "We are hiring a sales executive. Interview on Sunday at 10am at our office. Bring your CV. No fee is charged at any stage."]
+      - [bn, "নিয়োগ বিজ্ঞপ্তি: হিসাবরক্ষক পদে লোক নেওয়া হবে। আগ্রহীরা সিভি ইমেইল করুন। কোনো টাকা লাগবে না।"]
+      - [bl, "amader dokane ekjon sales man lagbe, beton {amt} taka, agrohi hole dokane ese kotha bolun"]
+      - [en, "Your interview is scheduled for Tuesday. Please confirm attendance by replying to this message."]
+      - [bn, "আপনার আবেদন গ্রহণ করা হয়েছে। লিখিত পরীক্ষার তারিখ পরে জানানো হবে।"]
+      - [en, "Internship opening for students, stipend Tk {amt} per month. Apply through our website {web}."]
+
+  - id: salary_bill
+    labels: []
+    templates:
+      - [bl, "apnar ei masher beton {amt} taka pathano hoyeche, check kore niben"]
+      - [bn, "বিদ্যুৎ বিল {amt_bn} টাকা পরিশোধ সফল হয়েছে। ধন্যবাদ।"]
+      - [en, "Your salary for this month, Tk {amt}, has been disbursed to your wallet."]
+      - [en, "Your internet bill of Tk {amt} is due on the 10th. Pay from the app or at any branch."]
+      - [bn, "আপনার মোবাইল রিচার্জ {fee_bn} টাকা সফল হয়েছে।"]
+      - [bl, "gas bill {amt} taka porishodh hoyeche, dhonnobad"]
+      - [en, "Tuition fee received: Tk {amt}. Receipt number {trx}."]
+
+  - id: honest_buyer
+    hard: true
+    labels: []
+    templates:
+      - [bl, "vai payment kore dilam {amt} taka, apnar app e check kore janaben, tarpor product pathaben"]
+      - [bn, "টাকা পাঠিয়েছি, আপনি আপনার হিসাবে দেখে নিশ্চিত হয়ে তারপর পণ্য পাঠাবেন।"]
+      - [en, "I've paid Tk {amt}, TrxID {trx}. Please check your statement and confirm before you ship, no hurry."]
+      - [bl, "apu taka dhukse naki dekhen to, na dhukle bolben ami abar check korbo"]
+      - [en, "Sent the money just now. Let me know once you see it in your balance."]
+      - [bn, "পেমেন্ট করেছি, আপনার ব্যালেন্সে এসেছে কিনা দেখে জানাবেন।"]
+
+  - id: support_question
+    hard: true
+    labels: []
+    templates:
+      - [bl, "ami vul kore onno number e taka pathiye felechi, ki korle ferot pabo?"]
+      - [bn, "আমার অ্যাকাউন্টে লগইন করতে পারছি না, পিন ভুলে গেছি। কীভাবে রিসেট করব?"]
+      - [en, "I sent money to a wrong number by mistake. How can I file a complaint from the app?"]
+      - [en, "How do I change my PIN? I think someone saw it when I was at the shop."]
+      - [bl, "amar phone hariye gese, wallet ta kivabe bondho korbo?"]
+      - [bn, "একজন ফোন করে ওটিপি চাইছিল, আমি দিইনি। এটা কোথায় জানাব?"]
+      - [en, "Someone called asking for my OTP and I refused. Where can I report this number?"]
+
+  - id: everyday_notices
+    labels: []
+    templates:
+      - [en, "Your A/C ***123 has been debited by BDT {amt} on purchase. Available balance BDT {amt}."]
+      - [en, "Your parcel is out for delivery today. The rider will call you from his own phone."]
+      - [bn, "আপনার পার্সেলটি আজ ডেলিভারি হবে। রাইডার আপনাকে ফোন করবে।"]
+      - [bl, "apnar parcel ta kal delivery hobe, bashay thakben"]
+      - [en, "Appointment confirmed with the doctor on Saturday at 6pm. Please arrive 15 minutes early."]
+      - [bn, "আপনার ডাক্তারের অ্যাপয়েন্টমেন্ট শনিবার সন্ধ্যা ৬টায়।"]
+      - [en, "Watch the highlights here {web}"]
+      - [bl, "ei video ta dekh {web} onek mojar"]
+
+  # --------------------------------- harmless text the model never trains on
+  - id: school_notice
+    held_out: true
+    labels: []
+    templates:
+      - [bn, "আগামীকাল বিদ্যালয় বন্ধ থাকবে। পরীক্ষার নতুন সময়সূচি পরে জানানো হবে।"]
+      - [en, "Parents meeting on Thursday at 11am. Monthly fee can be paid at the school office or through the bank."]
+      - [bl, "kal school bondho, porikkhar routine pore janano hobe"]
+      - [en, "Exam results are published on the notice board."]
+
+  - id: split_bill
+    held_out: true
+    hard: true
+    labels: []
+    templates:
+      - [bl, "kal ke restaurant e {amt} taka bill hoise, tor vag {fee} taka, somoy moto pathais"]
+      - [en, "Dinner was {amt} total, your share is {fee}. Send it whenever, my number is the same as always."]
+      - [bn, "গতকালের পিকনিকের চাঁদা {fee_bn} টাকা, সুবিধামতো আমাকে পাঠিয়ে দিও।"]
+      - [en, "I'll pay you back the {amt} taka on Friday when I get my salary."]
+
+  - id: official_notice
+    held_out: true
+    hard: true
+    labels: []
+    templates:
+      - [en, "Scheduled maintenance: {brand} services will be unavailable from 2am to 4am tonight. We never ask for your PIN."]
+      - [bn, "প্রিয় গ্রাহক, আপনার পিন পরিবর্তন সফল হয়েছে। আপনি এটি না করে থাকলে অ্যাপের হেল্পলাইনে যোগাযোগ করুন।"]
+      - [bl, "apnar {brand} app e notun device theke login hoyeche. apni na hole app theke pin change korun"]
+      - [en, "Your KYC information was updated successfully at our customer care centre. No further action is needed."]

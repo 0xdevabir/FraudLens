@@ -43,6 +43,12 @@ DISTRICT_COORDS: dict[str, tuple[float, float]] = {
 BORDER_KM = 30.0
 MIN_TRAVEL_SECONDS = 60.0
 MAX_KMH = 2000.0
+# The behaviour profile: where a wallet usually transacts from, and over which networks.
+# Nothing is said about a place or a network until the wallet has this much history.
+MIN_PLACE_HISTORY = 10
+MIN_NETWORK_HISTORY = 3
+# Mobile networks hand out many addresses; only the most used ones are remembered.
+MAX_NETWORKS = 32
 
 
 @lru_cache(maxsize=4096)
@@ -74,6 +80,8 @@ class Txn(NamedTuple):
     device_id: str
     channel: str
     district: str
+    # Address prefix the request came from; empty when the channel did not send one.
+    network: str = ""
 
 
 FEATURES: tuple[str, ...] = (
@@ -150,6 +158,10 @@ FEATURES: tuple[str, ...] = (
 # so it can score a wallet without reference to any one sender.
 RECIPIENT_FEATURES: tuple[str, ...] = tuple(f for f in FEATURES if f.startswith("r_"))
 
+# Facts about the sender's habits that the policy reads and the models do not: the
+# share of the wallet's earlier transactions made from this place, and over this network.
+BEHAVIOUR_FIELDS: tuple[str, ...] = ("s_place_share", "s_network_share")
+
 
 class WalletState:
     __slots__ = (
@@ -158,7 +170,7 @@ class WalletState:
         "recipients", "new_recipient_events", "senders", "n_reciprocated", "in_events",
         "n_in", "sum_in", "last_in_ts", "fund_ts", "fund_amount", "fund_agent",
         "dwell", "n_fast_exit", "sum_cashout", "agents_used", "flagged_neighbors",
-        "flagged_hops",
+        "flagged_hops", "places", "networks",
     )  # fmt: skip
 
     def __init__(self, created_ts: float, home: str) -> None:
@@ -192,6 +204,8 @@ class WalletState:
         self.agents_used: dict[str, int] = {}
         self.flagged_neighbors = 0
         self.flagged_hops = NO_LINK  # transfers between this wallet and confirmed fraud
+        self.places: dict[str, int] = {}  # district -> transactions initiated there
+        self.networks: dict[str, int] = {}  # network -> transactions initiated over it
 
 
 class AgentState:
@@ -485,6 +499,28 @@ class FeatureEngine:
             float(r.flagged_hops) if r.flagged_hops <= MAX_HOPS else NAN,
         ]
 
+    def behaviour(self, t: Txn) -> list[float]:
+        """How usual this place and this network are for the sender (BEHAVIOUR_FIELDS order).
+
+        Like `features`, it sees only what happened before `t`. A value is missing
+        until the wallet has enough history to have habits, and the network share is
+        also missing when the transaction carries no network.
+        """
+        s = self.wallets.get(t.sender_id)
+        if s is None:
+            return [NAN, NAN]
+        place = network = NAN
+        if s.n_init >= MIN_PLACE_HISTORY:
+            here = t.district
+            # Home, office and campus are all usual; districts that share a border are one place.
+            seen = sum(n for d, n in s.places.items() if d == here or travel_km(d, here) == 0.0)
+            place = seen / s.n_init
+        if t.network:
+            total = sum(s.networks.values())
+            if total >= MIN_NETWORK_HISTORY:
+                network = s.networks.get(t.network, 0) / total
+        return [place, network]
+
     # ----------------------------------------------------------------- update
 
     def update(self, t: Txn) -> None:
@@ -512,6 +548,12 @@ class FeatureEngine:
         s.hour_hist[hour] += 1
         s.last_ts = ts
         s.last_district = t.district
+        s.places[t.district] = s.places.get(t.district, 0) + 1
+        if t.network:
+            networks = s.networks
+            if t.network not in networks and len(networks) >= MAX_NETWORKS:
+                del networks[min(networks, key=networks.__getitem__)]
+            networks[t.network] = networks.get(t.network, 0) + 1
         if t.channel == "app" and t.device_id:
             device = t.device_id
             if device not in s.devices:
@@ -594,4 +636,8 @@ class FeatureEngine:
             engine = pickle.load(fh)  # noqa: S301
         if not isinstance(engine, FeatureEngine):
             raise TypeError(f"{path} is not a FeatureEngine snapshot")
+        wallet = next(iter(engine.wallets.values()), None)
+        if wallet is not None and not hasattr(wallet, "places"):
+            # Starting with empty habits would make served decisions differ from evaluated ones.
+            raise TypeError(f"{path} predates the behaviour profile; rebuild it (`make features`)")
         return engine

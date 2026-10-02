@@ -35,6 +35,10 @@
   --color-info: #96eefb;
   --color-rule: #b9a5ff;
 
+  /* upay's own yellow and blue, measured from its app icon. Only the phone demo uses them. */
+  --color-upay-yellow: #ffd600;
+  --color-upay-blue: #0054a5;
+
   /* The iOS sheet curve: fast out of the gate, long soft landing. */
   --ease-ios: cubic-bezier(0.32, 0.72, 0, 1);
   --animate-rise: rise 0.45s var(--ease-ios) backwards;

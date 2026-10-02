@@ -1,0 +1,111 @@
+"""The scam-message classifier: is this text a scam, and of which kinds.
+
+One logistic regression per output (scam or not, then one per category) over two
+kinds of feature: character n-grams, and cues (`cues.py`: what the message does,
+such as asking for a code or wanting a fee first). Character n-grams are what
+make it work across Bangla script, Bangla written in Latin letters with no fixed
+spelling, and English, without a tokenizer or a language detector for any of
+them. The cues are what carry it to a scam script it was never trained on.
+
+Numbers and links are reduced to their shape before the model sees them: it
+learns that a message carries an eleven-digit number or a link, never which one.
+What a link points to is the link check's job (`links.py`).
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import unicodedata
+from dataclasses import dataclass
+from pathlib import Path
+
+import joblib
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.multiclass import OneVsRestClassifier
+from sklearn.pipeline import FeatureUnion, Pipeline
+
+from .cues import Cue, CueFeatures, matched
+from .links import URL
+
+MODEL_FILE = "text_model.joblib"
+MANIFEST_FILE = "manifest.json"
+SCAM = "scam"
+MAX_CHARS = 2000  # the longest text the API accepts
+
+_BN_DIGITS = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+_DIGIT = re.compile(r"\d")
+_SPACE = re.compile(r"\s+")
+
+
+def normalise(text: str) -> str:
+    """Lower-case, one form per character, digits as `0`, links as one token."""
+    text = unicodedata.normalize("NFKC", text[:MAX_CHARS]).translate(_BN_DIGITS).lower()
+    text = URL.sub(" urltoken ", text)
+    return _SPACE.sub(" ", _DIGIT.sub("0", text)).strip()
+
+
+def build_pipeline(seed: int = 7) -> Pipeline:
+    features = FeatureUnion(
+        [
+            (
+                "chars",
+                TfidfVectorizer(
+                    analyzer="char_wb", ngram_range=(2, 5), min_df=2, sublinear_tf=True,
+                    max_features=60_000, lowercase=False,
+                ),
+            ),
+            ("cues", CueFeatures()),
+        ],
+        # A message's n-grams have length 1 together; without this a handful of
+        # cues would outweigh them and the wording would stop counting.
+        transformer_weights={"chars": 1.0, "cues": 0.5},
+    )  # fmt: skip
+    model = OneVsRestClassifier(
+        LogisticRegression(C=2.0, max_iter=3000, class_weight="balanced", random_state=seed)
+    )
+    return Pipeline([("features", features), ("model", model)])
+
+
+@dataclass
+class TextModel:
+    version: str
+    pipeline: Pipeline
+    outputs: list[str]  # "scam", then the category ids
+    thresholds: dict[str, float]  # caution, high (on the scam score), category
+
+    @property
+    def categories(self) -> list[str]:
+        return self.outputs[1:]
+
+    def score(self, texts: list[str]) -> np.ndarray:
+        """One row per text, one column per output, each a probability."""
+        return self.pipeline.predict_proba([normalise(t) for t in texts])
+
+    def level(self, scam: float) -> str:
+        if scam >= self.thresholds["high"]:
+            return "high"
+        return "caution" if scam >= self.thresholds["caution"] else "none"
+
+    @staticmethod
+    def signals(text: str) -> list[Cue]:
+        """What the message does that a scam does: the cues that matched, minus
+        the ones that point the other way. Shown as the reason; nothing is generated."""
+        return [cue for cue in matched(normalise(text)) if not cue.benign]
+
+    # -------------------------------------------------------------- storage
+
+    def save(self, directory: Path, **manifest) -> None:
+        directory.mkdir(parents=True, exist_ok=True)
+        joblib.dump(self.pipeline, directory / MODEL_FILE, compress=3)
+        body = {"version": self.version, "outputs": self.outputs, "thresholds": self.thresholds}
+        (directory / MANIFEST_FILE).write_text(json.dumps(body | manifest, indent=2))
+
+    @classmethod
+    def load(cls, directory: Path) -> TextModel:
+        manifest = json.loads((directory / MANIFEST_FILE).read_text())
+        # Our own build artifact; never load a model file from an untrusted source.
+        pipeline = joblib.load(directory / MODEL_FILE)
+        return cls(manifest["version"], pipeline, manifest["outputs"], manifest["thresholds"])

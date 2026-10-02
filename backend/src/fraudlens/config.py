@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # Model and policy the API serves. None means the promoted (CURRENT) model version.
     models_root: Path | None = None
     model_version: str | None = None
-    policy_version: str = "v1"
+    policy_version: str = "v2"
     # A challenger scored next to the served model on every decision. It is recorded
     # for comparison and never decides anything.
     shadow_model_version: str | None = None

@@ -3,7 +3,8 @@
 uv run python -m fraudlens.features.build            # backend/data/full
 uv run python -m fraudlens.features.build --small    # backend/data/small
 
-Writes `features.parquet` (one row per scored transaction: keys, labels, features)
+Writes `features.parquet` (one row per scored transaction: keys, labels, features,
+and the behaviour facts the decision policy reads)
 and an engine snapshot at the end of each split, so the API can start warm from
 the state as of the end of validation and score the test period live.
 """
@@ -18,7 +19,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import settings
-from .engine import FEATURES, SCORED_TYPES, FeatureEngine, Txn
+from .engine import BEHAVIOUR_FIELDS, FEATURES, SCORED_TYPES, FeatureEngine, Txn
 
 # Carried next to the features for training and evaluation. Never model inputs.
 LABEL_COLUMNS = (
@@ -34,6 +35,8 @@ def epoch_seconds(ts: pd.Series) -> np.ndarray:
 
 def iter_txns(df: pd.DataFrame):
     """Transaction rows as engine inputs. Label columns are deliberately not passed."""
+    # The synthetic history carries no network; a dataset that does has a `network` column.
+    network = df["network"].tolist() if "network" in df.columns else [""] * len(df)
     return map(
         Txn._make,
         zip(
@@ -49,6 +52,7 @@ def iter_txns(df: pd.DataFrame):
             df["device_id"].tolist(),
             df["channel"].tolist(),
             df["district"].tolist(),
+            network,
             strict=True,
         ),
     )
@@ -74,12 +78,15 @@ class Replayer:
             zip(epoch_seconds(flags["flagged_at"]).tolist(), flags["wallet_id"], strict=True)
         )
         self._next_flag = 0
+        # Behaviour facts (BEHAVIOUR_FIELDS) of the rows scored by the last `run`.
+        self.behaviour = np.empty((0, len(BEHAVIOUR_FIELDS)))
 
     def run(self, df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
         """Replay `df`. Returns (positions of scored rows in df, their feature matrix)."""
         engine, flags = self.engine, self._flags
         scored = df["type"].isin(SCORED_TYPES).to_numpy()
         out = np.empty((int(scored.sum()), len(FEATURES)))
+        behaviour = np.empty((len(out), len(BEHAVIOUR_FIELDS)))
         i, j, n_flags = 0, self._next_flag, len(flags)
         for t, is_scored in zip(iter_txns(df), scored.tolist(), strict=True):
             # A flag becomes visible only to transactions at or after the time it was raised.
@@ -88,9 +95,11 @@ class Replayer:
                 j += 1
             if is_scored:
                 out[i] = engine.features(t)
+                behaviour[i] = engine.behaviour(t)
                 i += 1
             engine.update(t)
         self._next_flag = j
+        self.behaviour = behaviour
         return np.flatnonzero(scored), out
 
 
@@ -104,7 +113,9 @@ def build_features(
         part = txns[txns["split"] == split]
         pos, x = replayer.run(part)
         frame = part.iloc[pos][list(LABEL_COLUMNS)].reset_index(drop=True)
-        parts.append(pd.concat([frame, pd.DataFrame(x, columns=list(FEATURES))], axis=1))
+        columns = [*FEATURES, *BEHAVIOUR_FIELDS]
+        values = np.hstack([x, replayer.behaviour])
+        parts.append(pd.concat([frame, pd.DataFrame(values, columns=columns)], axis=1))
         if snapshot_dir is not None:
             replayer.engine.save(snapshot_dir / f"engine_after_{split}.pkl")
     return pd.concat(parts, ignore_index=True)

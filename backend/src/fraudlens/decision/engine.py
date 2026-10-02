@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 
 import numpy as np
 
-from ..features import FEATURES, FeatureEngine, Txn
+from ..features import BEHAVIOUR_FIELDS, FEATURES, FeatureEngine, Txn
 from ..models.bundle import ModelBundle, logit
 from .narrative import mask_id, template
 from .policy import ALERT_TIERS, RANK, Policy, apply_policy, evaluate
@@ -46,10 +46,12 @@ def display_score(risk: float, thresholds: Mapping[str, float]) -> int:
 
 
 def context_from_engine(engine: FeatureEngine, txn: Txn) -> dict[str, float]:
-    """Facts the policy needs that are not model features: confirmed-fraud flags."""
+    """Facts the policy needs that are not model features: confirmed-fraud flags, and
+    how usual this place and this network are for the sender."""
     return {
         "sender_flagged": float(txn.sender_id in engine.flagged),
         "recipient_flagged": float(txn.receiver_id in engine.flagged),
+        **dict(zip(BEHAVIOUR_FIELDS, engine.behaviour(txn), strict=True)),
     }
 
 
@@ -204,7 +206,8 @@ class DecisionEngine:
     # ------------------------------------------------------------- internals
 
     def _scenario(self, txn_type: str, fired, fields: Mapping[str, float]) -> str:
-        """Which customer message fits: a scam on the customer, or someone else in their wallet."""
+        """Which customer message fits: a scam on the customer, someone else in their
+        wallet, or the wallet being used from somewhere it normally is not."""
         for rule in fired:
             if rule.scenario:
                 return rule.scenario
