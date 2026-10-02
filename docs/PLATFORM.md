@@ -67,7 +67,7 @@ served at `/docs` outside production.
 
 | Area | Endpoint | Role |
 | --- | --- | --- |
-| Auth | `POST /auth/login`, `GET /auth/me` | anyone / signed in |
+| Auth | `POST /auth/login`, `GET /auth/me`, `POST /auth/logout` | anyone / signed in / signed in |
 | Scoring | `POST /score`, `POST /events` (up to 500 per call, queued), `POST /wallet-flags` | service |
 | | `POST /score/what-if` | service, analyst, supervisor |
 | Alerts | `GET /alerts`, `GET /decisions/{txn_id}`, `GET /decisions/{txn_id}/narrative?lang=en\|bn`, `GET /stream/alerts` (server-sent events) | analyst, supervisor |
@@ -151,7 +151,8 @@ and each request still needs its own approval by a second person.
   period to be over (`409 cooling_off` with `Retry-After` until then).
 - **Reporting a scam.** Stored and attached to a case for a person to read. A
   report on its own flags nobody and releases nothing; its text is never used as
-  an instruction to anything. Limited to 5 an hour per reporter.
+  an instruction to anything. Limited to 5 an hour per reporter, on the demo
+  endpoint as well.
 
 ## 7. Security
 
@@ -159,8 +160,12 @@ and each request still needs its own approval by a second person.
   for a wrong password and an unknown user. Five failures in five minutes lock
   the username from that address (`429`, `Retry-After`), and each address is
   limited overall.
-- **Tokens** are signed JWTs (HS256, 8 hours). Every request re-reads the user:
-  disabling an account or changing its role takes effect at once.
+- **Tokens** are signed JWTs (HS256, 8 hours), each with its own id. Every
+  request re-reads the user: disabling an account or changing its role takes
+  effect at once. Signing out (`POST /auth/logout`) revokes that one token in
+  Redis until it would have expired; the user's other sessions are untouched.
+  If Redis cannot be reached the check fails closed (`503`), it does not let the
+  token through.
 - **Roles**: `analyst`, `supervisor`, `admin`, `service`. The admin role can read
   the audit log and the metrics but not customer data; the service account can
   score and cannot read alerts or cases.
@@ -179,6 +184,14 @@ and each request still needs its own approval by a second person.
   match a fixed pattern; bodies over 1 MB are refused; all SQL is parameterised.
 - **Headers.** `nosniff`, `X-Frame-Options: DENY`, `no-store`, `no-referrer`,
   HSTS in production. CORS allows only the configured origins and no cookies.
+- **Console content security policy.** `frontend/proxy.ts` sends a policy with a
+  fresh nonce on every page: scripts run only with that nonce, connections go
+  only to the console's own origin and the configured API, the page cannot be
+  framed, and plugins and foreign form targets are off. Camera, microphone,
+  location, payment and USB are disabled by `Permissions-Policy`. Inline
+  `style` attributes are still allowed (the charts set them), and the token is
+  held in `sessionStorage`, so the policy is what stands between an injected
+  script and the token.
 - **Production guard.** With `FRAUDLENS_ENVIRONMENT=production` the API refuses to
   start with the development signing secret, and the interactive docs are off.
 - **Language model.** Optional, off by default, and only for the wording of a case
@@ -236,8 +249,11 @@ bit-identical features to the one that lived through it.
 
 ## 11. Measured
 
-One run on a laptop (Apple silicon), API with one process, Postgres and Redis in
-Docker on the same machine. Reports are written to `backend/artifacts/reports/`.
+A laptop (Apple silicon), API with one process, Postgres and Redis in Docker on
+the same machine. Reports are written to `backend/artifacts/reports/`. The
+verification table, the latency table and the stream rate are from the run of
+model v4. The concurrency, restart and slow-endpoint figures are from the
+earlier run of the previous model and were not repeated.
 
 **The served decisions are the evaluated ones.** The whole test period (25 days,
 304,734 transactions and 133 fraud flags) was replayed into the running service:
@@ -256,23 +272,33 @@ days 95–118 through the event stream, day 119 one HTTP request at a time.
 So the numbers in MODEL_CARD and DECISION_POLICY describe what this service
 actually does, not a separate offline code path. (136,180 includes the 1,635
 transactions with an ambiguous role that the model report leaves out of its
-metrics.) The replay produced 1,094 holds grouped into 265 cases.
+metrics.) The replay produced 1,065 holds.
 
 **Latency**, day 119 over HTTP, sequential, one connection (12,297 transactions,
 5,152 of them scored):
 
 | Milliseconds | p50 | p95 | p99 |
 | --- | --- | --- | --- |
-| Features + models + policy + reasons, scored transactions | 3.8 | 4.9 | 7.1 |
-| Full round trip, scored transactions (incl. database commit) | 10.6 | 15.1 | 23.3 |
-| Full round trip, all transactions | 6.8 | 13.1 | 19.2 |
+| Features + models + policy + reasons, scored transactions | 8.1 | 13.0 | 21.7 |
+| Full round trip, scored transactions (incl. database commit) | 26.9 | 47.9 | 86.1 |
+| Full round trip, all transactions | 18.1 | 39.5 | 73.1 |
 
-**Throughput.** The stream worker handled about 380 events a second (roughly 190
-scored decisions a second), and the full replay of 292,567 events took about
-thirteen minutes. Eight concurrent what-if callers got 194 answers a second with
-a p95 of 51 ms: scoring is serialised in one process, so concurrency adds waiting,
-not capacity (§10). For scale: the simulated system averages 0.14 transactions a
-second, and 190 scored decisions a second is about 16 million a day.
+These are slower than the previous model's run (3.8 / 4.9 / 7.1 ms for the first
+row, 10.6 / 15.1 / 23.3 for the second), and the two runs are **not comparable**:
+this one shared the laptop with a second API process, two consoles and other
+work (load average 6 to 9 on 10 cores), and the database round trip, which the
+model change does not touch, slowed by the same factor. What the model change
+itself costs is the offline figure: one decision takes 3.1 ms at the median
+against 2.4 ms before (DECISION_POLICY §6). A run of v4 on a quiet machine has
+not been made, so the table above is the only served measurement of v4 and
+should be read as an upper bound.
+
+**Throughput.** In the v4 run the stream worker handled the full replay of
+292,567 events in just under six minutes, about 840 events a second. In the
+earlier run eight concurrent what-if callers got 194 answers a second with a p95
+of 51 ms: scoring is serialised in one process, so concurrency adds waiting, not
+capacity (§10). For scale: the simulated system averages 0.14 transactions a
+second.
 
 **Restart.** With all 304,867 events since the snapshot to re-apply, the service
 is ready 8–10 seconds after start. The rebuilt state was compared with the
@@ -359,7 +385,7 @@ make verify      # served decisions against the offline evaluation
 make review      # close the older cases with the simulation's ground truth (demo scaffolding)
 make retrain     # a challenger trained on those verdicts
 make console     # the console on http://localhost:3100
-make test        # 175 tests; the platform and MLOps ones run against real Postgres and Redis
+make test        # 179 tests; the platform and MLOps ones run against real Postgres and Redis
 ```
 
 The demo accounts (`analyst1`, `analyst2`, `supervisor1`, `supervisor2`, `admin`,

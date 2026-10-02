@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { connection } from "next/server";
 
 import "./globals.css";
 
@@ -13,7 +14,9 @@ export const viewport: Viewport = {
   colorScheme: "dark",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Rendered per request, so every script tag carries the nonce that proxy.ts put in the CSP.
+  await connection();
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full font-sans">{children}</body>

@@ -30,7 +30,7 @@ normal payment. Three consequences run through the whole system:
 ┌────────────┐   ┌───────────┐   ┌──────────┐   ┌─────────┐   ┌──────────────────────────┐
 │ simulator  │──▶│ features  │──▶│ models   │──▶│ policy  │──▶│ Scorer                   │
 │ 120 days   │   │ engine    │   │ registry │   │ report  │   │ same feature engine,     │
-│ 1.45M txns │   │ 57 cols   │   │ v1, v2…  │   │ insights│   │ same bundle, same policy │
+│ 1.45M txns │   │ 61 cols   │   │ v1, v2…  │   │ insights│   │ same bundle, same policy │
 └────────────┘   └───────────┘   └──────────┘   └─────────┘   └────────────┬─────────────┘
                                       ▲                                    │
                                       │ verdicts as labels                 ▼
@@ -100,7 +100,8 @@ output is rejected if it contains a number or identifier that is not in the
 evidence, and the deterministic template is used instead. It is off by default.
 
 **State in memory, log in the database.** The feature state lives in the scorer
-process for speed (about 4 ms to features, models, policy and reasons). Every
+process for speed (about 3 ms for features, models, policy and reasons when
+measured in process; served figures are in PLATFORM §11). Every
 event that entered the state is stored with its position, so a restart rebuilds
 the same state exactly. The cost is one scorer process (PLATFORM §10).
 

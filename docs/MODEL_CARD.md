@@ -1,15 +1,18 @@
-# Model card — FraudLens risk models, version v2
+# Model card — FraudLens risk models, version v4
 
-Every number below is read from `backend/artifacts/models/v2/report.json`, which
-`make train` writes. Nothing here is hand-entered or rounded up. The data is
-synthetic ([DATA_ASSUMPTIONS.md](DATA_ASSUMPTIONS.md)); absolute values will not
-transfer to real traffic.
+Every number below is read from `backend/artifacts/models/v4/report.json`, which
+`make train` writes, except where §13 says otherwise. Nothing here is
+hand-entered or rounded up. The data is synthetic
+([DATA_ASSUMPTIONS.md](DATA_ASSUMPTIONS.md)); absolute values will not transfer
+to real traffic.
 
 Version numbers count registrations in one registry. This card was written on a
-machine where the first registered version was the model trained on the first
-simulator (§11), so the model described here is `v2` there. On a fresh checkout
-(`make demo`) the same model, with the same numbers, is registered as `v1` and
-the challenger trained on analyst verdicts (§13) as `v2`.
+machine whose registry holds `v1` (trained on the first simulator, §11), `v2`
+(the previous served model, 57 features), `v3` (a challenger trained on analyst
+verdicts, §13) and `v4`, the model described here. On a fresh checkout
+(`make demo`) the same model, with the same numbers, is registered as `v1`.
+Versions older than `v4` were trained on a shorter feature list and the service
+refuses to load them with the current code (§11).
 
 ## 1. What the models are for
 
@@ -24,8 +27,8 @@ or a wallet freeze is always reviewed by a person.
 
 | Model | Type | Input | Output |
 | --- | --- | --- | --- |
-| Transaction risk | LightGBM, 304 trees | all 57 features | probability that a send-money or cash-out is part of a fraud chain |
-| Mule wallet | LightGBM, 56 trees | 20 recipient features only | probability that the receiving wallet is a mule; usable without any sender |
+| Transaction risk | LightGBM, 667 trees | all 61 features | probability that a send-money or cash-out is part of a fraud chain |
+| Mule wallet | LightGBM, 56 trees | 21 recipient features only | probability that the receiving wallet is a mule; usable without any sender |
 | Behaviour anomaly | Isolation Forest | 15 sender-behaviour features | how unusual this is for the sender (unsupervised, needs no labels) |
 | Fusion | logistic regression over the three scores | — | fitted and compared, **not served** (§4) |
 | Calibration | Platt scaling | served score | probability; monotone, so ranking is unchanged |
@@ -56,31 +59,31 @@ Splits are by time. Nothing is shuffled across time.
 
 | | PR-AUC | ROC-AUC | Base rate |
 | --- | --- | --- | --- |
-| Any fraud-chain transaction | 0.823 | 0.992 | 1.20% |
-| Victim transfers only | 0.795 | 0.992 | 0.52% |
+| Any fraud-chain transaction | 0.834 | 0.986 | 1.20% |
+| Victim transfers only | 0.797 | 0.986 | 0.52% |
 
-On val_b, where all typologies were seen in training, PR-AUC is 0.988. The drop
-to 0.823 on test is almost entirely the unseen typology (§6).
+On val_b, where all typologies were seen in training, PR-AUC is 0.990. The drop
+to 0.834 on test is almost entirely the unseen typology (§6).
 
 ## 4. Does each part earn its place? (ablation, top 1% of transactions alerted)
 
 | Score | PR-AUC | Precision | Loss transfers caught | Taka stopped | Taka incl. exit holds | Held-out typology caught |
 | --- | --- | --- | --- | --- | --- | --- |
-| Hand-written rules baseline | 0.076 | 11.8% | 13.0% | 34.6% | 50.2% | 0.0% |
-| Anomaly model only | 0.175 | 27.4% | 19.9% | 33.1% | 58.3% | 0.9% |
-| Mule model only | 0.373 | 44.8% | 72.5% | 77.1% | 78.9% | **61.7%** |
-| **Transaction model (served)** | **0.823** | 82.0% | **74.2%** | **78.0%** | 89.3% | 46.6% |
-| Fusion of the three | 0.821 | 82.5% | 73.4% | 77.3% | 89.7% | 44.8% |
+| Hand-written rules baseline | 0.0764 | 11.8% | 13.0% | 34.6% | 50.2% | 0.0% |
+| Anomaly model only | 0.1748 | 27.4% | 19.9% | 33.1% | 58.3% | 0.9% |
+| Mule model only | 0.3750 | 44.5% | 70.8% | 75.0% | 78.7% | **58.3%** |
+| **Transaction model (served)** | 0.8343 | **84.8%** | **73.8%** | **78.1%** | **90.1%** | 45.7% |
+| Fusion of the three | 0.8345 | 84.3% | 73.1% | 77.6% | 89.7% | 44.1% |
 
 Findings, stated as they are:
 
-- **Fusion did not win.** On val_b the cross-validated fusion scored 0.9873
-  PR-AUC against 0.9884 for the transaction model alone. The rule set before
+- **Fusion did not win.** On val_b the cross-validated fusion scored 0.9891
+  PR-AUC against 0.9896 for the transaction model alone. The rule set before
   training was "serve fusion only if it gains at least 0.002"; it did not, so the
   single model is served. On test the two are within noise of each other.
 - **The mule model is what generalises.** Using recipient features alone, it
-  catches 61.7% of the unseen typology at this budget, more than any other score,
-  and nearly matches the full model on loss transfers caught. It is kept as a
+  catches 58.3% of the unseen typology at this budget, more than any other score,
+  and comes close to the full model on loss transfers caught. It is kept as a
   separate output: it scores a wallet before any victim pays (§7), drives ring
   detection, and gives the decision engine an independent signal.
 - The anomaly model is weak alone. It is kept as an explanation signal
@@ -96,9 +99,9 @@ target, capped by an alert budget. They were not adjusted on test.
 
 | Tier | Target on val_b | Alerts/day | False alerts/day | Precision | Scams caught | Loss transfers caught | Taka stopped | Taka incl. exit holds |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| hold | ≥90% precise, ≤1.0% of traffic | 40.8 | 2.8 | 93.1% | 74.2% | 67.3% | 73.4% (৳2.60M) | 80.8% |
-| step-up | ≥75%, ≤2.0% | 51.8 | 8.5 | 83.6% | 80.3% | 73.2% | 77.5% (৳2.75M) | 88.8% |
-| warn | ≥50%, ≤4.0% | 82.8 | 31.0 | 62.5% | 87.8% | 81.7% | 84.9% (৳3.01M) | 96.7% |
+| hold | ≥90% precise, ≤1.0% of traffic | 41.2 | 2.3 | 94.5% | 73.6% | 66.5% | 72.8% (৳2.59M) | 83.1% |
+| step-up | ≥75%, ≤2.0% | 54.0 | 8.4 | 84.5% | 80.0% | 73.8% | 78.1% (৳2.77M) | 90.1% |
+| warn | ≥50%, ≤4.0% | 80.2 | 27.8 | 65.3% | 86.9% | 81.4% | 85.1% (৳3.02M) | 96.6% |
 
 Tiers are cumulative (warn includes step-up and hold). Traffic is about 5,400
 scored transactions per day; ৳3,549,860 was at risk in the 25 test days.
@@ -115,12 +118,12 @@ scored transactions per day; ৳3,549,860 was at risk in the 25 test days.
 | --- | --- | --- | --- | --- | --- | --- |
 | account_takeover | yes | 62 | 100% | 100% | 100% | 100% |
 | wrong_send | yes | 48 | 100% | 100% | 100% | 100% |
-| lottery_fee | yes | 67 | 98.5% | 97.8% | 99.0% | 99.6% |
+| lottery_fee | yes | 67 | 98.5% | 97.1% | 98.6% | 99.6% |
 | impersonation | yes | 31 | 96.8% | 97.9% | 99.7% | 100.0% |
-| **investment_scam** | **no** | 152 | **72.4%** | **62.0%** | **65.5%** | **92.4%** |
+| **investment_scam** | **no** | 152 | **70.4%** | **61.7%** | **66.1%** | **92.3%** |
 
-At the stricter tiers the held-out typology falls further: 55.3% of scams at
-step-up and 40.8% at hold. This is the honest measure of how the system handles
+At the stricter tiers the held-out typology falls further: 54.6% of scams at
+step-up and 39.5% at hold. This is the honest measure of how the system handles
 a scam it was never shown: it catches most cases at the warning level, mainly
 through recipient-side signals, and recovers most of the rest at cash-out, but it
 is far from the near-perfect numbers on known typologies. Those near-perfect
@@ -134,13 +137,13 @@ a wallet is alerted when its mule score reaches the threshold set on val_b).
 
 | | |
 | --- | --- |
-| PR-AUC / ROC-AUC | 0.720 / 0.935 |
-| Wallets alerted | 133, of which 70.7% are mules |
+| PR-AUC / ROC-AUC | 0.722 / 0.937 |
+| Wallets alerted | 134, of which 70.1% are mules |
 | Mules detected | 94 of 145 (64.8%) |
-| Detected **before any victim had paid them** | 68 |
+| Detected **before any victim had paid them** | 70 |
 | Median victim transfers before detection | 0 |
 | Detected before the victim's report was confirmed | 82 of the 119 later reported |
-| Median lead over the report | 39.3 hours |
+| Median lead over the report | 40.2 hours |
 
 ## 8. Agents and rings
 
@@ -157,8 +160,8 @@ The data contains honest agents that look odd (transit hubs, onboarding agents),
 but this is still an easy setting: 2 of 13 colluding agents are missed and real
 agent abuse is subtler than the simulated kind.
 
-**Rings.** 33 rings covering 333 wallets; 93.99% of ring members are true cell
-wallets; 30 of 33 rings map to a single cell; 313 of all 507 cell wallets are
+**Rings.** 34 rings covering 331 wallets; 94.26% of ring members are true cell
+wallets; 32 of 34 rings map to a single cell; 312 of all 507 cell wallets are
 covered. Wallets pulled in only by a shared handset ("linked only") include mules
 that had not been used yet. Wallets that had their own handset before appearing
 on a ring's handset are listed as probable takeover victims, not members.
@@ -167,15 +170,15 @@ on a ring's handset are listed as probable takeover victims, not members.
 
 | | |
 | --- | --- |
-| Brier score | 0.00578 |
+| Brier score | 0.00568 |
 | Mean predicted risk vs observed fraud rate | 0.62% vs 1.20% |
-| Scores above 0.5 (808 rows) | predicted 95.9%, observed 98.6% |
-| Top decile | predicted 6.2%, observed 11.8% |
+| Scores above 0.5 (809 rows) | predicted 96.2%, observed 99.0% |
+| Top decile | predicted 6.2%, observed 11.7% |
 
 The score **under-predicts in the test period** by about half. The cause is the
 unseen typology raising the fraud rate after calibration was fitted. High scores
 are reliable; mid-range scores are not well calibrated, and scores are bimodal
-(most fraud is near 1, the hold threshold sits at 0.052). The risk score is
+(most fraud is near 1, the hold threshold sits at 0.050). The risk score is
 therefore used as a **ranking with tier thresholds**, and is not shown to
 analysts or customers as a literal probability.
 
@@ -183,16 +186,20 @@ analysts or customers as a literal probability.
 
 Share of total gain:
 
-- **Transaction model:** recipient's fast-exit share 24.7%, sender's device age
-  15.1%, time since sender last received money 13.5%, recipient wallet age 10.0%,
-  agent's cash-out count 7.2%, agent's fast-exit share 4.2%, away from home 3.1%.
-- **Mule model:** fast-exit share 55.1%, incoming transfers per day 13.0%, wallet
-  age 11.9%, number of recipients 3.6%, incoming value in 24h 3.5%.
+- **Transaction model:** recipient's fast-exit share 24.0%, sender's wallet age
+  23.6%, time since sender last received money 11.4%, recipient wallet age 9.4%,
+  time since the sender's wallet was last funded 4.7%, away from home 3.6%,
+  sender's device age 3.4%, agent's fast-exit share 3.3%.
+- **Mule model:** fast-exit share 56.2%, wallet age 12.1%, incoming transfers per
+  day 9.7%, cash-out share 3.7%, incoming value in 24h 3.3%.
+- **The four features added in v4 are minor inputs.** Hops to a flagged wallet
+  carries 0.7% of the mule model's gain; none of the four is among the
+  transaction model's fifteen largest (each below 0.6%). See §11.
 
 Per-alert reasons come from exact SHAP contributions of these models (tested to
 sum to the model output), not from a separate explanation model.
 
-## 11. What changed from v1, and what that means for the test set
+## 11. What changed between versions, and what that means for the test set
 
 v1 looked better than it was. Two device features carried 73% of its gain because
 in the first simulator only scammers shared handsets; it caught 0% of the held-out
@@ -214,8 +221,41 @@ Three choices were made after seeing v1's test results, so the test period is
 
 None of these was tuned to a test metric, v2's thresholds and model selection
 were fixed on val_b before v2's test evaluation, and v2 was evaluated on test
-once. A stricter protocol would evaluate on a world generated with a seed never
-used during development (`python -m fraudlens.simulator.generate --seed N --out
+once.
+
+**v4 adds four features and is a fourth look at the same test period.** The
+feature list grew from 57 to 61: speed implied by the sender's last two
+locations (impossible travel), hops from the sender and from the recipient to
+the nearest confirmed-fraud wallet (up to three), and the number of contacts
+the two wallets share. They were added to cover the feature specification, not
+picked by a test metric; training, thresholds and model selection used the same
+procedure and v4 was evaluated on test once. Against v2:
+
+| Test period | v2 | v4 |
+| --- | --- | --- |
+| PR-AUC, any fraud-chain transaction | 0.823 | 0.834 |
+| Precision at the 1% budget | 82.0% | 84.8% |
+| Warn tier: alerts/day | 82.8 | 80.2 |
+| Warn tier: precision | 62.5% | 65.3% |
+| Warn tier: scams caught | 87.8% | 86.9% |
+| Warn tier: taka incl. exit holds | 96.7% | 96.6% |
+| Held-out typology, scams caught at warn | 72.4% | 70.4% |
+| Legitimate payments interrupted (§13) | 0.59% | 0.53% |
+
+So v4 is **a little more precise and a little less sensitive**: fewer false
+alerts for about one percentage point of scams caught, and it is slightly
+worse, not better, on the scam type it never saw. The new features account for
+little of this (§10); the transaction model also stopped later (667 trees
+against 304), and differences of this size are within what a different seed
+would produce. Nothing here supports a claim that v4 is clearly the better
+model, only that it is not worse and uses the full feature specification.
+
+Older versions cannot be served by the current code: a bundle whose feature
+list differs from the engine's is rejected at load, so rolling back to v2 means
+checking out the code that built it.
+
+A stricter protocol would evaluate on a world generated with a seed never used
+during development (`python -m fraudlens.simulator.generate --seed N --out
 DIR`, then features and `train --data DIR --no-promote`); that confirmation run
 has not been done yet.
 
@@ -253,28 +293,28 @@ after the test period was replayed through it. The console shows all of them.
 ### Who pays for false alarms
 
 False-alert rate: the share of a group's **legitimate** scored payments that were
-interrupted (warn or above). Overall it is 0.59%, and 0.05% are held. Groups under
+interrupted (warn or above). Overall it is 0.53%, and 0.04% are held. Groups under
 200 rows are not reported.
 
 | By the customer sending | False-alert rate | Times the overall rate |
 | --- | --- | --- |
-| Account under 30 days old | 3.39% | 5.8 |
-| Account 30–179 days | 0.48% | 0.8 |
-| Account 1 year or more | 0.51% | 0.9 |
-| Rural / urban | 0.58% / 0.59% | 1.0 / 1.0 |
-| App / USSD | 0.62% / 0.51% | 1.1 / 0.9 |
-| Balance under ৳1,000 / ৳10,000 or more | 0.30% / 0.69% | 0.5 / 1.2 |
-| Region, highest (Sylhet) and lowest (Barishal) | 0.91% / 0.22% | 1.6 / 0.4 |
+| Account under 30 days old | 3.17% | 6.0 |
+| Account 30–179 days | 0.42% | 0.8 |
+| Account 1 year or more | 0.45% | 0.9 |
+| Rural / urban | 0.52% / 0.54% | 1.0 / 1.0 |
+| App / USSD | 0.58% / 0.41% | 1.1 / 0.8 |
+| Balance under ৳1,000 / ৳10,000 or more | 0.27% / 0.70% | 0.5 / 1.3 |
+| Region, highest (Sylhet) and lowest (Barishal) | 0.75% / 0.22% | 1.4 / 0.4 |
 
 | By the wallet receiving | False-alert rate | Times the overall rate |
 | --- | --- | --- |
-| Account under 30 days old | 10.25% (1.63% held) | 17.5 |
-| Account 30–179 days | 0.20% | 0.3 |
-| USSD | 1.17% | 2.0 |
-| Seller | 0.10% | 0.2 |
+| Account under 30 days old | 8.88% (1.50% held) | 16.4 |
+| Account 30–179 days | 0.16% | 0.3 |
+| USSD | 1.05% | 1.9 |
+| Seller | 0.09% | 0.2 |
 
-- **Account age is the gap that matters.** One legitimate payment in ten to a
-  wallet under a month old is interrupted, and one in sixty is held. A young
+- **Account age is the gap that matters.** One legitimate payment in eleven to a
+  wallet under a month old is interrupted, and one in sixty-seven is held. A young
   receiving wallet is also the strongest honest signal of a mule, so the gap
   cannot be removed by dropping the feature without losing most of the recall.
   What limits the harm is the form of the interruption: a warning the customer
@@ -287,6 +327,11 @@ interrupted (warn or above). Overall it is 0.59%, and 0.05% are held. Groups und
   the dashboard, not evidence about real people.
 
 ### Verdicts as labels
+
+**This subsection and the next (shadow mode) were measured with the previous
+served model, v2, and its challenger v3. They have not been re-run for v4**, so
+"served model" below means v2. Re-running takes `make review retrain`, then
+`make shadow VERSION=<new>` and a replay.
 
 After the replay, 206 older cases were closed: 102 confirmed fraud, 93
 legitimate, 11 inconclusive (which label nothing). The retraining job added 957
@@ -332,21 +377,24 @@ challenger alone would have caught is reported as a count without an outcome.
 ### Drift
 
 Population stability index of each feature and of the score, test period against
-training period: 33 features stable (below 0.1), 9 to watch, 15 shifted (above
-0.25). The score itself stays stable (PSI 0.003 to 0.013 by week) while the weekly
-fraud rate moves between 0.97% and 1.46%. The most shifted inputs are lifetime
-counts and ages (handset age, payments sent, an agent's cash-outs), which grow
-with time by construction, so a shifted input is a prompt to look, not an alarm;
-the alert rate (1.54% on test against 1.24% on validation) is the signal to act
-on. The
-live endpoint measures the same on the latest decisions actually served.
+training period: 34 features stable (below 0.1), 10 to watch, 17 shifted (above
+0.25). The score itself stays stable (PSI 0.0004 to 0.0007 by week) while the
+weekly fraud rate moves between 0.97% and 1.46%. The most shifted inputs are
+lifetime counts and ages (handset age, payments sent, an agent's cash-outs),
+which grow with time by construction, so a shifted input is a prompt to look,
+not an alarm; the alert rate (1.49% on test against 1.24% on validation) is the
+signal to act on. The sender's hops to a flagged wallet is the second most
+shifted input (PSI 3.1) for the same reason: confirmed flags only accumulate, so
+more wallets sit within three hops of one as time passes. A deployment that
+keeps this feature should expire or age old flags. The live endpoint measures
+the same on the latest decisions actually served.
 
 ## 14. Reproduce
 
 ```
 make data features train     # about one minute; writes backend/artifacts/models/<version>/
 make policy insights         # policy_report.json and insights.json (fairness, drift, threshold sweep)
-make test                    # 175 tests, including leakage and round-trip checks
+make test                    # 179 tests, including leakage and round-trip checks
 ```
 
 `report.json` holds every number above; `manifest.json` holds thresholds,

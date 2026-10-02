@@ -56,6 +56,9 @@ def render(kind: str, v: float) -> tuple[str, str]:
         text = f"{v:+.1f}"
     elif kind == "hour":
         text = f"{int(v):02d}:00"
+    elif kind == "kmh":
+        text = f"{v:,.0f}"
+        return f"{text} km/h", f"{bn_digits(text)} কিমি/ঘণ্টা"
     else:
         raise ValueError(f"unknown value kind {kind!r}")
     return text, bn_digits(text)
@@ -114,6 +117,14 @@ PHRASES: dict[str, Phrase] = {
         "আগের লেনদেনের চেয়ে জেলা ভিন্ন",
         "same district as the sender's previous transaction",
         "আগের লেনদেনের একই জেলা",
+    ),
+    "s_travel_kmh": Phrase(
+        "TIME_AND_PLACE",
+        "kmh",
+        "to be here after the previous transaction the sender had to travel at {v}",
+        "আগের লেনদেনের পর এখানে পৌঁছাতে প্রেরককে {v} গতিতে যেতে হতো",
+        "no travel was needed since the sender's previous transaction",
+        "আগের লেনদেনের পর প্রেরকের যাতায়াতের প্রয়োজন হয়নি",
     ),
     "s_age_days": Phrase(
         "SENDER_HISTORY",
@@ -248,6 +259,22 @@ PHRASES: dict[str, Phrase] = {
         "প্রেরক প্রতারণা হিসেবে নিশ্চিত {v}টি ওয়ালেটের সাথে লেনদেন করেছেন",
         "the sender has not transacted with any wallet confirmed as fraud",
         "প্রেরক নিশ্চিত প্রতারণার কোনো ওয়ালেটের সাথে লেনদেন করেননি",
+    ),
+    "s_flagged_hops": Phrase(
+        "SENDER_FRAUD_LINK",
+        "count",
+        "the sender is {v} [transfer|transfers] away from a wallet confirmed as fraud",
+        "প্রেরক প্রতারণা হিসেবে নিশ্চিত একটি ওয়ালেট থেকে {v} ধাপ দূরে",
+        "the sender's own wallet is confirmed as fraud",
+        "প্রেরকের নিজের ওয়ালেট প্রতারণা হিসেবে নিশ্চিত",
+    ),
+    "pair_common_contacts": Phrase(
+        "RELATIONSHIP",
+        "count",
+        "sender and receiver have {v} [contact|contacts] in common",
+        "প্রেরক ও প্রাপকের {v} জন অভিন্ন পরিচিত আছে",
+        "sender and receiver have no contacts in common",
+        "প্রেরক ও প্রাপকের কোনো অভিন্ন পরিচিত নেই",
     ),
     "pair_prior_count": Phrase(
         "RELATIONSHIP",
@@ -416,6 +443,14 @@ PHRASES: dict[str, Phrase] = {
         "প্রাপক প্রতারণা হিসেবে নিশ্চিত {v}টি ওয়ালেটের সাথে লেনদেন করেছে",
         "the receiver has not transacted with any wallet confirmed as fraud",
         "প্রাপক নিশ্চিত প্রতারণার কোনো ওয়ালেটের সাথে লেনদেন করেনি",
+    ),
+    "r_flagged_hops": Phrase(
+        "RECIPIENT_FRAUD_LINK",
+        "count",
+        "the receiver is {v} [transfer|transfers] away from a wallet confirmed as fraud",
+        "প্রাপক প্রতারণা হিসেবে নিশ্চিত একটি ওয়ালেট থেকে {v} ধাপ দূরে",
+        "the receiver's own wallet is confirmed as fraud",
+        "প্রাপকের নিজের ওয়ালেট প্রতারণা হিসেবে নিশ্চিত",
     ),
     "a_n_cashouts": Phrase(
         "AGENT_PATTERN",

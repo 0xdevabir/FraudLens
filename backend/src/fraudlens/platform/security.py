@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import jwt
@@ -46,6 +48,7 @@ def issue_token(user_id: int, role: str, settings: Settings, now: datetime | Non
         "iss": ISSUER,
         "iat": now,
         "exp": now + timedelta(minutes=settings.jwt_ttl_minutes),
+        "jti": uuid.uuid4().hex,  # names this one token, so signing out can revoke it
     }
     return jwt.encode(claims, settings.jwt_secret.get_secret_value(), algorithm=ALGORITHM)
 
@@ -57,10 +60,24 @@ def read_token(token: str, settings: Settings) -> dict:
             settings.jwt_secret.get_secret_value(),
             algorithms=[ALGORITHM],  # never trust the algorithm named in the token
             issuer=ISSUER,
-            options={"require": ["exp", "iat", "sub", "iss"]},
+            options={"require": ["exp", "iat", "sub", "iss", "jti"]},
         )
     except jwt.PyJWTError as exc:
         raise TokenError(str(exc)) from exc
+
+
+def _revoked_key(claims: dict) -> str:
+    return f"fraudlens:revoked:{claims['jti']}"
+
+
+def revoke_token(redis: Redis, claims: dict) -> None:
+    """Refuse this token from now on. The entry lasts exactly as long as the token would have."""
+    redis.set(_revoked_key(claims), "1", ex=max(int(claims["exp"] - time.time()) + 1, 1))
+
+
+def is_revoked(redis: Redis, claims: dict) -> bool:
+    """Raises when Redis cannot be asked: a token nobody can vouch for is not accepted."""
+    return bool(redis.exists(_revoked_key(claims)))
 
 
 class RateLimiter:

@@ -164,7 +164,29 @@ transfers are part of a case but are not fraud by themselves.
 
 Labels never enter the feature engine: its input record has no label field (tested).
 
-## 8. Revision history
+## 8. Assumptions in the derived signals
+
+Four features are computed from the data with constants we chose. They are
+**assumed**, like the simulator's rates.
+
+- **Travel speed.** A transaction carries a district, not a position. The
+  distance between two consecutive transactions of a wallet is the great-circle
+  distance between the two district centres (coordinates in
+  `features/engine.py`), less 30 km, so that someone who lives near a district
+  border is not counted as having travelled. Speed is that distance over the
+  time between the two transactions and is capped at 2,000 km/h. Real location
+  data (cell tower, IP, GPS) would be finer and noisier than this.
+- **Hops to a flagged wallet.** The shortest path through past transfers from a
+  wallet to any wallet with a confirmed-fraud flag, counted up to 3 hops;
+  further than that is "no link". A flag counts only from its own timestamp.
+  Flags are never removed, so the share of wallets within 3 hops of one grows
+  for as long as the system runs. This is the feature that drifts most between
+  training and test (MODEL_CARD §13), and a deployment would need flags to
+  expire.
+- **Contacts in common.** The number of wallets that both the sender and the
+  receiver have already transacted with, from the same transfer history.
+
+## 9. Revision history
 
 The simulator was revised **once**, after the first trained model (v1) was
 inspected. In the first version only scammers ever shared a handset and only
@@ -173,8 +195,9 @@ fraud": two device features carried 73% of its gain, it scored 0% on the held-ou
 typology, and agent ranking was trivially perfect. That was a flaw in the data,
 not a result. The revision added what real traffic has: family and shopkeeper
 handsets, transit-hub and onboarding agents, cells that do not always reuse
-handsets, and takeovers from fresh handsets. Model v2 is trained on the revised
-data and all published numbers come from it.
+handsets, and takeovers from fresh handsets. Model v2 was the first trained on
+the revised data. The data has not changed since: model v4, which the published
+numbers come from, is trained on the same dataset with four more features (§8).
 
 To be plain about what this means for the test set: the 0% held-out result was
 seen on v1's test period, and it is one of the things that exposed the flaw. The
@@ -183,7 +206,7 @@ parameter was tuned to move a test metric: each change adds a legitimate
 behaviour that was missing. But the test period is no longer strictly
 "looked at once", and the model card says so.
 
-## 9. Known limitations
+## 10. Known limitations
 
 - Rates, shares and amounts are informed guesses, not calibrated to real traffic.
   Absolute metrics will not transfer; the relative findings and the system design

@@ -620,7 +620,7 @@ def test_engine_falls_back_to_rules_when_the_model_is_missing_or_fails(world, po
 
 def test_engine_rejects_a_feature_vector_of_the_wrong_length(world):
     txn = next(iter_txns(world.txns.iloc[[0]].reset_index()))
-    with pytest.raises(ValueError, match="expected 57 features"):
+    with pytest.raises(ValueError, match=f"expected {len(FEATURES)} features"):
         world.engine.decide(txn, [0.0] * 5)
 
 

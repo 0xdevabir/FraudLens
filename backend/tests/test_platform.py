@@ -301,6 +301,21 @@ def test_a_forged_or_stale_token_is_refused(client, tokens, p):
 # ------------------------------------------------------ request handling
 
 
+def test_signing_out_revokes_the_token(client, p):
+    login = client.post("/v1/auth/login", json={"username": "analyst2", "password": PASSWORD})
+    mine = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    again = client.post("/v1/auth/login", json={"username": "analyst2", "password": PASSWORD})
+    other = {"Authorization": f"Bearer {again.json()['access_token']}"}
+    assert client.get("/v1/auth/me", headers=mine).status_code == 200
+    assert client.post("/v1/auth/logout", headers=mine).json() == {"signed_out": True}
+    assert client.get("/v1/auth/me", headers=mine).status_code == 401
+    assert client.post("/v1/auth/logout", headers=mine).status_code == 401
+    # Only that token: the same person's other session carries on.
+    assert client.get("/v1/auth/me", headers=other).status_code == 200
+    with p.sessions() as s:
+        assert s.scalars(select(AuditLog).where(AuditLog.action == "auth.logout")).all()
+
+
 def test_responses_carry_request_id_and_security_headers(client):
     response = client.get("/health", headers={"X-Request-ID": "trace-1234-abcd"})
     assert response.json() == {"status": "ok"}

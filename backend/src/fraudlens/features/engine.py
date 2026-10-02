@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 import pickle
 from collections import deque
+from functools import lru_cache
 from pathlib import Path
 from typing import NamedTuple
 
@@ -23,6 +24,41 @@ SCORED_TYPES = ("SEND_MONEY", "CASH_OUT")
 YOUNG_ACCOUNT_DAYS = 30.0
 FAST_EXIT_SECONDS = 1800.0
 MIN_AGENT_HISTORY = 20
+# How far the link to confirmed fraud is followed through the transfer graph.
+MAX_HOPS = 3
+NO_LINK = MAX_HOPS + 1
+
+# District centres (latitude, longitude). A district this table does not know gives
+# no travel speed rather than a guessed one.
+DISTRICT_COORDS: dict[str, tuple[float, float]] = {
+    "Dhaka": (23.81, 90.41), "Gazipur": (24.00, 90.42), "Narayanganj": (23.62, 90.50),
+    "Chattogram": (22.36, 91.78), "Cumilla": (23.46, 91.18), "Sylhet": (24.89, 91.87),
+    "Rajshahi": (24.37, 88.60), "Khulna": (22.85, 89.54), "Barishal": (22.70, 90.37),
+    "Rangpur": (25.74, 89.28), "Mymensingh": (24.75, 90.41), "Bogura": (24.85, 89.37),
+    "Cox's Bazar": (21.43, 92.01), "Jashore": (23.17, 89.21), "Dinajpur": (25.63, 88.64),
+    "Noakhali": (22.87, 91.10), "Faridpur": (23.61, 89.84), "Kushtia": (23.90, 89.12),
+}  # fmt: skip
+# A location is only known to the district, so this much of the distance between two
+# centres is not counted: neighbouring districts are one place for this purpose.
+BORDER_KM = 30.0
+MIN_TRAVEL_SECONDS = 60.0
+MAX_KMH = 2000.0
+
+
+@lru_cache(maxsize=4096)
+def travel_km(a: str, b: str) -> float:
+    """Distance that must have been covered to transact in `a` and then in `b`."""
+    if a == b:
+        return 0.0
+    p, q = DISTRICT_COORDS.get(a), DISTRICT_COORDS.get(b)
+    if p is None or q is None:
+        return NAN
+    lat1, lon1, lat2, lon2 = map(math.radians, (*p, *q))
+    h = (
+        math.sin((lat2 - lat1) / 2) ** 2
+        + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    )
+    return max(2 * 6371.0 * math.asin(math.sqrt(h)) - BORDER_KM, 0.0)
 
 
 class Txn(NamedTuple):
@@ -66,16 +102,19 @@ FEATURES: tuple[str, ...] = (
     "s_device_flagged",
     "s_away_from_home",
     "s_district_changed",
+    "s_travel_kmh",
     # --- sender seen as a receiver: is the sender itself passing money through?
     "s_fan_in_7d",
     "s_in_sum_24h",
     "s_secs_since_last_in",
     "s_out_in_ratio_24h",
     "s_flagged_neighbors",
+    "s_flagged_hops",
     # --- the relationship
     "pair_prior_count",
     "pair_reverse_count",
     "pair_same_district",
+    "pair_common_contacts",
     # --- recipient wallet (SEND_MONEY only)
     "r_age_days",
     "r_fan_in_24h",
@@ -97,6 +136,7 @@ FEATURES: tuple[str, ...] = (
     "r_device_other_wallets",
     "r_device_flagged",
     "r_flagged_neighbors",
+    "r_flagged_hops",
     # --- agent (CASH_OUT only)
     "a_n_cashouts",
     "a_young_share",
@@ -118,6 +158,7 @@ class WalletState:
         "recipients", "new_recipient_events", "senders", "n_reciprocated", "in_events",
         "n_in", "sum_in", "last_in_ts", "fund_ts", "fund_amount", "fund_agent",
         "dwell", "n_fast_exit", "sum_cashout", "agents_used", "flagged_neighbors",
+        "flagged_hops",
     )  # fmt: skip
 
     def __init__(self, created_ts: float, home: str) -> None:
@@ -150,6 +191,7 @@ class WalletState:
         self.sum_cashout = 0.0
         self.agents_used: dict[str, int] = {}
         self.flagged_neighbors = 0
+        self.flagged_hops = NO_LINK  # transfers between this wallet and confirmed fraud
 
 
 class AgentState:
@@ -187,7 +229,7 @@ class FeatureEngine:
     def register_wallet(self, wallet_id: str, created_ts: float, district: str) -> None:
         w = self.wallets.get(wallet_id)
         if w is None:
-            self.wallets[wallet_id] = WalletState(created_ts, district)
+            self._new_wallet(wallet_id, created_ts, district)
         else:
             w.created_ts, w.home = created_ts, district
 
@@ -199,7 +241,13 @@ class FeatureEngine:
         w = self.wallets.get(wallet_id)
         if w is None:
             # First sighting of a wallet with no master record: treat it as opened now.
-            w = self.wallets[wallet_id] = WalletState(ts, district)
+            w = self._new_wallet(wallet_id, ts, district)
+        return w
+
+    def _new_wallet(self, wallet_id: str, created_ts: float, district: str) -> WalletState:
+        w = self.wallets[wallet_id] = WalletState(created_ts, district)
+        if wallet_id in self.flagged:  # confirmed before it was ever seen transacting
+            w.flagged_hops = 0
         return w
 
     def _agent(self, agent_id: str, district: str) -> AgentState:
@@ -218,9 +266,42 @@ class FeatureEngine:
             return
         for other in w.recipients.keys() | w.senders.keys():
             self.wallets[other].flagged_neighbors += 1
+        self._link(wallet_id, 0)
         self.flagged_devices.update(w.devices)
         for agent_id in w.agents_used:
             self.agents[agent_id].flagged_customers += 1
+
+    def _link(self, wallet_id: str, hops: int) -> None:
+        """`wallet_id` is `hops` transfers from confirmed fraud; tell the wallets around it.
+
+        Flags and transfers are never taken back, so a distance only ever shrinks, and
+        each wallet is walked at most MAX_HOPS + 1 times over the engine's whole life.
+        """
+        wallets = self.wallets
+        stack = [(wallet_id, hops)]
+        while stack:
+            wid, d = stack.pop()
+            w = wallets[wid]
+            if d >= w.flagged_hops:
+                continue
+            w.flagged_hops = d
+            if d < MAX_HOPS:
+                stack.extend((other, d + 1) for other in w.recipients)
+                stack.extend((other, d + 1) for other in w.senders)
+
+    @staticmethod
+    def _common_contacts(a: WalletState, b: WalletState) -> int:
+        """Wallets both have exchanged money with: how far the two share a community."""
+        if len(a.recipients) + len(a.senders) > len(b.recipients) + len(b.senders):
+            a, b = b, a
+        theirs_out, theirs_in = b.recipients, b.senders
+        mine_out = a.recipients
+        n = sum(1 for other in mine_out if other in theirs_out or other in theirs_in)
+        return n + sum(
+            1
+            for other in a.senders
+            if other not in mine_out and (other in theirs_out or other in theirs_in)
+        )
 
     # --------------------------------------------------------------- features
 
@@ -302,6 +383,12 @@ class FeatureEngine:
         else:
             new_device, device_age = 0.0, NAN
         s_in = self._inbound(s, ts)
+        if s.last_district:
+            # Impossible travel: the speed needed to be here after the previous transaction.
+            km = travel_km(s.last_district, t.district)
+            travel_kmh = min(km * HOUR / max(ts - s.last_ts, MIN_TRAVEL_SECONDS), MAX_KMH)
+        else:
+            travel_kmh = NAN
 
         row = [
             amount,
@@ -327,11 +414,13 @@ class FeatureEngine:
             1.0 if device and device in self.flagged_devices else 0.0,
             1.0 if t.district != s.home else 0.0,
             1.0 if s.last_district and t.district != s.last_district else 0.0,
+            travel_kmh,
             float(s_in[1]),
             s_in[3],
             ts - s.last_in_ts,
             min((sum_24h + amount) / (s_in[3] + 1.0), 50.0),
             float(s.flagged_neighbors),
+            float(s.flagged_hops) if s.flagged_hops <= MAX_HOPS else NAN,
         ]
 
         if is_cash_out:
@@ -340,6 +429,7 @@ class FeatureEngine:
                 float(s.agents_used.get(t.receiver_id, 0)),
                 NAN,
                 1.0 if s.home == a.district else 0.0,
+                NAN,
             ]
             row += [NAN] * len(RECIPIENT_FEATURES)
             enough = a.n_co >= MIN_AGENT_HISTORY
@@ -358,6 +448,7 @@ class FeatureEngine:
             float(s.recipients.get(t.receiver_id, 0)),
             float(r.recipients.get(t.sender_id, 0)),
             1.0 if s.home == r.home else 0.0,
+            float(self._common_contacts(s, r)),
         ]
         row += self.recipient_features(t.receiver_id, ts)
         row += [NAN] * 6
@@ -391,6 +482,7 @@ class FeatureEngine:
             float(self._device_others(r.last_device, wallet_id)),
             1.0 if r.last_device and r.last_device in self.flagged_devices else 0.0,
             float(r.flagged_neighbors),
+            float(r.flagged_hops) if r.flagged_hops <= MAX_HOPS else NAN,
         ]
 
     # ----------------------------------------------------------------- update
@@ -467,6 +559,11 @@ class FeatureEngine:
                     s.flagged_neighbors += 1
                 if sid in self.flagged:
                     r.flagged_neighbors += 1
+                # ...and whichever end is nearer to confirmed fraud brings the other closer.
+                if s.flagged_hops < r.flagged_hops:
+                    self._link(rid, s.flagged_hops + 1)
+                else:
+                    self._link(sid, r.flagged_hops + 1)
         else:
             aid = t.receiver_id
             a = self._agent(aid, t.district)

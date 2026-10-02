@@ -1,12 +1,14 @@
-# Decision policy — FraudLens policy v1 on model v2
+# Decision policy — FraudLens policy v1 on model v4
 
 The models rank transactions by risk ([MODEL_CARD.md](MODEL_CARD.md)). This
 document covers the layer that turns a score into an action: what happens at each
 level of risk, which business rules apply whatever the score is, what the system
 does when the model is unavailable, and how each alert explains itself.
 
-Every number below is read from `backend/artifacts/models/v2/policy_report.json`,
-which `make policy` writes. The data is synthetic
+Every number below is read from `backend/artifacts/models/v4/policy_report.json`,
+which `make policy` writes. The rule-selection table in §3 is the exception: it
+records the validation measurements made when the rules were chosen, on the
+previous model, and was not repeated for v4. The data is synthetic
 ([DATA_ASSUMPTIONS.md](DATA_ASSUMPTIONS.md)).
 
 Code: `backend/src/fraudlens/decision/`. Policy file:
@@ -95,8 +97,8 @@ Tier counts:
 
 | | allow | warn | step-up | hold |
 | --- | --- | --- | --- | --- |
-| Model only | 132,474 | 777 | 273 | 1,021 |
-| Model + policy v1 | 132,469 | 782 | 273 | 1,021 |
+| Model only | 132,541 | 653 | 322 | 1,029 |
+| Model + policy v1 | 132,533 | 661 | 322 | 1,029 |
 | Rules-only fallback | 134,232 | 246 | 67 | 0 |
 
 What each rule did:
@@ -106,20 +108,20 @@ What each rule did:
 | R01 | 0 | — | 0 | — |
 | R02 | 0 | — | 0 | — |
 | R03 | 21 | 100% | 0 | — |
-| R04 | 471 | 90.5% | 5 | 1 (one extra victim transfer warned) |
+| R04 | 505 | 90.7% | 8 | 2 (two extra victim transfers warned) |
 
 Outcomes, everything at or above each tier:
 
 | | Alerts/day | Precision | Scams caught | Taka stopped | Taka incl. exit holds |
 | --- | --- | --- | --- | --- | --- |
-| Policy, warn | 83.0 | 62.4% | 88.1% | 84.9% | 96.7% |
-| Policy, step-up | 51.8 | 83.6% | 80.3% | 77.5% | 88.8% |
-| Policy, hold | 40.8 | 93.1% | 74.2% | 73.4% | 80.8% |
-| Model only, warn | 82.8 | 62.5% | 87.8% | 84.9% | 96.7% |
+| Policy, warn | 80.5 | 65.2% | 87.5% | 85.2% | 96.6% |
+| Policy, step-up | 54.0 | 84.5% | 80.0% | 78.1% | 90.1% |
+| Policy, hold | 41.2 | 94.5% | 73.6% | 72.8% | 83.1% |
+| Model only, warn | 80.2 | 65.3% | 86.9% | 85.1% | 96.6% |
 
-The policy differs from the model in five transactions out of 134,545: four false
-warnings and one true one. For the scam type that was never in training
-(`investment_scam`), scams caught at warn go from 72.4% to 73.0%.
+The policy differs from the model in eight transactions out of 134,545: six false
+warnings and two true ones. For the scam type that was never in training
+(`investment_scam`), scams caught at warn go from 70.4% to 71.7%.
 
 ## 5. Rules-only fallback
 
@@ -157,7 +159,7 @@ degraded mode that keeps the service answering, not a substitute for the model.
   validation periods (1,181 transfers, 697 cases; never the test period) are
   indexed by their SHAP vector, so "similar" means *risky for the same reasons*.
   For test-period victim transfers of a known scam type, the nearest past case is
-  the same type 77.9% of the time. The unseen type has no true match by
+  the same type 76.5% of the time. The unseen type has no true match by
   construction; its nearest neighbours are other scam types, and the case note
   says "closest confirmed past case", not "same scam".
 - **Recommended actions** come from the policy file, selected by tier, transaction
@@ -170,8 +172,9 @@ degraded mode that keeps the service answering, not a substitute for the model.
 
 Checked on 600 single decisions from the test period (400 alerts, 200 allowed):
 0 differ from the batch result, 0 alerts lack a raising reason, and `decide()`
-takes 2.4 ms at the median and 2.7 ms at p95 on a laptop, including scoring and
-SHAP.
+takes 3.1 ms at the median and 3.4 ms at p95 on a laptop, including scoring and
+SHAP (2.4 and 2.7 ms on the previous model, which had fewer trees and four fewer
+features).
 
 ## 7. Case notes and the language model
 
@@ -231,5 +234,5 @@ check.
 
 ```
 make policy     # writes policy_report.json and similar_cases.npz next to the model
-make test       # 147 tests; 68 cover this layer
+make test       # 179 tests; 68 cover this layer
 ```

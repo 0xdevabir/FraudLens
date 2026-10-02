@@ -1,4 +1,4 @@
-"""Sign-in. Tokens are short-lived bearer tokens; every request re-checks the account."""
+"""Sign-in and sign-out. Tokens are short-lived; every request re-checks the account."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from ...platform.audit import Ctx, WorkflowError, audit
 from ...platform.models import User
-from ...platform.security import issue_token, verify_password
+from ...platform.security import issue_token, revoke_token, verify_password
 from ..deps import Db, Plat, client_ip, current_user
 from ..schemas import Login
 from ..views import user_view
@@ -46,6 +46,16 @@ def login(body: Login, request: Request, p: Plat, s: Db) -> dict:
         "expires_in": p.settings.jwt_ttl_minutes * 60,
         "user": user_view(user),
     }
+
+
+@router.post("/logout")
+def logout(request: Request, p: Plat, s: Db, user: Annotated[User, Depends(current_user)]) -> dict:
+    """Sign out: this token stops working now, on every device, not when it expires."""
+    revoke_token(p.redis, request.state.claims)
+    ctx = Ctx(user.id, user.username, user.role, request.state.request_id, client_ip(request))
+    audit(s, ctx, "auth.logout")
+    s.commit()
+    return {"signed_out": True}
 
 
 @router.get("/me")

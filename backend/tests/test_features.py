@@ -115,6 +115,55 @@ def test_links_to_flagged_wallets():
     assert feats(e, make_txn(5, 500, "SEND_MONEY", "C", "B", 100))["s_flagged_neighbors"] == 1
 
 
+def test_hops_to_a_flagged_wallet_follow_the_shortest_path():
+    e = FeatureEngine()
+    # A - B - C - MULE, and E four transfers away.
+    chain = [("C", "MULE"), ("B", "C"), ("A", "B"), ("E", "A")]
+    run(e, [make_txn(i, i * 60, "SEND_MONEY", s, r, 100) for i, (s, r) in enumerate(chain)])
+    nothing = feats(e, make_txn(9, 600, "SEND_MONEY", "A", "B", 100))
+    assert math.isnan(nothing["s_flagged_hops"]) and math.isnan(nothing["r_flagged_hops"])
+    e.flag_wallet("MULE", T0 + 700)
+    f = feats(e, make_txn(10, 800, "SEND_MONEY", "A", "B", 100))
+    assert f["s_flagged_hops"] == 3 and f["r_flagged_hops"] == 2
+    far = feats(e, make_txn(11, 800, "SEND_MONEY", "E", "MULE", 100))
+    assert math.isnan(far["s_flagged_hops"]) and far["r_flagged_hops"] == 0
+    # A transfer made after the flag shortens the path for everything behind it.
+    run(e, [make_txn(12, 900, "SEND_MONEY", "A", "MULE", 100)])
+    near = feats(e, make_txn(13, 1000, "SEND_MONEY", "E", "A", 100))
+    assert near["s_flagged_hops"] == 2 and near["r_flagged_hops"] == 1
+    # A wallet confirmed before it was ever seen still starts the chain.
+    e.flag_wallet("GHOST", T0 + 1100)
+    run(e, [make_txn(14, 1200, "SEND_MONEY", "Z", "GHOST", 100)])
+    assert feats(e, make_txn(15, 1300, "SEND_MONEY", "Z", "Y", 100))["s_flagged_hops"] == 1
+
+
+def test_impossible_travel_is_a_speed_between_districts():
+    e = FeatureEngine()
+    first = make_txn(0, 0, "SEND_MONEY", "A", "B", 100)
+    assert math.isnan(feats(e, first)["s_travel_kmh"])  # no earlier place to compare with
+    run(e, [first])
+    assert feats(e, make_txn(1, 300, "SEND_MONEY", "A", "B", 100))["s_travel_kmh"] == 0
+    # Dhaka to Chattogram is about 215 km: ten minutes is not a journey, a day is.
+    fast = feats(e, make_txn(2, 600, "SEND_MONEY", "A", "B", 100, district="Chattogram"))
+    slow = feats(e, make_txn(3, DAY, "SEND_MONEY", "A", "B", 100, district="Chattogram"))
+    assert fast["s_travel_kmh"] > 900 and slow["s_travel_kmh"] < 10
+    # Next-door districts are one place; an unknown district gives no speed at all.
+    near = feats(e, make_txn(4, 60, "SEND_MONEY", "A", "B", 100, district="Narayanganj"))
+    unknown = feats(e, make_txn(5, 60, "SEND_MONEY", "A", "B", 100, district="Atlantis"))
+    assert near["s_travel_kmh"] == 0 and math.isnan(unknown["s_travel_kmh"])
+
+
+def test_common_contacts_between_sender_and_receiver():
+    e = FeatureEngine()
+    pairs = [("A", "M1"), ("B", "M1"), ("M2", "A"), ("B", "M2"), ("A", "X")]
+    run(e, [make_txn(i, i * 60, "SEND_MONEY", s, r, 100) for i, (s, r) in enumerate(pairs)])
+    assert feats(e, make_txn(9, 600, "SEND_MONEY", "A", "B", 100))["pair_common_contacts"] == 2
+    assert feats(e, make_txn(9, 600, "SEND_MONEY", "B", "A", 100))["pair_common_contacts"] == 2
+    assert feats(e, make_txn(9, 600, "SEND_MONEY", "A", "NEW", 100))["pair_common_contacts"] == 0
+    cash_out = feats(e, make_txn(9, 600, "CASH_OUT", "A", "AG1", 100))
+    assert math.isnan(cash_out["pair_common_contacts"])
+
+
 def test_dwell_time_and_pass_through():
     e = FeatureEngine()
     run(

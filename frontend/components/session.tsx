@@ -115,7 +115,9 @@ export function Console({ children }: { children: ReactNode }) {
     setRevealed((old) => new Set(old).add(id));
   }, []);
 
-  const signOut = useCallback(() => {
+  const signOut = useCallback(async () => {
+    // Revoke the token on the server first; if that fails, still sign out here.
+    await api("/v1/auth/logout", {}).catch(() => undefined);
     setToken(null);
     // A full page load, on purpose: it drops revealed identifiers and every cached response from memory.
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination

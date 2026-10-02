@@ -17,7 +17,7 @@ from ..platform.audit import Ctx, WorkflowError
 from ..platform.graph import Graph
 from ..platform.models import User
 from ..platform.scoring import Scorer
-from ..platform.security import RateLimiter, TokenError, read_token
+from ..platform.security import RateLimiter, TokenError, is_revoked, read_token
 from ..platform.stream import Worker
 
 REVIEWERS = ("analyst", "supervisor")
@@ -84,6 +84,9 @@ def current_user(
     # changed role takes effect at once, not when the token expires.
     if user is None or not user.is_active or user.role != claims.get("role"):
         raise denied
+    if is_revoked(p.redis, claims):  # signed out
+        raise denied
+    request.state.claims = claims
     return user
 
 

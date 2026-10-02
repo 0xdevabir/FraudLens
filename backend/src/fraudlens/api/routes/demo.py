@@ -27,7 +27,7 @@ from ...platform.models import Decision, Transaction
 from ..deps import Db, Plat, Platform, Staff
 from ..schemas import DemoClock, DemoPayment, DemoResponse, RecipientCheck, ScamReport
 from ..views import result_view
-from .customer import check_recipient
+from .customer import _limit, check_recipient
 
 router = APIRouter(prefix="/demo", tags=["demo"])
 
@@ -161,7 +161,8 @@ def respond(body: DemoResponse, p: Plat, s: Db, ctx: Staff) -> dict:
 
 @router.post("/report", status_code=201)
 def report(body: ScamReport, p: Plat, ctx: Staff) -> dict:
-    """The demo customer's 'I think I was scammed'."""
+    """The demo customer's 'I think I was scammed'. Limited per wallet, like the real one."""
+    _limit(p.report_limit, body.reporter_id)
     made = workflow.report_scam(
         p.scorer, ctx, body.reporter_id, body.reported_wallet_id, body.txn_id,
         body.category, body.description,

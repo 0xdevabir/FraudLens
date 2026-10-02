@@ -32,6 +32,7 @@ const FEATURES: [string, string, (value: number) => string][] = [
   ["r_reciprocity", "Senders it also pays back", (v) => pct(v, 0)],
   ["r_device_other_wallets", "Other wallets on its handsets", (v) => num(v)],
   ["r_flagged_neighbors", "Confirmed-fraud contacts", (v) => num(v)],
+  ["r_flagged_hops", "Transfers away from confirmed fraud", (v) => num(v)],
 ];
 
 export function RiskProfile({ risk }: { risk: WalletRisk }) {

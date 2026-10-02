@@ -16,7 +16,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
 ![Redis Streams](https://img.shields.io/badge/Redis-Streams-DC382D?logo=redis&logoColor=white)
 ![Tailwind](https://img.shields.io/badge/Tailwind-v4-06B6D4?logo=tailwindcss&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-175-success)
+![Tests](https://img.shields.io/badge/tests-179-success)
 ![Served = evaluated](https://img.shields.io/badge/served%20vs%20offline-0%20differences-success)
 
 [Quick start](#-run-it-in-one-command) · [How it works](#-how-it-works) · [Results](#-results) · [Console tour](#%EF%B8%8F-console-tour) · [Three-minute demo](#-three-minute-demo) · [Limits](#%EF%B8%8F-what-this-is-not)
@@ -27,14 +27,14 @@
 
 > **Why is this hard?** In an authorised-push-payment scam, *the victim presses "send" themselves*. Their phone, PIN and location are all genuine, so checks on the sender see a normal payment. A caller pretending to be wallet staff, a "lottery fee", an "investment" with daily returns: the money goes to a mule wallet and is cashed out at an agent within minutes.
 >
-> **FraudLens answers one question, in about 5 milliseconds:** *is this payment going to a scammer, and if so, what is the gentlest thing that will stop it?*
+> **FraudLens answers one question, in a few milliseconds:** *is this payment going to a scammer, and if so, what is the gentlest thing that will stop it?*
 
 <table>
 <tr>
 <td align="center"><h2>1.45M</h2>simulated transactions<br/>over 120 days</td>
-<td align="center"><h2>87.8%</h2>of scams caught<br/>at the warning tier</td>
-<td align="center"><h2>0.59%</h2>of honest payments<br/>interrupted</td>
-<td align="center"><h2>4.9 ms</h2>p95 to score, decide<br/>and explain</td>
+<td align="center"><h2>86.9%</h2>of scams caught<br/>at the warning tier</td>
+<td align="center"><h2>0.53%</h2>of honest payments<br/>interrupted</td>
+<td align="center"><h2>3.4 ms</h2>p95 to score, decide<br/>and explain, in process</td>
 <td align="center"><h2>0</h2>differences between<br/>served and evaluated</td>
 </tr>
 </table>
@@ -70,7 +70,7 @@
 ```mermaid
 flowchart LR
     A["📱 Customer<br/>presses send"] --> B["⚡ POST /v1/score"]
-    B --> C["🧮 Feature engine<br/>57 point-in-time features"]
+    B --> C["🧮 Feature engine<br/>61 point-in-time features"]
     C --> D["🧠 Models<br/>transaction risk · mule wallet · anomaly"]
     D --> E{"📜 Policy v1<br/>thresholds + 4 rules"}
     E -- "98.5%" --> F["✅ Allow<br/>nothing shown"]
@@ -94,7 +94,7 @@ sequenceDiagram
     actor S as Supervisor
     C->>W: Send ৳9,130 to a new number
     W->>F: POST /v1/score
-    F->>F: features → models → policy → reasons (≈4 ms)
+    F->>F: features → models → policy → reasons (a few ms)
     alt allow
         F-->>W: proceed
     else warn or step-up
@@ -115,9 +115,9 @@ sequenceDiagram
 | Tier | What happens | Who decides | False alerts per day, this tier and stricter |
 |---|---|---|---:|
 | ✅ **Allow** | Payment goes through, nothing is shown | nobody | n/a |
-| ⚠️ **Warn** | A scam warning; the customer may continue | the customer | 31.0 |
-| 🔐 **Step-up** | Verify again, then a 30-minute cooling-off | the customer | 8.5 |
-| ⏸️ **Hold** | Paused, with a 30-minute review deadline | **a human analyst** | 2.8 |
+| ⚠️ **Warn** | A scam warning; the customer may continue | the customer | 27.8 |
+| 🔐 **Step-up** | Verify again, then a 30-minute cooling-off | the customer | 8.4 |
+| ⏸️ **Hold** | Paused, with a 30-minute review deadline | **a human analyst** | 2.3 |
 
 That is out of about 5,400 scored payments a day.
 
@@ -172,10 +172,10 @@ xychart-beta
     title "Ranking quality (PR-AUC) on the test period"
     x-axis ["Hand-written rules", "Anomaly only", "Mule model only", "Transaction model (served)", "Fusion of all three"]
     y-axis "PR-AUC" 0 --> 1
-    bar [0.076, 0.175, 0.373, 0.823, 0.821]
+    bar [0.076, 0.175, 0.375, 0.834, 0.835]
 ```
 
-The fusion did not beat the single model, so the simpler model is served and the comparison is kept.
+The fusion is level with the single model here (0.8345 against 0.8343) and slightly behind it on validation and on precision, so the simpler model is served and the comparison is kept.
 
 ### A scam type the models never saw
 
@@ -186,11 +186,11 @@ xychart-beta
     title "Warn tier by scam type (bar = scams caught at the payment, line = money stopped incl. cash-out holds)"
     x-axis ["Account takeover", "Wrong send", "Lottery fee", "Impersonation", "Investment (unseen)"]
     y-axis "Percent" 0 --> 100
-    bar [100, 100, 98.5, 96.8, 72.4]
-    line [100, 100, 99.6, 100, 92.4]
+    bar [100, 100, 98.5, 96.8, 70.4]
+    line [100, 100, 99.6, 100, 92.3]
 ```
 
-Most of the unseen scam is still caught at the warning level, mainly through **signals about the receiving wallet**, and most of the rest is recovered at cash-out. At the stricter tiers it falls to 55.3% (step-up) and 40.8% (hold). The near-perfect bars on known types are a property of scripted synthetic fraud and should not be expected on real traffic.
+Most of the unseen scam is still caught at the warning level, mainly through **signals about the receiving wallet**, and most of the rest is recovered at cash-out. At the stricter tiers it falls to 54.6% (step-up) and 39.5% (hold). The near-perfect bars on known types are a property of scripted synthetic fraud and should not be expected on real traffic.
 
 ### How much money each tier stops
 
@@ -199,33 +199,33 @@ xychart-beta
     title "Victims' money stopped (bar = at the victim's payment, line = also counting held cash-outs)"
     x-axis ["Hold and above", "Step-up and above", "Warn and above"]
     y-axis "Percent of taka at risk" 50 --> 100
-    bar [73.4, 77.5, 84.9]
-    line [80.8, 88.8, 96.7]
+    bar [72.8, 78.1, 85.1]
+    line [83.1, 90.1, 96.6]
 ```
 
 The line assumes the hold on the mule's cash-out succeeds, so it is an upper bound on recovery, not a promise.
 
 ### Where the interruptions land
 
-98.5% of scored payments are never interrupted. Of the 2,076 that were:
+98.5% of scored payments are never interrupted. Of the 2,012 that were:
 
 ```mermaid
 pie showData
     title Interrupted payments in the test period
-    "Hold (a person reviews)" : 1021
-    "Warn (customer chooses)" : 782
-    "Step-up (verify and wait)" : 273
+    "Hold (a person reviews)" : 1029
+    "Warn (customer chooses)" : 661
+    "Step-up (verify and wait)" : 322
 ```
 
 ### Beyond single payments
 
 | | Result |
 |---|---|
-| 🕵️ **Mule wallets** | 94 of 145 mules detected, **68 of them before any victim had paid**, a median 39.3 hours ahead of the victim's report |
-| 🕸️ **Rings** | 33 rings covering 333 wallets; 94% of ring members are true fraud-cell wallets |
+| 🕵️ **Mule wallets** | 94 of 145 mules detected, **70 of them before any victim had paid**, a median 40.2 hours ahead of the victim's report |
+| 🕸️ **Rings** | 34 rings covering 331 wallets; 94% of ring members are true fraud-cell wallets |
 | 🏪 **Agents** | No labels used: 90.9% precision in a review list of 22, finding all commission-farming agents |
-| 🔁 **Feedback loop** | Retraining on analyst verdicts raised PR-AUC from 0.759 to 0.904 on later data (reviewers were simulated and always right, so this is an upper bound) |
-| 👥 **Shadow mode** | The challenger scored all 136,180 served decisions without deciding any; it agrees on the tier for 98.5% |
+| 🔁 **Feedback loop** | Measured on the previous model version and not repeated for this one: retraining on analyst verdicts raised PR-AUC from 0.759 to 0.904 on later data (reviewers were simulated and always right, so this is an upper bound) |
+| 👥 **Shadow mode** | Also from the previous version: the challenger scored all 136,180 served decisions without deciding any, and agreed on the tier for 98.5% |
 
 ---
 
@@ -247,10 +247,11 @@ A fraud system that cannot be checked is not one a bank can run. These are the c
 
 | Milliseconds | p50 | p95 | p99 |
 |---|---:|---:|---:|
-| Features + models + policy + reasons | 3.8 | **4.9** | 7.1 |
-| Full round trip, including the database commit | 10.6 | 15.1 | 23.3 |
+| One decision in process: features, models, policy, reasons | 3.1 | **3.4** | n/a |
+| Served, features + models + policy + reasons (busy machine) | 8.1 | 13.0 | 21.7 |
+| Served, full round trip including the database commit (busy machine) | 26.9 | 47.9 | 86.1 |
 
-About 190 scored decisions a second through the stream, and ready 8–10 seconds after a restart with the feature state rebuilt exactly.
+The served rows were measured while the laptop was also running a second API and two consoles, so they are an upper bound; the previous model version, on a quiet machine, served at 4.9 ms and 15.1 ms p95, and the current one has not been measured that way ([PLATFORM.md §11](docs/PLATFORM.md)). The stream worker replayed 292,567 events in under six minutes, and the service is ready 8–10 seconds after a restart with the feature state rebuilt exactly.
 
 **Guardrails that are enforced in code, not left to configuration:**
 
@@ -265,7 +266,7 @@ About 190 scored decisions a second through the stream, and ready 8–10 seconds
 | Privacy by default | Wallet numbers are masked (`W***6128`); revealing one writes the viewer's name to the audit log |
 | The language model only words things | Optional and off by default; its note is rejected if it contains a number or identifier that is not in the evidence |
 
-**And the uncomfortable finding, stated plainly:** wallets under 30 days old are interrupted on honest payments **5.8×** as often as average when sending and **17.5×** when receiving. A young receiving wallet is also the strongest honest sign of a mule, so the gap cannot simply be removed. The fairness report measures it so that a deployment can watch it.
+**And the uncomfortable finding, stated plainly:** wallets under 30 days old are interrupted on honest payments **6.0×** as often as average when sending and **16.4×** when receiving. A young receiving wallet is also the strongest honest sign of a mule, so the gap cannot simply be removed. The fairness report measures it so that a deployment can watch it.
 
 ---
 
@@ -275,7 +276,7 @@ About 190 scored decisions a second through the stream, and ready 8–10 seconds
 flowchart TB
     subgraph OFF["Offline · make pipeline"]
         direction LR
-        S["🌍 Simulator<br/>20,000 customers · 600 agents<br/>5 scam types, 1 held out"] --> FE["🧮 Feature engine<br/>57 features"]
+        S["🌍 Simulator<br/>20,000 customers · 600 agents<br/>5 scam types, 1 held out"] --> FE["🧮 Feature engine<br/>61 features"]
         FE --> M["🧠 Models + registry<br/>LightGBM · Isolation Forest"]
         M --> P["📜 Policy<br/>thresholds from alert budgets"]
     end
@@ -300,7 +301,7 @@ flowchart TB
 | Layer | What it does |
 |---|---|
 | Simulator | A 120-day world of wallets, agents and merchants with five fraud typologies, one of them held out of training, plus honest customers who look suspicious on purpose |
-| Features | 57 point-in-time features from one engine used for both training and serving |
+| Features | 61 point-in-time features from one engine used for both training and serving |
 | Models | LightGBM transaction risk, mule-wallet score, Isolation Forest anomaly, agent peer comparison, ring detection |
 | Decisions | allow / warn / step-up / hold from versioned rules and budgeted thresholds, with a rules-only fallback |
 | Explanations | SHAP reasons in Bangla and English, rule trace, similar past cases, case summary |
@@ -331,7 +332,7 @@ FraudLens/
 │   │   ├── platform/    # scorer, cases, freezes, stream worker, audit
 │   │   ├── mlops/       # verdicts as labels, retraining, shadow, drift
 │   │   └── api/         # HTTP routes, schemas, middleware
-│   └── tests/           # 175 tests
+│   └── tests/           # 179 tests
 ├── frontend/            # the analyst console
 ├── docs/                # architecture, model card, policy, platform, demo script
 ├── docker-compose.yml
@@ -398,7 +399,7 @@ To run a challenger in shadow mode, set `FRAUDLENS_SHADOW_MODEL_VERSION` to its 
 <summary><b>Check it</b></summary>
 
 ```bash
-make test     # 175 backend tests; the platform tests need `make up`
+make test     # 179 backend tests; the platform tests need `make up`
 make lint     # ruff, tsc, eslint
 make smoke    # opens every console page as each role in a headless browser
 ```
