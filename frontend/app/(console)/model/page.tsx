@@ -17,7 +17,7 @@ const ABLATION: Record<string, string> = {
   transaction_model: "Transaction model (served)",
   fusion: "Fusion of all three",
 };
-const DRIFT_COLOR: Record<string, string> = { stable: "#10b981", watch: "#f59e0b", shifted: "#dc2626" };
+const DRIFT_COLOR: Record<string, string> = { stable: "var(--color-good)", watch: "var(--color-warn)", shifted: "var(--color-bad)" };
 
 function ms(value: number | null | undefined): string {
   return value === null || value === undefined ? "–" : `${value.toFixed(1)} ms`;
@@ -97,7 +97,7 @@ function Performance({ report, summary }: { report: Report; summary?: Summary })
               ) : null;
             })}
           </Table>
-          <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+          <p className="border-t border-line px-4 py-2 text-xs text-fg-3">
             Ranking quality over the whole test period: PR-AUC {num(chain?.pr_auc, 3)}, ROC-AUC {num(chain?.roc_auc, 3)} on{" "}
             {num(chain?.positives)} fraud payments in {num(chain?.rows)} ({pct(chain?.base_rate, 2)}).
           </p>
@@ -106,7 +106,7 @@ function Performance({ report, summary }: { report: Report; summary?: Summary })
         <Card title="What each layer adds" hint="Every scorer given the same 1% alert budget on the test period. “New scam” is a fraud pattern held out of training entirely." flush>
           <Table head={["Scorer", "PR-AUC", "Precision", "Fraud caught", "Money stopped", "New scam"]}>
             {Object.entries(test["ablation_at_1.00%"] ?? {}).map(([name, row]) => (
-              <tr key={name} className={name === "transaction_model" ? "bg-emerald-50/50" : undefined}>
+              <tr key={name} className={name === "transaction_model" ? "bg-good/10" : undefined}>
                 <Td className="font-medium">{ABLATION[name] ?? words(name)}</Td>
                 <Td right>{num(row.pr_auc, 3)}</Td>
                 <Td right>{pct(row.precision)}</Td>
@@ -126,7 +126,7 @@ function Performance({ report, summary }: { report: Report; summary?: Summary })
                 label: words(name),
                 value: row.case_recall,
                 note: `${num(row.cases)} cases`,
-                color: row.case_recall >= 0.9 ? "#059669" : row.case_recall >= 0.7 ? "#f59e0b" : "#dc2626",
+                color: row.case_recall >= 0.9 ? "var(--color-good)" : row.case_recall >= 0.7 ? "var(--color-warn)" : "var(--color-bad)",
               }))}
             />
           ) : (
@@ -149,7 +149,7 @@ function Performance({ report, summary }: { report: Report; summary?: Summary })
               </tr>
             ))}
           </Table>
-          <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+          <p className="border-t border-line px-4 py-2 text-xs text-fg-3">
             Nine payments in ten score near zero and are honest. In the riskiest tenth the model says less than what happens, so its
             probabilities rank payments well but read low: thresholds are set from alert budgets, not from the number itself.
           </p>
@@ -197,7 +197,7 @@ function Performance({ report, summary }: { report: Report; summary?: Summary })
           />
         </Card>
       </div>
-      <p className="mt-4 text-xs text-slate-500">
+      <p className="mt-4 text-xs text-fg-3">
         Model {report.model_version}, trained on {num(report.model.data.rows.train)} payments and measured on {num(report.model.data.rows.test)} later
         ones it never saw. The data is simulated: these numbers say the pipeline works end to end, not how it would do on real traffic.
       </p>
@@ -233,7 +233,7 @@ function DriftView({ drift, backtest }: { drift: Drift; backtest?: Insights["dri
           sub={`${num(drift.feature_status.watch ?? 0)} more to watch, ${num(drift.feature_status.stable ?? 0)} stable`}
         />
       </div>
-      <p className="mt-2 text-xs text-slate-500">
+      <p className="mt-2 text-xs text-fg-3">
         The latest {num(drift.rows)} live decisions ({when(drift.from)} to {when(drift.to)}) of model {drift.model_version}, compared with its{" "}
         {drift.reference.features} data for inputs and {words(drift.reference.score).toLowerCase()} for the score.
       </p>
@@ -251,7 +251,7 @@ function DriftView({ drift, backtest }: { drift: Drift; backtest?: Insights["dri
               note: row.missing ? `${pct(row.missing, 0)} missing` : undefined,
             }))}
           />
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-fg-3">
             Counters that only ever grow, such as account or handset age, drift by construction. What matters is whether the score moves with them,
             which is the first number above.
           </p>
@@ -316,15 +316,15 @@ function ShadowView({ shadow }: { shadow: Shadow }) {
           <div className="mb-3 grid grid-cols-3 gap-3 text-center">
             <div>
               <div className="text-2xl font-semibold tabular-nums">{pct(shadow.agreement, 2)}</div>
-              <div className="text-xs text-slate-500">same tier</div>
+              <div className="text-xs text-fg-3">same tier</div>
             </div>
             <div>
               <div className="text-2xl font-semibold tabular-nums">{num(shadow.challenger_only_alerts)}</div>
-              <div className="text-xs text-slate-500">only the challenger would alert</div>
+              <div className="text-xs text-fg-3">only the challenger would alert</div>
             </div>
             <div>
               <div className="text-2xl font-semibold tabular-nums">{num(shadow.served_only_alerts)}</div>
-              <div className="text-xs text-slate-500">only the served model alerted</div>
+              <div className="text-xs text-fg-3">only the served model alerted</div>
             </div>
           </div>
           <Facts
@@ -348,7 +348,7 @@ function ShadowView({ shadow }: { shadow: Shadow }) {
                 : []),
             ]}
           />
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-fg-3">
             Reviewed alerts are only ones the served model raised, so this comparison cannot show fraud that both models missed.
           </p>
         </div>
@@ -357,7 +357,7 @@ function ShadowView({ shadow }: { shadow: Shadow }) {
             <tr key={served}>
               <Td className="font-medium">{TIER_LABEL[served]}</Td>
               {TIERS.map((challenger) => (
-                <Td key={challenger} right className={served === challenger ? "bg-slate-50 font-medium" : undefined}>
+                <Td key={challenger} right className={served === challenger ? "bg-wash font-medium" : undefined}>
                   {num(shadow.matrix?.[served]?.[challenger] ?? 0)}
                 </Td>
               ))}
@@ -441,7 +441,7 @@ function FeedbackView({ feedback, registry }: { feedback: Feedback; registry?: R
                         </tr>
                       ))}
                     </Table>
-                    <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+                    <p className="border-t border-line px-4 py-2 text-xs text-fg-3">
                       Compared only on the {num(fb.test_rows_after_last_label)} payments made after the last label, so the retrained model is never
                       scored on something a reviewer already told it about. Reviewers only see payments the old model alerted on, so these labels are
                       not a random sample.

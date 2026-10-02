@@ -32,11 +32,11 @@ const ACTION: Record<string, string> = {
 const SCENARIO: Record<string, string> = { scam: "Paying a scammer", takeover: "Account taken over", cash_out: "Cash-out" };
 
 function When({ conditions }: { conditions: Condition[] }) {
-  if (!conditions.length) return <span className="text-slate-400">always</span>;
+  if (!conditions.length) return <span className="text-fg-4">always</span>;
   return (
     <span className="flex flex-wrap gap-1">
       {conditions.map((c, i) => (
-        <code key={i} className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-800">{c.field} {c.op} {String(c.value)}</code>
+        <code key={i} className="rounded-md bg-fill px-1.5 py-0.5 text-xs text-fg">{c.field} {c.op} {String(c.value)}</code>
       ))}
     </span>
   );
@@ -68,7 +68,7 @@ function View({ policy, report }: { policy: Policy; report?: Report }) {
             );
           })}
         </Table>
-        <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+        <p className="border-t border-line px-4 py-2 text-xs text-fg-3">
           Thresholds come from {policy.thresholds.source === "model" ? "the served model’s validation run, set to an alert budget" : words(policy.thresholds.source).toLowerCase()}
           {Object.keys(policy.thresholds.overrides).length ? `, with overrides for ${Object.keys(policy.thresholds.overrides).join(", ")}` : ""}. The
           model only produces a score; this policy, which is versioned and reviewed separately, turns it into an action. Nothing is blocked or frozen
@@ -83,10 +83,10 @@ function View({ policy, report }: { policy: Policy; report?: Report }) {
             return (
               <tr key={rule.id}>
                 <Td className="whitespace-normal">
-                  <div className="flex items-center gap-1.5 font-mono text-xs text-slate-500">{rule.id}{rule.hard && <Badge tone="red">hard</Badge>}</div>
-                  <div className="text-slate-800">{rule.description}</div>
-                  <div lang="bn" className="text-xs text-slate-500">{rule.description_bn}</div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                  <div className="flex items-center gap-1.5 font-mono text-xs text-fg-3">{rule.id}{rule.hard && <Badge tone="red">hard</Badge>}</div>
+                  <div className="text-fg">{rule.description}</div>
+                  <div lang="bn" className="text-xs text-fg-3">{rule.description_bn}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-fg-3">
                     On {rule.applies_to.map((type) => words(type).toLowerCase()).join(" and ")}, when <When conditions={rule.when} />
                   </div>
                 </Td>
@@ -99,7 +99,7 @@ function View({ policy, report }: { policy: Policy; report?: Report }) {
           })}
         </Table>
         {counts?.policy && counts.model_only && (
-          <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+          <p className="border-t border-line px-4 py-2 text-xs text-fg-3">
             On the test period the rules moved {num((counts.model_only.allow ?? 0) - (counts.policy.allow ?? 0))} payments out of “allow” that the
             model alone would have let through. The rules that hold payments to confirmed-fraud wallets fire only once reviewers have confirmed
             wallets, which the offline test does not have.
@@ -122,7 +122,7 @@ function View({ policy, report }: { policy: Policy; report?: Report }) {
             ))}
           </Table>
           {counts?.rules_only_fallback && (
-            <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+            <p className="border-t border-line px-4 py-2 text-xs text-fg-3">
               Replayed on the test period, the fallback would have warned {num(counts.rules_only_fallback.warn)} payments and asked{" "}
               {num(counts.rules_only_fallback.step_up)} to verify again. It holds nothing, because without the model there is no score strong enough
               to stop someone’s money.
@@ -136,7 +136,7 @@ function View({ policy, report }: { policy: Policy; report?: Report }) {
                 <Td><TierBadge tier={item.min_tier} /></Td>
                 <Td className="whitespace-normal">
                   {item.en} {item.needs_second_approver && <Badge tone="violet">needs a second person</Badge>}
-                  <div lang="bn" className="text-xs text-slate-500">{item.bn}</div>
+                  <div lang="bn" className="text-xs text-fg-3">{item.bn}</div>
                   {item.when.length > 0 && <div className="mt-1"><When conditions={item.when} /></div>}
                 </Td>
               </tr>
@@ -148,7 +148,7 @@ function View({ policy, report }: { policy: Policy; report?: Report }) {
       <Card
         title="What the customer is told"
         hint="Fixed texts, written and approved in advance. The language model never writes to customers."
-        actions={<span className="text-xs text-slate-500">Takeover wording is used when <When conditions={policy.takeover_when} /></span>}
+        actions={<span className="text-xs text-fg-3">Takeover wording is used when <When conditions={policy.takeover_when} /></span>}
         flush
       >
         <Table head={["Situation", "Tier", "বাংলা", "English"]}>
@@ -158,7 +158,7 @@ function View({ policy, report }: { policy: Policy; report?: Report }) {
                 <Td>{SCENARIO[scenario] ?? words(scenario)}</Td>
                 <Td><TierBadge tier={tier} /></Td>
                 <Td className="max-w-md whitespace-normal"><span lang="bn">{byTier[tier]?.bn}</span></Td>
-                <Td className="max-w-md whitespace-normal text-slate-600">{byTier[tier]?.en}</Td>
+                <Td className="max-w-md whitespace-normal text-fg-2">{byTier[tier]?.en}</Td>
               </tr>
             )),
           )}

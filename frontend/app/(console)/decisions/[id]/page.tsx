@@ -38,25 +38,25 @@ function Reasons({ reasons, lang }: { reasons: Reason[]; lang: Lang }) {
         return (
           <li key={reason.code} className="flex gap-3">
             <div className="w-24 shrink-0 pt-1">
-              <div className="h-1.5 rounded bg-slate-100">
+              <div className="h-1.5 rounded-md bg-fill">
                 <div
-                  className={cx("h-1.5 rounded", reason.weight == null ? "bg-violet-500" : raises ? "bg-red-500" : "bg-emerald-500")}
+                  className={cx("h-1.5 rounded-md", reason.weight == null ? "bg-rule" : raises ? "bg-bad" : "bg-good")}
                   style={{ width: reason.weight == null ? "100%" : `${Math.max(6, (Math.abs(reason.weight) / largest) * 100)}%` }}
                 />
               </div>
-              <div className="mt-1 text-xs text-slate-500" lang="en">
+              <div className="mt-1 text-xs text-fg-3" lang="en">
                 {reason.weight == null ? "rule matched" : raises ? "raises risk" : "lowers risk"}
                 {reason.share != null && ` · ${pct(reason.share, 0)}`}
               </div>
             </div>
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-slate-900">
+              <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-fg">
                 {lang === "bn" ? reason.title_bn : reason.title_en}
                 <Badge tone={reason.source === "rule" ? "violet" : "slate"}>{reason.source}</Badge>
               </div>
-              <p className="text-sm text-slate-600">{lang === "bn" ? reason.detail_bn : reason.detail_en}</p>
+              <p className="text-sm text-fg-2">{lang === "bn" ? reason.detail_bn : reason.detail_en}</p>
               {!!reason.facts?.length && (
-                <ul className="mt-1 list-disc pl-5 text-xs text-slate-500">
+                <ul className="mt-1 list-disc pl-5 text-xs text-fg-3">
                   {reason.facts.map((fact) => <li key={fact.feature}>{lang === "bn" ? fact.bn : fact.en}</li>)}
                 </ul>
               )}
@@ -79,20 +79,20 @@ function Rules({ trace }: { trace: RuleTrace[] }) {
   return (
     <Table head={["Rule and what it looked at", "Result", "Effect"]}>
       {trace.map((rule) => (
-        <tr key={rule.id} className={rule.status === "fired" ? "bg-red-50/50" : ""}>
+        <tr key={rule.id} className={rule.status === "fired" ? "bg-bad/10" : ""}>
           <Td>
-            <div className="font-mono text-xs text-slate-500">{rule.id}</div>
-            <div className="text-slate-800">{rule.description}</div>
+            <div className="font-mono text-xs text-fg-3">{rule.id}</div>
+            <div className="text-fg">{rule.description}</div>
             <div className="mt-0.5 flex flex-wrap gap-1">
               {Object.entries(rule.inputs).map(([name, value]) => (
-                <code key={name} className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">{name} = {show(value)}</code>
+                <code key={name} className="rounded-md bg-fill px-1.5 py-0.5 text-xs text-fg-2">{name} = {show(value)}</code>
               ))}
             </div>
           </Td>
           <Td><StatusBadge status={rule.status} /></Td>
-          <Td className="whitespace-nowrap text-slate-600">
+          <Td className="whitespace-nowrap text-fg-2">
             {words(rule.effect)} {rule.tier && <TierBadge tier={rule.tier} />}
-            {rule.hard && <div className="text-xs text-slate-500">cannot be overridden by the model</div>}
+            {rule.hard && <div className="text-xs text-fg-3">cannot be overridden by the model</div>}
           </Td>
         </tr>
       ))}
@@ -110,15 +110,15 @@ function CaseSummary({ id, lang }: { id: string; lang: Lang }) {
             <Badge tone={data.source === "llm" ? "violet" : "slate"}>
               {data.source === "llm" ? "Written by the language model" : "Written from a template"}
             </Badge>
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-fg-3">
               Built only from the structured evidence on this page. It describes the decision; it does not make it.
             </span>
           </div>
           {data.text.split("\n\n").map((paragraph, i) => (
-            <p key={i} className="mb-2 whitespace-pre-line text-sm text-slate-800">{paragraph}</p>
+            <p key={i} className="mb-2 whitespace-pre-line text-sm text-fg">{paragraph}</p>
           ))}
           {data.rejected.length > 0 && (
-            <p className="mt-2 text-xs text-amber-700" lang="en">
+            <p className="mt-2 text-xs text-warn" lang="en">
               A language-model draft was discarded because it failed the evidence check ({data.rejected.join("; ")}), so
               the template text is shown.
             </p>
@@ -148,7 +148,7 @@ function PastCaseRow({ row }: { row: SimilarCase }) {
       </tr>
       {open && (
         <tr>
-          <td colSpan={6} className="bg-slate-50 px-3 py-2 text-sm">
+          <td colSpan={6} className="bg-wash px-3 py-2 text-sm">
             <Async state={detail}>
               {(data) => (
                 <Facts
@@ -179,7 +179,7 @@ function Detail({ id, data }: { id: string; data: Decision }) {
         actions={
           <>
             <LangToggle lang={lang} onChange={setLang} />
-            {data.case_id && <Link href={`/cases/${data.case_id}`} className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">Open case #{data.case_id}</Link>}
+            {data.case_id && <Link href={`/cases/${data.case_id}`} className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-accent-ink hover:brightness-110 active:scale-[0.97]">Open case #{data.case_id}</Link>}
           </>
         }
       />
@@ -196,7 +196,7 @@ function Detail({ id, data }: { id: string; data: Decision }) {
                 ["Channel", txn.channel ?? "–"],
                 ["District", txn.district ?? "–"],
                 ["Sent at", when(txn.ts)],
-                ["Outcome", <span key="o"><StatusBadge status={txn.status} /> {txn.status_reason && <span className="text-xs text-slate-500">{words(txn.status_reason)}</span>}</span>],
+                ["Outcome", <span key="o"><StatusBadge status={txn.status} /> {txn.status_reason && <span className="text-xs text-fg-3">{words(txn.status_reason)}</span>}</span>],
                 ["Customer", data.customer_response ? `${words(data.customer_response)}${data.responded_at ? ` · ${when(data.responded_at)}` : ""}` : "no response recorded"],
               ]}
             />
@@ -205,7 +205,7 @@ function Detail({ id, data }: { id: string; data: Decision }) {
             <Facts
               rows={[
                 ["Risk score", <ScoreBar key="s" score={data.risk_score} />],
-                ["Tier", <span key="t"><TierBadge tier={data.tier} /> <span className="text-xs text-slate-500">{words(data.action)}</span></span>],
+                ["Tier", <span key="t"><TierBadge tier={data.tier} /> <span className="text-xs text-fg-3">{words(data.action)}</span></span>],
                 ["Model alone said", <TierBadge key="m" tier={data.model_tier} />],
                 ["Decided by", <DecidedBy key="d" value={data.decided_by} />],
                 ["Needs a reviewer", data.requires_review ? "Yes: a person must release or block it" : "No"],
@@ -219,14 +219,14 @@ function Detail({ id, data }: { id: string; data: Decision }) {
               ]}
             />
             {data.fallback_signals.length > 0 && (
-              <p className="mt-3 text-xs text-slate-500">Fallback signals: {data.fallback_signals.map(words).join(", ")}</p>
+              <p className="mt-3 text-xs text-fg-3">Fallback signals: {data.fallback_signals.map(words).join(", ")}</p>
             )}
           </Card>
           <Card title="What the customer saw" hint="Chosen by tier and scam type from fixed, reviewed wording.">
             {data.customer_message ? (
               <div className="space-y-2 text-sm">
-                <p lang="bn" className="rounded-md bg-amber-50 p-3 text-slate-900">{data.customer_message.bn}</p>
-                <p className="text-slate-600">{data.customer_message.en}</p>
+                <p lang="bn" className="rounded-xl bg-warn/10 p-3 text-fg">{data.customer_message.bn}</p>
+                <p className="text-fg-2">{data.customer_message.en}</p>
               </div>
             ) : (
               <Empty>Nothing: the payment went through without interruption.</Empty>
@@ -248,7 +248,7 @@ function Detail({ id, data }: { id: string; data: Decision }) {
               <ul className="space-y-2 text-sm" lang={lang}>
                 {data.recommended_actions.map((action) => (
                   <li key={action.id} className="flex gap-2">
-                    <span className="text-slate-400">→</span>
+                    <span className="text-fg-4">→</span>
                     <span>
                       {action[lang]}{" "}
                       {action.needs_second_approver && <Badge tone="violet">needs second approver</Badge>}

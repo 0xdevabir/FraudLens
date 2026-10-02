@@ -60,7 +60,7 @@ function Detail({ ring, reload }: { ring: Ring; reload: () => void }) {
       />
 
       {proposal && (
-        <div role="status" className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+        <div role="status" className="mb-4 rounded-xl border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn">
           {proposal.requested.length} freeze request{proposal.requested.length === 1 ? "" : "s"} sent for approval. Nothing is frozen until a
           supervisor approves on the <Link href="/approvals" className="underline">approvals page</Link>.
           {proposal.skipped.length > 0 && (
@@ -124,10 +124,10 @@ function Detail({ ring, reload }: { ring: Ring; reload: () => void }) {
       <Card title="Wallets" className="mt-4" flush>
         <Table head={["Wallet", "Role", "State"]}>
           {ring.wallets.map((id) => (
-            <tr key={id} className="hover:bg-slate-50">
+            <tr key={id} className="hover:bg-wash">
               <Td><Id value={id} /></Td>
               <Td>{role(id)}</Td>
-              <Td>{sets.frozen.has(id) ? <Badge tone="blue">frozen</Badge> : <span className="text-slate-400">active</span>}</Td>
+              <Td>{sets.frozen.has(id) ? <Badge tone="blue">frozen</Badge> : <span className="text-fg-4">active</span>}</Td>
             </tr>
           ))}
         </Table>

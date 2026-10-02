@@ -69,7 +69,7 @@ export default function AuditPage() {
         sub="Every sign-in, every wallet opened, every identifier revealed and every decision a person took, with who did it and when. Rows are only ever added."
       />
       <Card className="mb-4">
-        <form onSubmit={apply} className="flex flex-wrap items-end gap-3 text-xs text-slate-600">
+        <form onSubmit={apply} className="flex flex-wrap items-end gap-3 text-xs text-fg-2">
           <label>Who (username)<input className={`${inputClass} mt-1 block w-36`} maxLength={64} {...field("actor")} /></label>
           <label>
             Action
@@ -87,7 +87,7 @@ export default function AuditPage() {
           </label>
           <label>Its id<input className={`${inputClass} mt-1 block w-36`} maxLength={64} placeholder="W0001234 or 76" {...field("object_id")} /></label>
           <Button type="submit" variant="primary" disabled={invalid}>Filter</Button>
-          {invalid && <span className="text-red-700">Letters, digits and . : _ - only.</span>}
+          {invalid && <span className="text-bad">Letters, digits and . : _ - only.</span>}
         </form>
       </Card>
       <Card flush>
@@ -99,22 +99,22 @@ export default function AuditPage() {
                   {data.map((row) => (
                     <tr key={row.id}>
                       <Td className="whitespace-nowrap tabular-nums">{day(row.at)} {clock(row.at)}</Td>
-                      <Td>{row.actor ?? "system"}{row.role && <span className="ml-1 text-xs text-slate-400">{row.role}</span>}</Td>
+                      <Td>{row.actor ?? "system"}{row.role && <span className="ml-1 text-xs text-fg-4">{row.role}</span>}</Td>
                       <Td><Badge tone={tone(row.action)}>{row.action}</Badge></Td>
                       <Td>
                         {row.object_type ? (
                           <span className="inline-flex items-center gap-1">
-                            <span className="text-xs text-slate-500">{row.object_type}</span>
+                            <span className="text-xs text-fg-3">{row.object_type}</span>
                             {row.object_id && PERSONAL.test(row.object_id) ? <Id value={row.object_id} /> : <span className="font-mono text-xs">{row.object_id}</span>}
                           </span>
                         ) : "–"}
                       </Td>
-                      <Td className="whitespace-normal text-xs text-slate-600">{detail(row.detail)}</Td>
-                      <Td className="font-mono text-xs text-slate-500" title={row.request_id ? `request ${row.request_id}` : undefined}>{row.ip ?? "–"}</Td>
+                      <Td className="whitespace-normal text-xs text-fg-2">{detail(row.detail)}</Td>
+                      <Td className="font-mono text-xs text-fg-3" title={row.request_id ? `request ${row.request_id}` : undefined}>{row.ip ?? "–"}</Td>
                     </tr>
                   ))}
                 </Table>
-                <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+                <div className="flex items-center justify-between border-t border-line px-4 py-2 text-xs text-fg-3">
                   <span>Entries {data.at(-1)?.id} to {data[0].id}, newest first. Times here are real time, not the simulated platform clock.</span>
                   <span className="flex gap-2">
                     <Button small disabled={!before.length} onClick={() => setBefore(before.slice(0, -1))}>Newer</Button>

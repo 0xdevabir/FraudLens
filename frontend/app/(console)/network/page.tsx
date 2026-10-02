@@ -34,7 +34,7 @@ export default function NetworkPage() {
       <Card className="mb-4">
         <form onSubmit={go} className="flex flex-wrap items-end gap-2">
           <div>
-            <label htmlFor="lookup" className="mb-1 block text-xs font-medium text-slate-600">Wallet or agent number</label>
+            <label htmlFor="lookup" className="mb-1 block text-xs font-medium text-fg-2">Wallet or agent number</label>
             <input
               id="lookup"
               value={text}
@@ -46,9 +46,9 @@ export default function NetworkPage() {
             />
           </div>
           <Button type="submit" variant="primary" disabled={!valid}>Open</Button>
-          {text.trim() && !valid && <span className="text-xs text-red-700">Letters, digits, dash and underscore only.</span>}
+          {text.trim() && !valid && <span className="text-xs text-bad">Letters, digits, dash and underscore only.</span>}
         </form>
-        <p className="mt-2 text-xs text-slate-500">Opening a wallet is recorded in the audit log.</p>
+        <p className="mt-2 text-xs text-fg-3">Opening a wallet is recorded in the audit log.</p>
       </Card>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -58,9 +58,9 @@ export default function NetworkPage() {
               data.cases.length ? (
                 <Table head={["Wallet", "Case", "Priority", "Status", "Held"]}>
                   {data.cases.map((row) => (
-                    <tr key={row.id} className="hover:bg-slate-50">
+                    <tr key={row.id} className="hover:bg-wash">
                       <Td><Id value={row.subject_id} caseId={row.id} /></Td>
-                      <Td><Link href={`/cases/${row.id}`} className="text-sky-700 hover:underline">#{row.id}</Link></Td>
+                      <Td><Link href={`/cases/${row.id}`} className="text-info hover:underline">#{row.id}</Link></Td>
                       <Td><TierBadge tier={row.priority} /></Td>
                       <Td><StatusBadge status={row.status} /></Td>
                       <Td right>{row.held ? taka(row.held_amount) : "–"}</Td>
@@ -73,14 +73,14 @@ export default function NetworkPage() {
             }
           </Async>
         </Card>
-        <Card title="Largest rings" hint="Groups of wallets tied together by shared handsets and transfers." actions={<Link href="/rings" className="text-xs text-sky-700 hover:underline">All rings</Link>} flush>
+        <Card title="Largest rings" hint="Groups of wallets tied together by shared handsets and transfers." actions={<Link href="/rings" className="text-xs text-info hover:underline">All rings</Link>} flush>
           <Async state={rings}>
             {(data) =>
               data.length ? (
                 <Table head={["Ring", "Wallets", "Confirmed", "Received"]}>
                   {data.slice(0, 8).map((ring) => (
-                    <tr key={ring.ring_id} className="hover:bg-slate-50">
-                      <Td><Link href={`/rings/${ring.ring_id}`} className="font-mono text-xs text-sky-700 hover:underline">{ringLabel(ring.ring_id)}</Link></Td>
+                    <tr key={ring.ring_id} className="hover:bg-wash">
+                      <Td><Link href={`/rings/${ring.ring_id}`} className="font-mono text-xs text-info hover:underline">{ringLabel(ring.ring_id)}</Link></Td>
                       <Td right>{num(ring.size)}</Td>
                       <Td right>{num(ring.confirmed.length)}</Td>
                       <Td right>{taka(ring.received_total, true)}</Td>

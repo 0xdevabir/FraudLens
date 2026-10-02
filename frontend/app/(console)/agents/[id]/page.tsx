@@ -39,7 +39,7 @@ function Detail({ agent }: { agent: Agent }) {
             <ul className="space-y-2 text-sm">
               {agent.reasons.map((reason) => (
                 <li key={reason.metric} className="flex items-start justify-between gap-3">
-                  <span className="text-slate-800">{reason.metric === "avg_cashout" ? "Unusually large cash-outs on average" : `Unusually many ${reason.text}`}</span>
+                  <span className="text-fg">{reason.metric === "avg_cashout" ? "Unusually large cash-outs on average" : `Unusually many ${reason.text}`}</span>
                   <Badge tone={reason.z >= 3 ? "red" : "amber"}>{num(reason.z, 1)}σ above typical</Badge>
                 </li>
               ))}
@@ -54,7 +54,7 @@ function Detail({ agent }: { agent: Agent }) {
               label: words(name),
               value: Math.max(metric.z ?? 0, 0),
               note: `${num(metric.z ?? 0, 1)}σ · value ${num(metric.value ?? 0, (metric.value ?? 0) >= 100 ? 0 : 3)}`,
-              color: (metric.z ?? 0) >= 3 ? "#dc2626" : "#64748b",
+              color: (metric.z ?? 0) >= 3 ? "var(--color-bad)" : "var(--color-fg-4)",
             }))}
             format={() => ""}
             limit={{ value: 3, label: "3σ" }}

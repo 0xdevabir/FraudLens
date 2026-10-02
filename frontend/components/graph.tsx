@@ -34,18 +34,18 @@ type Placed = GraphNode & SimulationNodeDatum;
 const W = 760;
 
 function colour(node: GraphNode): string {
-  if (node.kind === "agent") return "#7c3aed";
-  if (node.flagged) return "#dc2626";
-  if (node.suspected) return "#f59e0b";
-  return "#64748b";
+  if (node.kind === "agent") return "var(--color-rule)";
+  if (node.flagged) return "var(--color-bad)";
+  if (node.suspected) return "var(--color-warn)";
+  return "var(--color-fg-4)";
 }
 
 export const GRAPH_LEGEND = [
-  { label: "Confirmed fraud", swatch: "#dc2626" },
-  { label: "Suspected mule", swatch: "#f59e0b" },
-  { label: "Other wallet", swatch: "#64748b" },
-  { label: "Agent", swatch: "#7c3aed", square: true },
-  { label: "Frozen", ring: "#0ea5e9" },
+  { label: "Confirmed fraud", swatch: "var(--color-bad)" },
+  { label: "Suspected mule", swatch: "var(--color-warn)" },
+  { label: "Other wallet", swatch: "var(--color-fg-4)" },
+  { label: "Agent", swatch: "var(--color-rule)", square: true },
+  { label: "Frozen", ring: "var(--color-info)" },
 ];
 
 /**
@@ -100,13 +100,13 @@ export function Graph({
     return set;
   }, [focus, layout]);
 
-  if (!nodes.length) return <div className="py-10 text-center text-sm text-slate-500">Nothing is connected to this wallet yet.</div>;
+  if (!nodes.length) return <div className="py-10 text-center text-sm text-fg-3">Nothing is connected to this wallet yet.</div>;
 
   return (
     <svg viewBox={`0 0 ${W} ${height}`} className="h-auto w-full select-none" role="img" aria-label="Network of connected wallets and agents">
       <defs>
         <marker id="arrow" viewBox="0 0 10 10" refX="19" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-          <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8" />
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--color-fg-4)" />
         </marker>
       </defs>
       {layout.links.map((link, i) => {
@@ -118,7 +118,7 @@ export function Graph({
           <line
             key={i}
             x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-            stroke={device ? "#0ea5e9" : "#94a3b8"}
+            stroke={device ? "var(--color-info)" : "var(--color-fg-4)"}
             strokeWidth={Math.min(1 + Math.log2(link.count ?? 1) * 0.6, 4)}
             strokeDasharray={device ? "4 3" : undefined}
             markerEnd={device ? undefined : "url(#arrow)"}
@@ -143,14 +143,14 @@ export function Graph({
             onClick={() => onSelect?.(node.id)}
             className={onSelect ? "cursor-pointer" : undefined}
           >
-            {node.frozen && <circle r={size + 5} fill="none" stroke="#0ea5e9" strokeWidth="2" />}
-            {(node.subject || selected === node.id) && <circle r={size + 3} fill="none" stroke="#0f172a" strokeWidth="1.5" />}
+            {node.frozen && <circle r={size + 5} fill="none" stroke="var(--color-info)" strokeWidth="2" />}
+            {(node.subject || selected === node.id) && <circle r={size + 3} fill="none" stroke="var(--color-fg)" strokeWidth="1.5" />}
             {node.kind === "agent" ? (
               <rect x={-size + 1} y={-size + 1} width={size * 2 - 2} height={size * 2 - 2} rx="2" fill={fill} />
             ) : (
-              <circle r={size} fill={node.hollow ? "#fff" : fill} stroke={fill} strokeWidth="2" />
+              <circle r={size} fill={node.hollow ? "var(--color-card)" : fill} stroke={fill} strokeWidth="2" />
             )}
-            <text y={size + 12} textAnchor="middle" fontSize="10" fill="#334155" paintOrder="stroke" stroke="#fff" strokeWidth="3">
+            <text y={size + 12} textAnchor="middle" fontSize="10" fill="var(--color-fg-2)" paintOrder="stroke" stroke="var(--color-card)" strokeWidth="3">
               {revealed.has(node.id) ? node.id : maskId(node.id)}
             </text>
           </g>
@@ -162,7 +162,7 @@ export function Graph({
 
 export function GraphLegend({ extra }: { extra?: { label: string; dashed?: boolean; hollow?: boolean }[] }) {
   return (
-    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-fg-2">
       {GRAPH_LEGEND.map((item) => (
         <span key={item.label} className="inline-flex items-center gap-1.5">
           <span
@@ -179,9 +179,9 @@ export function GraphLegend({ extra }: { extra?: { label: string; dashed?: boole
       {extra?.map((item) => (
         <span key={item.label} className="inline-flex items-center gap-1.5">
           {item.dashed ? (
-            <span className="inline-block w-4 border-t-2 border-dashed border-sky-500" />
+            <span className="inline-block w-4 border-t-2 border-dashed border-info" />
           ) : (
-            <span className="inline-block size-2.5 rounded-full border-2 border-slate-500 bg-white" />
+            <span className="inline-block size-2.5 rounded-full border-2 border-fg-3 bg-card" />
           )}
           {item.label}
         </span>

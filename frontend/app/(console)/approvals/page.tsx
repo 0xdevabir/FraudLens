@@ -66,23 +66,23 @@ export default function ApprovalsPage() {
         title="Freeze approvals"
         sub="Freezing a wallet takes two people: a reviewer asks, and a supervisor who is not that reviewer decides. Nothing here is automatic."
       />
-      {outcome && <div role="status" className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{outcome}</div>}
+      {outcome && <div role="status" className="mb-3 rounded-xl border border-good/30 bg-good/10 px-3 py-2 text-sm text-good">{outcome}</div>}
       {!canApprove && (
-        <div className="mb-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+        <div className="mb-3 rounded-xl border border-line bg-card px-3 py-2 text-sm text-fg-2">
           You can see the requests. Only a supervisor can approve or reject them.
         </div>
       )}
 
       {status === "pending" && rings.length > 0 && (
         <Card title="Ring proposals" hint="Requests that were raised together for one ring. Each wallet is still decided and audited separately." className="mb-4">
-          <ul className="divide-y divide-slate-100 text-sm">
+          <ul className="divide-y divide-line text-sm">
             {rings.map(([ring, group]) => {
               const allowed = group.filter((request) => !mine(request));
               return (
                 <li key={ring} className="flex flex-wrap items-center justify-between gap-2 py-2">
                   <span>
-                    <Link href={`/rings/${ring}`} className="font-medium text-sky-700 hover:underline">{ring}</Link>
-                    <span className="text-slate-600"> · {group.length} wallets waiting · asked by {group[0].requester}</span>
+                    <Link href={`/rings/${ring}`} className="font-medium text-info hover:underline">{ring}</Link>
+                    <span className="text-fg-2"> · {group.length} wallets waiting · asked by {group[0].requester}</span>
                   </span>
                   {canApprove && (
                     <span className="flex gap-2">
@@ -102,7 +102,7 @@ export default function ApprovalsPage() {
       )}
 
       <Card flush>
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-100 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-4 py-3">
           {STATUSES.map((value) => <Chip key={value} on={status === value} onClick={() => setStatus(value)}>{words(value)}</Chip>)}
         </div>
         <Async state={requests}>
@@ -110,21 +110,21 @@ export default function ApprovalsPage() {
             rows.length ? (
               <Table head={["Request", "Wallet", "Status", "Reason", "Asked by", "Case", status === "pending" ? "" : "Decision"]}>
                 {rows.map((request) => (
-                  <tr key={request.id} className="hover:bg-slate-50">
+                  <tr key={request.id} className="hover:bg-wash">
                     <Td>#{request.id}</Td>
                     <Td><Id value={request.wallet_id} caseId={request.case_id} /></Td>
                     <Td><StatusBadge status={request.status} /></Td>
-                    <Td className="max-w-md whitespace-normal text-slate-700">{request.reason}</Td>
-                    <Td className="whitespace-nowrap text-slate-600">
+                    <Td className="max-w-md whitespace-normal text-fg-2">{request.reason}</Td>
+                    <Td className="whitespace-nowrap text-fg-2">
                       {request.requester}
-                      <div className="text-xs text-slate-500">{when(request.created_at)}</div>
+                      <div className="text-xs text-fg-3">{when(request.created_at)}</div>
                     </Td>
                     <Td>
-                      {request.case_id ? <Link href={`/cases/${request.case_id}`} className="text-sky-700 hover:underline">#{request.case_id}</Link> : <span className="text-slate-400">–</span>}
+                      {request.case_id ? <Link href={`/cases/${request.case_id}`} className="text-info hover:underline">#{request.case_id}</Link> : <span className="text-fg-4">–</span>}
                     </Td>
                     <Td className="max-w-sm whitespace-normal">
                       {request.status !== "pending" ? (
-                        <span className="text-slate-600">{request.decider}: {request.decision_note}</span>
+                        <span className="text-fg-2">{request.decider}: {request.decision_note}</span>
                       ) : !canApprove ? null : mine(request) ? (
                         <Badge title="The two-person rule: whoever asked cannot approve">you asked for this</Badge>
                       ) : (

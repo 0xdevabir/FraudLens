@@ -38,11 +38,14 @@ const CATEGORIES: [string, string, string][] = [
 const WALLET_ID = /^[A-Za-z0-9_-]{1,32}$/;
 
 function Screen({ tone, title, children }: { tone: Tier | "plain"; title: ReactNode; children: ReactNode }) {
-  const bar = { plain: "bg-slate-800", allow: "bg-emerald-600", warn: "bg-amber-500", step_up: "bg-orange-500", hold: "bg-red-600" }[tone];
+  const bar = {
+    plain: "bg-fill text-fg", allow: "bg-good text-accent-ink", warn: "bg-warn text-accent-ink",
+    step_up: "bg-alert text-accent-ink", hold: "bg-bad text-accent-ink",
+  }[tone];
   return (
     <div className="flex h-full flex-col">
-      <div className={cx("px-4 py-3 text-sm font-semibold text-white", bar)}>{title}</div>
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4 text-sm text-slate-800">{children}</div>
+      <div className={cx("px-4 pt-5 pb-3 text-sm font-semibold transition-colors duration-500", bar)}>{title}</div>
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4 text-sm text-fg">{children}</div>
     </div>
   );
 }
@@ -51,19 +54,19 @@ function Message({ text }: { text: Text2 | null | undefined }) {
   if (!text) return null;
   return (
     <div>
-      <p lang="bn" className="text-[15px] leading-relaxed text-slate-900">{text.bn}</p>
-      <p className="mt-2 text-xs leading-relaxed text-slate-500">{text.en}</p>
+      <p lang="bn" className="text-[15px] leading-relaxed text-fg">{text.bn}</p>
+      <p className="mt-2 text-xs leading-relaxed text-fg-3">{text.en}</p>
     </div>
   );
 }
 
 function PhoneButton({ tone = "dark", ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: "dark" | "light" | "red" }) {
   const look = {
-    dark: "bg-slate-900 text-white disabled:bg-slate-300",
-    light: "border border-slate-300 bg-white text-slate-800",
-    red: "border border-red-300 bg-red-50 text-red-800",
+    dark: "bg-accent font-semibold text-accent-ink disabled:opacity-40",
+    light: "bg-white/8 text-fg hover:bg-white/14",
+    red: "border border-bad/30 bg-bad/10 text-bad",
   }[tone];
-  return <button type="button" {...rest} className={cx("w-full rounded-lg px-3 py-2.5 text-sm font-medium disabled:cursor-not-allowed", look)} />;
+  return <button type="button" {...rest} className={cx("w-full rounded-2xl px-3 py-2.5 text-sm font-medium disabled:cursor-not-allowed", look)} />;
 }
 
 function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: string }) {
@@ -183,8 +186,8 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
     </PhoneButton>
   );
   const party = payment && (
-    <div className="rounded-lg bg-slate-50 px-3 py-2">
-      <div className="text-xs text-slate-500">To</div>
+    <div className="rounded-2xl bg-wash px-3 py-2">
+      <div className="text-xs text-fg-3">To</div>
       <div className="font-mono">{maskId(payment.receiver_id)}</div>
       <div className="mt-1 text-2xl font-semibold tabular-nums">{taka(payment.amount)}</div>
     </div>
@@ -192,7 +195,7 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
 
   let screen: ReactNode;
   if (!payment) {
-    screen = <Screen tone="plain" title="Send money"><p className="text-slate-500">Choose a payment on the left to begin.</p></Screen>;
+    screen = <Screen tone="plain" title="Send money"><p className="text-fg-3">Choose a payment on the left to begin.</p></Screen>;
   } else if (reporting) {
     screen = (
       <Screen tone="plain" title={<><span lang="bn">কী হয়েছিল?</span> · What happened?</>}>
@@ -202,10 +205,10 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
             type="button"
             disabled={busy}
             onClick={() => report(id, en)}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-50"
+            className="rounded-2xl border border-line px-3 py-2 text-left hover:bg-wash disabled:opacity-50"
           >
             <div lang="bn">{bn}</div>
-            <div className="text-xs text-slate-500">{en}</div>
+            <div className="text-xs text-fg-3">{en}</div>
           </button>
         ))}
         <PhoneButton tone="light" onClick={() => setReporting(false)}>Back</PhoneButton>
@@ -215,10 +218,10 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
     screen = (
       <Screen tone="plain" title="Send money">
         {party}
-        <div className="text-xs text-slate-500">Balance {taka(payment.sender_balance_before)} · from {maskId(payment.sender_id)}</div>
+        <div className="text-xs text-fg-3">Balance {taka(payment.sender_balance_before)} · from {maskId(payment.sender_id)}</div>
         {check && check.level !== "none" && (
-          <div className={cx("rounded-lg border px-3 py-2", check.level === "high" ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50")}>
-            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
+          <div className={cx("rounded-2xl border px-3 py-2", check.level === "high" ? "border-bad/30 bg-bad/10" : "border-warn/30 bg-warn/10")}>
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-fg-2">
               <span lang="bn">পাঠানোর আগে দেখুন</span> · Before you send
             </div>
             <Message text={check.message} />
@@ -235,7 +238,7 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
       <Screen tone="step_up" title={<><span lang="bn">আবার যাচাই করুন</span> · Verify again</>}>
         {party}
         <Message text={decision.customer_message} />
-        <label className="block text-xs text-slate-600">
+        <label className="block text-xs text-fg-2">
           <span lang="bn">পিন দিন</span> · Enter your PIN
           <input
             inputMode="numeric"
@@ -248,7 +251,7 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
           />
         </label>
         {minutes !== null && minutes > 0 && (
-          <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-900">
+          <div className="rounded-2xl border border-alert/30 bg-alert/10 px-3 py-2 text-xs text-alert">
             <span lang="bn">এই লেনদেনটি আরও {num(minutes)} মিনিট পর পাঠানো যাবে।</span> You can send this in {num(minutes)} more minutes. Use the wait
             to check who asked you to pay.
           </div>
@@ -280,7 +283,7 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
         {party}
         <Message text={decision?.customer_message} />
         {decision?.review_sla_minutes != null && (
-          <p className="text-xs text-slate-500">Your money has not left your account. A person will review this within {decision.review_sla_minutes} minutes.</p>
+          <p className="text-xs text-fg-3">Your money has not left your account. A person will review this within {decision.review_sla_minutes} minutes.</p>
         )}
         <div className="mt-auto">{reportButton}</div>
       </Screen>
@@ -295,7 +298,7 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
     screen = (
       <Screen tone={sent ? "allow" : "plain"} title={title}>
         {party}
-        <p className="text-slate-600">
+        <p className="text-fg-2">
           {sent
             ? "The payment went through."
             : status === "cancelled"
@@ -324,24 +327,24 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
                 aria-pressed={picked === scenario.id}
                 onClick={() => start(scenario.payment, scenario.id)}
                 className={cx(
-                  "flex w-full items-start justify-between gap-3 rounded-lg border px-3 py-2 text-left text-sm",
-                  picked === scenario.id ? "border-slate-900 bg-slate-50" : "border-slate-200 hover:bg-slate-50",
+                  "flex w-full items-start justify-between gap-3 rounded-2xl border px-3 py-2 text-left text-sm",
+                  picked === scenario.id ? "border-accent/60 bg-accent/10" : "border-line hover:bg-wash",
                 )}
               >
                 <span>
-                  <span className="font-medium text-slate-900">{SCENARIO[scenario.id]?.title ?? words(scenario.id)}</span>
-                  <span className="block text-xs text-slate-500">
+                  <span className="font-medium text-fg">{SCENARIO[scenario.id]?.title ?? words(scenario.id)}</span>
+                  <span className="block text-xs text-fg-3">
                     {SCENARIO[scenario.id]?.text} {taka(scenario.payment.amount)} to {maskId(scenario.payment.receiver_id)}.
                   </span>
                 </span>
                 <TierBadge tier={scenario.expected_tier} />
               </button>
             ))}
-            {!scenarios.length && <p className="text-sm text-slate-500">No ready payments: the platform has not scored any yet.</p>}
+            {!scenarios.length && <p className="text-sm text-fg-3">No ready payments: the platform has not scored any yet.</p>}
           </div>
         </Card>
         <Card title="Or enter your own" hint="Both wallets must be ones the platform has seen.">
-          <form onSubmit={putCustom} className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+          <form onSubmit={putCustom} className="grid grid-cols-2 gap-2 text-xs text-fg-2">
             <label>From wallet<input className={`${inputClass} mt-1 w-full`} value={custom.sender} maxLength={32} onChange={(e) => setCustom({ ...custom, sender: e.target.value })} /></label>
             <label>To wallet<input className={`${inputClass} mt-1 w-full`} value={custom.receiver} maxLength={32} onChange={(e) => setCustom({ ...custom, receiver: e.target.value })} /></label>
             <label>Amount (taka)<input className={`${inputClass} mt-1 w-full`} inputMode="decimal" value={custom.amount} maxLength={10} onChange={(e) => setCustom({ ...custom, amount: e.target.value })} /></label>
@@ -351,13 +354,13 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
       </div>
 
       <div>
-        <div className="mx-auto h-[36rem] w-full max-w-[22rem] overflow-hidden rounded-[2rem] border-[10px] border-slate-900 bg-white shadow-xl">
+        <div className="mx-auto h-[36rem] w-full max-w-[22rem] overflow-hidden rounded-[2.75rem] border-[10px] border-black bg-base shadow-2xl shadow-black/60 ring-1 ring-white/15">
           {screen}
         </div>
         {reported && (
-          <p className="mt-3 text-center text-xs text-slate-600">
+          <p className="mt-3 text-center text-xs text-fg-2">
             <span lang="bn">অভিযোগ গ্রহণ করা হয়েছে।</span> Report received.{" "}
-            {canReview ? <Link href={`/cases/${reported.case_id}`} className="text-sky-700 hover:underline">It is on case #{reported.case_id}</Link> : `It is on case #${reported.case_id}`}.
+            {canReview ? <Link href={`/cases/${reported.case_id}`} className="text-info hover:underline">It is on case #{reported.case_id}</Link> : `It is on case #${reported.case_id}`}.
           </p>
         )}
         {error && <div className="mt-3"><ErrorNote error={error} /></div>}
@@ -378,40 +381,40 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
                   ...(decision.case_id
                     ? ([[
                         "Case",
-                        canReview ? <Link key="case" href={`/cases/${decision.case_id}`} className="text-sky-700 hover:underline">#{decision.case_id}</Link> : `#${decision.case_id}`,
+                        canReview ? <Link key="case" href={`/cases/${decision.case_id}`} className="text-info hover:underline">#{decision.case_id}</Link> : `#${decision.case_id}`,
                       ]] as [ReactNode, ReactNode][])
                     : []),
                 ]}
               />
             ) : (
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-fg-2">
                 Not scored: the payment was {words(result.status).toLowerCase()} ({words(result.status_reason ?? "no reason given").toLowerCase()}).
               </p>
             )
           ) : (
-            <p className="text-sm text-slate-500">Send the payment to see the decision.</p>
+            <p className="text-sm text-fg-3">Send the payment to see the decision.</p>
           )}
           {result && decision && canReview && (
-            <Link href={`/decisions/${result.txn_id}`} className="mt-3 inline-block text-sm text-sky-700 hover:underline">
+            <Link href={`/decisions/${result.txn_id}`} className="mt-3 inline-block text-sm text-info hover:underline">
               Open the full explanation: reasons, rules and similar cases →
             </Link>
           )}
         </Card>
         <Card title="Platform clock" hint="The demo runs on simulated time, so a cooling-off period can be shown ending.">
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-            <span>{when(now)} <span className="text-slate-500">Dhaka time</span></span>
+            <span>{when(now)} <span className="text-fg-3">Dhaka time</span></span>
             {waitMinutes > 0 ? (
               <Button small onClick={() => skip(waitMinutes)} disabled={busy}>Skip ahead {waitMinutes} minutes</Button>
             ) : (
               <Badge>{wait === 0 ? "cooling-off has passed" : "no wait in progress"}</Badge>
             )}
           </div>
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="mt-2 text-xs text-fg-3">
             Skipping ahead moves the clock for the whole platform: review deadlines on open cases come closer by the same amount. It is recorded in the
             audit log.
           </p>
         </Card>
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-fg-3">
           In production upay’s own app shows these screens and checks the PIN; it calls the same endpoints with a service account. Here a member of staff
           plays the customer, any four digits pass the PIN check, and every action is audited as a demo action.
         </p>

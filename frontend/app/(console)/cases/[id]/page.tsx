@@ -56,13 +56,13 @@ function eventText(event: CaseEvent): string {
 
 function Activity({ events }: { events: CaseEvent[] }) {
   return (
-    <ol className="space-y-3 border-l border-slate-200 pl-4 text-sm">
+    <ol className="space-y-3 border-l border-line pl-4 text-sm">
       {events.map((event) => (
         <li key={event.id} className="relative">
-          <span className="absolute top-1.5 -left-[21px] size-2 rounded-full bg-slate-400" />
-          <div className="font-medium text-slate-800">{eventText(event)}</div>
-          {event.body && <p className="whitespace-pre-line text-slate-700">{event.body}</p>}
-          <div className="text-xs text-slate-500">{event.actor ?? "system"} · recorded {when(event.at)}</div>
+          <span className="absolute top-1.5 -left-[21px] size-2 rounded-full bg-fg-4" />
+          <div className="font-medium text-fg">{eventText(event)}</div>
+          {event.body && <p className="whitespace-pre-line text-fg-2">{event.body}</p>}
+          <div className="text-xs text-fg-3">{event.actor ?? "system"} · recorded {when(event.at)}</div>
         </li>
       ))}
     </ol>
@@ -90,7 +90,7 @@ function NoteBox({ caseId, onDone }: { caseId: number; onDone: () => void }) {
   }
   return (
     <form onSubmit={submit} className="mt-4 space-y-2">
-      <label htmlFor="note" className="block text-xs font-medium text-slate-600">Add a note</label>
+      <label htmlFor="note" className="block text-xs font-medium text-fg-2">Add a note</label>
       <textarea id="note" rows={2} maxLength={4000} value={text} onChange={(event) => setText(event.target.value)} className={`${inputClass} w-full`} />
       {error && <ErrorNote error={error} />}
       <Button type="submit" small variant="primary" disabled={!text.trim() || busy}>{busy ? "Saving…" : "Save note"}</Button>
@@ -182,7 +182,7 @@ function Detail({ data, reload }: { data: CaseDetail; reload: () => void }) {
                   ))}
                 </div>
                 {!mayDecide && (
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-fg-3">
                     {data.status === "escalated" ? "An escalated case needs a supervisor's verdict." : "The case is assigned to someone else."}
                   </p>
                 )}
@@ -203,15 +203,15 @@ function Detail({ data, reload }: { data: CaseDetail; reload: () => void }) {
 
           <Card title="Customer reports" hint="Sent from the app with one tap.">
             {data.customer_reports.length ? (
-              <ul className="divide-y divide-slate-100 text-sm">
+              <ul className="divide-y divide-line text-sm">
                 {data.customer_reports.map((report) => (
                   <li key={report.id} className="py-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge tone="amber">{words(report.category)}</Badge>
-                      <span className="text-slate-600">from <Id value={report.reporter_id} caseId={data.id} /> · {when(report.reported_at)}</span>
+                      <span className="text-fg-2">from <Id value={report.reporter_id} caseId={data.id} /> · {when(report.reported_at)}</span>
                     </div>
-                    {report.description && <p className="mt-1 text-slate-800">{report.description}</p>}
-                    {report.txn_id && <p className="text-xs text-slate-500">about payment #{report.txn_id}</p>}
+                    {report.description && <p className="mt-1 text-fg">{report.description}</p>}
+                    {report.txn_id && <p className="text-xs text-fg-3">about payment #{report.txn_id}</p>}
                   </li>
                 ))}
               </ul>

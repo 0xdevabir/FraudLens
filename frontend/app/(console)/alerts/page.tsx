@@ -91,9 +91,9 @@ export default function AlertsPage() {
         }
       />
       <Card flush>
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-slate-100 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-line px-4 py-3">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-xs font-medium text-slate-500">Tier</span>
+            <span className="mr-1 text-xs font-medium text-fg-3">Tier</span>
             {TIERS.map((tier) => (
               <Chip key={tier} on={tiers.includes(tier)} onClick={() => { setTiers(toggle(tiers, tier)); setPage(0); }}>
                 {TIER_LABEL[tier]}
@@ -101,17 +101,17 @@ export default function AlertsPage() {
             ))}
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-xs font-medium text-slate-500">Outcome</span>
+            <span className="mr-1 text-xs font-medium text-fg-3">Outcome</span>
             {STATUSES.map((status) => (
               <Chip key={status} on={statuses.includes(status)} onClick={() => { setStatuses(toggle(statuses, status)); setPage(0); }}>
                 {words(status)}
               </Chip>
             ))}
           </div>
-          <span className="ml-auto text-xs text-slate-500">{alerts.data ? `${num(total)} alerts` : ""}</span>
+          <span className="ml-auto text-xs text-fg-3">{alerts.data ? `${num(total)} alerts` : ""}</span>
         </div>
         <Async state={alerts}>{(data) => <AlertTable alerts={data.alerts} />}</Async>
-        <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+        <div className="flex items-center justify-between border-t border-line px-4 py-2 text-xs text-fg-3">
           <span>Page {page + 1} of {num(pages)}</span>
           <span className="flex gap-2">
             <Button small disabled={page === 0} onClick={() => setPage(page - 1)}>Newer</Button>

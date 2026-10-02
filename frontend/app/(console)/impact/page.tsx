@@ -40,13 +40,13 @@ function Simulator({ insights, version }: { insights: Insights; version: string 
   const xs = points.map((p) => p.alert_rate * 100);
   const labels = points.map((p) => pct(p.alert_rate, 2));
   const money = [
-    { name: "Stopped, counting held mule cash-outs", color: "#059669", values: points.map((p) => p.taka_recall_with_exit_holds) },
-    { name: "Stopped at the victim's own payment", color: "#0ea5e9", values: points.map((p) => p.taka_recall) },
-    { name: "Share of alerts that are really fraud", color: "#94a3b8", values: points.map((p) => p.precision), dashed: true },
+    { name: "Stopped, counting held mule cash-outs", color: "var(--color-good)", values: points.map((p) => p.taka_recall_with_exit_holds) },
+    { name: "Stopped at the victim's own payment", color: "var(--color-info)", values: points.map((p) => p.taka_recall) },
+    { name: "Share of alerts that are really fraud", color: "var(--color-fg-4)", values: points.map((p) => p.precision), dashed: true },
   ];
   const load = [
-    { name: "Alerts a day", color: "#f59e0b", values: points.map((p) => p.alerts_per_day) },
-    { name: "Of which honest payments", color: "#dc2626", values: points.map((p) => p.false_alerts_per_day) },
+    { name: "Alerts a day", color: "var(--color-warn)", values: points.map((p) => p.alerts_per_day) },
+    { name: "Of which honest payments", color: "var(--color-bad)", values: points.map((p) => p.false_alerts_per_day) },
   ];
 
   return (
@@ -54,9 +54,9 @@ function Simulator({ insights, version }: { insights: Insights; version: string 
       <Card>
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Alert when the fraud probability is at least</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-fg-3">Alert when the fraud probability is at least</div>
             <div className="text-3xl font-semibold tabular-nums">{pct(point.threshold, point.threshold < 0.01 ? 3 : 1)}</div>
-            <div className="text-sm text-slate-500">
+            <div className="text-sm text-fg-3">
               which interrupts {pct(point.alert_rate, 2)} of payments
               {index === today ? " — the warn threshold in force today" : ""}
             </div>
@@ -71,9 +71,9 @@ function Simulator({ insights, version }: { insights: Insights; version: string 
           value={index}
           onChange={(event) => setIndex(Number(event.target.value))}
           aria-label="Alert threshold"
-          className="mt-4 w-full accent-slate-900"
+          className="mt-4 w-full accent-accent"
         />
-        <div className="flex justify-between text-xs text-slate-500">
+        <div className="flex justify-between text-xs text-fg-3">
           <span>Stricter: fewer alerts, more fraud missed</span>
           <span>Looser: more fraud stopped, more customers interrupted</span>
         </div>
@@ -137,7 +137,7 @@ function Simulator({ insights, version }: { insights: Insights; version: string 
           </Table>
         </Card>
         <Card title="Assumption you can change">
-          <label className="block text-sm text-slate-700">
+          <label className="block text-sm text-fg-2">
             Minutes a reviewer spends on one alert
             <input
               type="number"
@@ -148,13 +148,13 @@ function Simulator({ insights, version }: { insights: Insights; version: string 
               className={`${inputClass} mt-1 w-28`}
             />
           </label>
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-fg-3">
             Workload is the upper bound: today only the hold tier goes to a reviewer; warnings and step-up checks are answered by the customer.
           </p>
         </Card>
       </div>
 
-      <p className="mt-4 text-xs text-slate-500">
+      <p className="mt-4 text-xs text-fg-3">
         Measured by replaying model {version} over {num(insights.rows)} payments from {days} days it never trained on. The fraud is simulated, so the
         taka figures show the shape of the trade-off, not a forecast for a real customer base. Moving the slider changes nothing in production: thresholds
         are part of the versioned policy.

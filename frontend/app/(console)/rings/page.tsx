@@ -21,8 +21,8 @@ export default function RingsPage() {
             data.length ? (
               <Table head={["Ring", "Wallets", "Confirmed fraud", "Linked by handset only", "Takeover victims", "Shared handsets", "Transfers inside", "Money received", "Frozen"]}>
                 {data.map((ring) => (
-                  <tr key={ring.ring_id} className="hover:bg-slate-50">
-                    <Td><Link href={`/rings/${ring.ring_id}`} className="font-mono text-xs font-medium text-sky-700 hover:underline">{ringLabel(ring.ring_id)}</Link></Td>
+                  <tr key={ring.ring_id} className="hover:bg-wash">
+                    <Td><Link href={`/rings/${ring.ring_id}`} className="font-mono text-xs font-medium text-info hover:underline">{ringLabel(ring.ring_id)}</Link></Td>
                     <Td right>{num(ring.size)}</Td>
                     <Td right>{num(ring.confirmed.length)}</Td>
                     <Td right>{num(ring.linked_only.length)}</Td>
@@ -31,7 +31,7 @@ export default function RingsPage() {
                     <Td right>{num(ring.transfer_links)}</Td>
                     <Td right>{taka(ring.received_total)}</Td>
                     <Td right>
-                      {ring.frozen.length ? <Badge tone="blue">{ring.frozen.length} of {ring.size}</Badge> : <span className="text-slate-400">none</span>}
+                      {ring.frozen.length ? <Badge tone="blue">{ring.frozen.length} of {ring.size}</Badge> : <span className="text-fg-4">none</span>}
                     </Td>
                   </tr>
                 ))}

@@ -23,8 +23,8 @@ function Live({ summary, daily }: { summary: Summary; daily: DailyRow[] }) {
     values: daily.map((row) => row.decisions[tier] ?? 0),
   }));
   const money = [
-    { name: "Stopped", color: "#059669", values: daily.map((row) => row.alerts.blocked?.amount ?? 0) },
-    { name: "Went through after an alert", color: "#94a3b8", values: daily.map((row) => row.alerts.completed?.amount ?? 0) },
+    { name: "Stopped", color: "var(--color-good)", values: daily.map((row) => row.alerts.blocked?.amount ?? 0) },
+    { name: "Went through after an alert", color: "var(--color-fg-4)", values: daily.map((row) => row.alerts.completed?.amount ?? 0) },
   ];
   const verdicts = summary.cases.verdicts;
 
@@ -70,15 +70,15 @@ function Live({ summary, daily }: { summary: Summary; daily: DailyRow[] }) {
         <Card title="What reviewers found" hint="Verdicts on closed cases. These become the labels the next model is trained on.">
           <HBars
             rows={[
-              { label: "Confirmed fraud", value: verdicts.confirmed_fraud ?? 0, color: "#dc2626" },
-              { label: "Legitimate (false alarm)", value: verdicts.legitimate ?? 0, color: "#10b981" },
-              { label: "Inconclusive", value: verdicts.inconclusive ?? 0, color: "#94a3b8" },
+              { label: "Confirmed fraud", value: verdicts.confirmed_fraud ?? 0, color: "var(--color-bad)" },
+              { label: "Legitimate (false alarm)", value: verdicts.legitimate ?? 0, color: "var(--color-good)" },
+              { label: "Inconclusive", value: verdicts.inconclusive ?? 0, color: "var(--color-fg-4)" },
             ]}
           />
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-fg-3">
             {num(summary.cases.by_status.open ?? 0)} open · {num(summary.cases.by_status.in_review ?? 0)} in review ·{" "}
             {num(summary.cases.by_status.escalated ?? 0)} escalated · {num(summary.cases.by_status.closed ?? 0)} closed.{" "}
-            <Link href="/cases" className="text-sky-700 hover:underline">Open the case queue</Link>
+            <Link href="/cases" className="text-info hover:underline">Open the case queue</Link>
           </p>
         </Card>
         <Card title="Wallets acted on" hint="A freeze always needs a second person.">
@@ -90,18 +90,18 @@ function Live({ summary, daily }: { summary: Summary; daily: DailyRow[] }) {
             ].map(([label, value]) => (
               <div key={label}>
                 <div className="text-2xl font-semibold tabular-nums">{num(value as number)}</div>
-                <div className="text-xs text-slate-500">{label}</div>
+                <div className="text-xs text-fg-3">{label}</div>
               </div>
             ))}
           </div>
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-fg-3">
             Payments to a confirmed-fraud wallet are held by rule; payments to a frozen wallet are refused outright.
           </p>
         </Card>
         <Card title="Platform health">
           <div className="space-y-2 text-sm">
             <div className="flex items-center justify-between">
-              <span className="text-slate-600">Scoring mode</span>
+              <span className="text-fg-2">Scoring mode</span>
               <span className="flex gap-1">
                 {Object.entries(summary.decisions.by_mode).map(([mode, count]) => (
                   <Badge key={mode} tone={mode === "model" ? "green" : "amber"}>{words(mode)} · {num(count)}</Badge>
@@ -109,15 +109,15 @@ function Live({ summary, daily }: { summary: Summary; daily: DailyRow[] }) {
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-slate-600">Event stream worker</span>
+              <span className="text-fg-2">Event stream worker</span>
               <Badge tone={summary.stream.worker_running ? "green" : "red"}>{summary.stream.worker_running ? "Running" : "Stopped"}</Badge>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-slate-600">Stream backlog</span>
+              <span className="text-fg-2">Stream backlog</span>
               <span className="tabular-nums">{num(summary.stream.backlog)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-slate-600">Events that could not be processed</span>
+              <span className="text-fg-2">Events that could not be processed</span>
               <span className="tabular-nums">{num(summary.stream.dead_lettered)}</span>
             </div>
           </div>
@@ -132,8 +132,8 @@ function Backtest({ report }: { report: Report }) {
   if (!insights) return null;
   const { warn, hold } = insights.at_thresholds;
   const lines = [
-    { name: "Taken from victims", color: "#dc2626", values: insights.daily.map((row) => row.victim_taka) },
-    { name: "Of which FraudLens would have stopped", color: "#059669", values: insights.daily.map((row) => row.taka_stopped) },
+    { name: "Taken from victims", color: "var(--color-bad)", values: insights.daily.map((row) => row.victim_taka) },
+    { name: "Of which FraudLens would have stopped", color: "var(--color-good)", values: insights.daily.map((row) => row.taka_stopped) },
   ];
   return (
     <Card
@@ -144,22 +144,22 @@ function Backtest({ report }: { report: Report }) {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <div className="space-y-3">
           <div>
-            <div className="text-2xl font-semibold tabular-nums text-emerald-700">{pct(warn.taka_recall_with_exit_holds)}</div>
-            <div className="text-xs text-slate-500">
+            <div className="text-2xl font-semibold tabular-nums text-good">{pct(warn.taka_recall_with_exit_holds)}</div>
+            <div className="text-xs text-fg-3">
               of victims’ money interrupted before it left the system: {taka(warn.taka_stopped, true)} at the payment itself, the rest by holding the mule’s cash-out
             </div>
           </div>
           <div>
             <div className="text-2xl font-semibold tabular-nums">{num(warn.false_alerts_per_day, 1)} a day</div>
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-fg-3">
               honest payments interrupted, out of {num(warn.alerts_per_day, 1)} alerts a day ({pct(warn.alert_rate, 2)} of traffic)
             </div>
           </div>
           <div>
             <div className="text-2xl font-semibold tabular-nums">{pct(hold.precision)}</div>
-            <div className="text-xs text-slate-500">of payments held for a reviewer really were fraud</div>
+            <div className="text-xs text-fg-3">of payments held for a reviewer really were fraud</div>
           </div>
-          <Link href="/impact" className="inline-block text-sm text-sky-700 hover:underline">Move the threshold and see the trade-off →</Link>
+          <Link href="/impact" className="inline-block text-sm text-info hover:underline">Move the threshold and see the trade-off →</Link>
         </div>
         <div>
           <LineChart series={lines} labels={insights.daily.map((row) => shortDay(row.date))} format={(value) => taka(value, true)} />

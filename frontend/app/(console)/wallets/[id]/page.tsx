@@ -36,7 +36,7 @@ function Detail({ data, reload }: { data: Wallet; reload: () => void }) {
           canReview && (
             <>
               {openCase ? (
-                <Link href={`/cases/${openCase.id}`} className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">Open case #{openCase.id}</Link>
+                <Link href={`/cases/${openCase.id}`} className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-accent-ink hover:brightness-110 active:scale-[0.97]">Open case #{openCase.id}</Link>
               ) : (
                 data.registered && <Button variant="primary" onClick={() => setDialog("case")}>Open a case</Button>
               )}
@@ -64,7 +64,7 @@ function Detail({ data, reload }: { data: Wallet; reload: () => void }) {
                       "Fraud flag",
                       <span key="f">
                         {words(data.flag.reason)} · {when(data.flag.flagged_at)}
-                        {data.flag.case_id && <> · <Link href={`/cases/${data.flag.case_id}`} className="text-sky-700 hover:underline">case #{data.flag.case_id}</Link></>}
+                        {data.flag.case_id && <> · <Link href={`/cases/${data.flag.case_id}`} className="text-info hover:underline">case #{data.flag.case_id}</Link></>}
                       </span>,
                     ] as [string, React.ReactNode]]
                   : []),
@@ -76,10 +76,10 @@ function Detail({ data, reload }: { data: Wallet; reload: () => void }) {
               <Table head={["Case", "Status", "Priority", "Opened", "Verdict"]}>
                 {data.cases.map((row) => (
                   <tr key={row.id}>
-                    <Td><Link href={`/cases/${row.id}`} className="text-sky-700 hover:underline">#{row.id}</Link></Td>
+                    <Td><Link href={`/cases/${row.id}`} className="text-info hover:underline">#{row.id}</Link></Td>
                     <Td><StatusBadge status={row.status} /></Td>
                     <Td><TierBadge tier={row.priority} /></Td>
-                    <Td className="whitespace-nowrap text-slate-600">{day(row.opened_at)}</Td>
+                    <Td className="whitespace-nowrap text-fg-2">{day(row.opened_at)}</Td>
                     <Td><StatusBadge status={row.verdict} /></Td>
                   </tr>
                 ))}

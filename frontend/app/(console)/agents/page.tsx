@@ -20,8 +20,8 @@ export default function AgentsPage() {
             data.length ? (
               <Table head={["Rank", "Agent", "District", "Risk", "", "Cash-outs", "Cash-out value", "Customers", "What stands out"]}>
                 {data.map((agent) => (
-                  <tr key={agent.agent_id} className="hover:bg-slate-50">
-                    <Td right className="text-slate-500">{agent.rank}</Td>
+                  <tr key={agent.agent_id} className="hover:bg-wash">
+                    <Td right className="text-fg-3">{agent.rank}</Td>
                     <Td><Id value={agent.agent_id} /></Td>
                     <Td>{agent.district}</Td>
                     <Td right className="font-medium">{agent.risk == null ? "–" : num(agent.risk, 1)}</Td>
@@ -31,7 +31,7 @@ export default function AgentsPage() {
                     <Td right>{num(agent.n_cashouts)}</Td>
                     <Td right>{taka(agent.cashout_value, true)}</Td>
                     <Td right>{num(agent.n_customers)}</Td>
-                    <Td className="max-w-md whitespace-normal text-slate-600">{agent.reasons[0]?.text ?? "nothing unusual"}</Td>
+                    <Td className="max-w-md whitespace-normal text-fg-2">{agent.reasons[0]?.text ?? "nothing unusual"}</Td>
                   </tr>
                 ))}
               </Table>

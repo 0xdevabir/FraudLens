@@ -77,10 +77,10 @@ export const TIER_LABEL: Record<Tier, string> = {
 
 /** One colour per tier everywhere: charts, badges, the phone. */
 export const TIER_COLOR: Record<Tier, string> = {
-  allow: "#10b981",
-  warn: "#f59e0b",
-  step_up: "#f97316",
-  hold: "#dc2626",
+  allow: "var(--color-good)",
+  warn: "var(--color-warn)",
+  step_up: "var(--color-alert)",
+  hold: "var(--color-bad)",
 };
 
 /** Wallet, agent and handset ids are personal data: shown masked unless a reviewer asks. */

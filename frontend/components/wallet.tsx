@@ -42,7 +42,7 @@ export function RiskProfile({ risk }: { risk: WalletRisk }) {
         {risk.confirmed_fraud && <Badge tone="red">Confirmed fraud</Badge>}
         {risk.mule_alert && !risk.confirmed_fraud && <Badge tone="amber">Suspected mule</Badge>}
         {!risk.confirmed_fraud && !risk.mule_alert && <Badge>No mule alert</Badge>}
-        <span className="text-slate-600">
+        <span className="text-fg-2">
           Mule score {risk.mule_score == null ? "not available (too little incoming activity)" : num(risk.mule_score, 3)}
           {risk.mule_score != null && ` · alert at ${num(risk.mule_threshold, 3)}`}
           {risk.highest_mule_score_seen != null && ` · highest seen ${num(risk.highest_mule_score_seen, 3)}`}
@@ -70,7 +70,7 @@ export function RiskProfile({ risk }: { risk: WalletRisk }) {
       </div>
       {risk.shares_handset_with.length > 0 && (
         <div className="text-sm">
-          <span className="text-slate-500">Shares a handset with </span>
+          <span className="text-fg-3">Shares a handset with </span>
           <span className="inline-flex flex-wrap gap-x-3 gap-y-1">
             {risk.shares_handset_with.map((id) => <Id key={id} value={id} />)}
           </span>
@@ -120,7 +120,7 @@ export function NetworkCard({ walletId, threshold }: { walletId: string; thresho
             )}
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <GraphLegend extra={[{ label: "Shared handset", dashed: true }]} />
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-fg-3">
                 {num(data.nodes.length)} nodes{data.truncated && " · busiest links only, raise the limit to see more"}
               </span>
             </div>

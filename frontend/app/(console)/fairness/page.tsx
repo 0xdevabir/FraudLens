@@ -39,13 +39,13 @@ function Dimension({ name, rows, overall }: { name: string; rows: FairRow[]; ove
           label: label(row.group),
           value: row.false_alert_rate,
           muted: row.too_small,
-          color: !row.too_small && (row.ratio_to_overall ?? 0) >= NOTABLE ? "#f59e0b" : "#64748b",
+          color: !row.too_small && (row.ratio_to_overall ?? 0) >= NOTABLE ? "var(--color-warn)" : "var(--color-fg-4)",
           note: row.too_small ? "too few to judge" : `${num(row.ratio_to_overall, 2)}×`,
         }))}
       />
-      <Table className="mt-4 border-t border-slate-100" head={["Group", "Honest payments", "Interrupted", "Held", "Fraud caught"]}>
+      <Table className="mt-4 border-t border-line" head={["Group", "Honest payments", "Interrupted", "Held", "Fraud caught"]}>
         {rows.map((row) => (
-          <tr key={row.group} className={row.too_small ? "text-slate-400" : undefined}>
+          <tr key={row.group} className={row.too_small ? "text-fg-4" : undefined}>
             <Td>{label(row.group)}</Td>
             <Td right>{num(row.legitimate)}</Td>
             <Td right title={`${num(row.false_alerts)} payments`}>{pct(row.false_alert_rate, 2)}</Td>
@@ -84,7 +84,7 @@ function Fairness({ fairness, version }: { fairness: Insights["fairness"]; versi
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-slate-500">Group payments by</span>
+        <span className="text-fg-3">Group payments by</span>
         <Chip on={side === "sender"} onClick={() => setSide("sender")}>the customer sending</Chip>
         <Chip on={side === "receiver"} onClick={() => setSide("receiver")}>the wallet receiving</Chip>
       </div>
@@ -94,7 +94,7 @@ function Fairness({ fairness, version }: { fairness: Insights["fairness"]; versi
       </div>
 
       <Card className="mt-4" title="How to read this">
-        <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-700">
+        <ul className="list-disc space-y-1.5 pl-5 text-sm text-fg-2">
           <li>
             A false alert is an honest payment that was warned, checked again or held. The report asks whether some customers carry more of that
             cost than others, measured on model {version} over the held-out test period.

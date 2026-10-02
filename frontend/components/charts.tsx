@@ -35,7 +35,7 @@ function niceMax(value: number): number {
 
 export function Legend({ items }: { items: { name: string; color: string; dashed?: boolean }[] }) {
   return (
-    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-fg-2">
       {items.map((item) => (
         <span key={item.name} className="inline-flex items-center gap-1.5">
           <span
@@ -92,20 +92,20 @@ function Frame({ height, count, at, yMax, format, xLabel, xTitle, series, mark, 
         <svg width={width} height={height} onMouseMove={move} onMouseLeave={() => setHover(null)} role="img">
           {ticks.map((tick) => (
             <g key={tick}>
-              <line x1={PAD.left} x2={PAD.left + w} y1={y(tick)} y2={y(tick)} stroke="#e2e8f0" strokeDasharray={tick ? "3 3" : undefined} />
-              <text x={PAD.left - 6} y={y(tick) + 3.5} textAnchor="end" fontSize="10.5" fill="#64748b">{format(tick)}</text>
+              <line x1={PAD.left} x2={PAD.left + w} y1={y(tick)} y2={y(tick)} stroke="var(--color-line)" strokeDasharray={tick ? "3 3" : undefined} />
+              <text x={PAD.left - 6} y={y(tick) + 3.5} textAnchor="end" fontSize="10.5" fill="var(--color-fg-4)">{format(tick)}</text>
             </g>
           ))}
           {labelled.map((i) => (
-              <text key={i} x={x(i)} y={PAD.top + h + 15} textAnchor="middle" fontSize="10.5" fill="#64748b">{xLabel(i)}</text>
+              <text key={i} x={x(i)} y={PAD.top + h + 15} textAnchor="middle" fontSize="10.5" fill="var(--color-fg-4)">{xLabel(i)}</text>
             ))}
           {xTitle && (
-            <text x={PAD.left + w / 2} y={height - 3} textAnchor="middle" fontSize="10.5" fill="#64748b">{xTitle}</text>
+            <text x={PAD.left + w / 2} y={height - 3} textAnchor="middle" fontSize="10.5" fill="var(--color-fg-4)">{xTitle}</text>
           )}
           {children({ x, y, w, h })}
           {mark && mark.index >= 0 && mark.index < count && (
             <g>
-              <line x1={x(mark.index)} x2={x(mark.index)} y1={PAD.top} y2={PAD.top + h} stroke="#0f172a" strokeDasharray="4 3" />
+              <line x1={x(mark.index)} x2={x(mark.index)} y1={PAD.top} y2={PAD.top + h} stroke="var(--color-fg)" strokeDasharray="4 3" />
               <text
                 x={x(mark.index)}
                 y={PAD.top + 9}
@@ -113,30 +113,30 @@ function Frame({ height, count, at, yMax, format, xLabel, xTitle, series, mark, 
                 textAnchor={at(mark.index) > 0.7 ? "end" : "start"}
                 fontSize="10.5"
                 fontWeight="600"
-                fill="#0f172a"
+                fill="var(--color-fg)"
               >
                 {mark.label}
               </text>
             </g>
           )}
           {hover !== null && (
-            <line x1={x(hover)} x2={x(hover)} y1={PAD.top} y2={PAD.top + h} stroke="#94a3b8" pointerEvents="none" />
+            <line x1={x(hover)} x2={x(hover)} y1={PAD.top} y2={PAD.top + h} stroke="var(--color-fg-4)" pointerEvents="none" />
           )}
         </svg>
       )}
       {hover !== null && (
         <div
-          className="pointer-events-none absolute top-1 z-10 rounded-md border border-slate-200 bg-white/95 px-2 py-1.5 text-xs shadow-md"
+          className="pointer-events-none absolute top-1 z-10 rounded-xl border border-line bg-fill/85 px-2.5 py-2 text-xs shadow-lg shadow-black/40 backdrop-blur-xl"
           style={at(hover) > 0.6 ? { right: width - x(hover) + 8 } : { left: x(hover) + 8 }}
         >
-          <div className="mb-0.5 font-medium text-slate-900">{xLabel(hover)}{xTitle ? ` ${xTitle.toLowerCase()}` : ""}</div>
+          <div className="mb-0.5 font-medium text-fg">{xLabel(hover)}{xTitle ? ` ${xTitle.toLowerCase()}` : ""}</div>
           {series.map((s) => (
-            <div key={s.name} className="flex items-center justify-between gap-3 whitespace-nowrap text-slate-600">
+            <div key={s.name} className="flex items-center justify-between gap-3 whitespace-nowrap text-fg-2">
               <span className="inline-flex items-center gap-1.5">
                 <span className="inline-block size-2 rounded-sm" style={{ background: s.color }} />
                 {s.name}
               </span>
-              <span className="font-medium tabular-nums text-slate-900">
+              <span className="font-medium tabular-nums text-fg">
                 {s.values[hover] === null || s.values[hover] === undefined ? "–" : format(s.values[hover] as number)}
               </span>
             </div>
@@ -179,7 +179,7 @@ export function LineChart({ series, labels, xs, height = 220, format = num, yMax
             pen = true;
           });
           return (
-            <path key={s.name} d={path} fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round" strokeDasharray={s.dashed ? "5 4" : undefined} />
+            <path key={s.name} d={path} fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" strokeDasharray={s.dashed ? "5 4" : undefined} />
           );
         })
       }
@@ -230,37 +230,37 @@ export function HBars({
     <div className="space-y-1.5 text-sm">
       {rows.map((row, i) => (
         <div key={i} className={cx("grid grid-cols-[minmax(0,11rem)_minmax(0,1fr)_auto] items-center gap-3", row.muted && "opacity-50")}>
-          <div className="truncate text-slate-700">{row.label}</div>
-          <div className="relative h-4 rounded-sm bg-slate-100">
+          <div className="truncate text-fg-2">{row.label}</div>
+          <div className="relative h-3 rounded-full bg-white/8">
             <div
-              className="h-full rounded-sm"
-              style={{ width: `${Math.min(100, ((row.value ?? 0) / top) * 100)}%`, background: row.color ?? "#475569" }}
+              className="h-full rounded-full transition-[width] duration-700 ease-ios"
+              style={{ width: `${Math.min(100, ((row.value ?? 0) / top) * 100)}%`, background: row.color ?? "var(--color-accent)" }}
             />
             {limit && (
-              <div className="absolute inset-y-[-2px] w-px bg-slate-900" style={{ left: `${(limit.value / top) * 100}%` }} title={limit.label} />
+              <div className="absolute inset-y-[-2px] w-px bg-fg" style={{ left: `${(limit.value / top) * 100}%` }} title={limit.label} />
             )}
           </div>
-          <div className="whitespace-nowrap text-right text-xs tabular-nums text-slate-600">
+          <div className="whitespace-nowrap text-right text-xs tabular-nums text-fg-2">
             {row.value === null ? "–" : format(row.value)}
-            {row.note && <span className="ml-1.5 text-slate-400">{row.note}</span>}
+            {row.note && <span className="ml-1.5 text-fg-4">{row.note}</span>}
           </div>
         </div>
       ))}
-      {limit && <div className="text-xs text-slate-500">Vertical line: {limit.label}</div>}
+      {limit && <div className="text-xs text-fg-3">Vertical line: {limit.label}</div>}
     </div>
   );
 }
 
 /** A 0–100 risk score as a small bar. */
 export function ScoreBar({ score }: { score: number | null | undefined }) {
-  if (score === null || score === undefined) return <span className="text-slate-400">–</span>;
-  const color = score >= 75 ? "#dc2626" : score >= 50 ? "#f97316" : score >= 25 ? "#f59e0b" : "#94a3b8";
+  if (score === null || score === undefined) return <span className="text-fg-4">–</span>;
+  const color = score >= 75 ? "var(--color-bad)" : score >= 50 ? "var(--color-alert)" : score >= 25 ? "var(--color-warn)" : "var(--color-fg-4)";
   return (
     <span className="inline-flex items-center gap-2">
-      <span className="inline-block h-1.5 w-12 overflow-hidden rounded-full bg-slate-200">
-        <span className="block h-full rounded-full" style={{ width: `${score}%`, background: color }} />
+      <span className="inline-block h-1.5 w-12 overflow-hidden rounded-full bg-white/10">
+        <span className="block h-full rounded-full transition-[width] duration-700 ease-ios" style={{ width: `${score}%`, background: color }} />
       </span>
-      <span className="w-6 text-right text-xs font-medium tabular-nums text-slate-700">{score}</span>
+      <span className="w-6 text-right text-xs font-medium tabular-nums text-fg-2">{score}</span>
     </span>
   );
 }

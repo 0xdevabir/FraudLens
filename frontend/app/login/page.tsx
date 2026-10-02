@@ -32,15 +32,18 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-slate-900 px-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-6 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight text-white">FraudLens</h1>
-          <p className="mt-1 text-sm text-slate-400">Real-time fraud decisions for mobile money</p>
+    <main className="relative grid min-h-screen place-items-center overflow-hidden px-4 py-10">
+      {/* Two soft lights behind the glass: sage above, cyan below. */}
+      <div aria-hidden="true" className="pointer-events-none absolute -top-40 left-1/2 size-[36rem] -translate-x-1/2 rounded-full bg-accent/20 blur-[120px]" />
+      <div aria-hidden="true" className="pointer-events-none absolute -bottom-56 -left-24 size-[28rem] rounded-full bg-info/10 blur-[120px]" />
+      <div className="relative w-full max-w-sm animate-rise">
+        <div className="mb-7 text-center">
+          <h1 className="text-[2rem] leading-tight font-bold tracking-tight text-fg">FraudLens</h1>
+          <p className="mt-1.5 text-[0.9375rem] text-fg-3">Real-time fraud decisions for mobile money</p>
         </div>
-        <form onSubmit={submit} className="space-y-4 rounded-lg bg-white p-6 shadow-xl">
+        <form onSubmit={submit} className="space-y-4 rounded-3xl border border-white/12 bg-white/6 p-6 shadow-2xl shadow-black/40 backdrop-blur-2xl">
           <div>
-            <label htmlFor="username" className="mb-1 block text-xs font-medium text-slate-600">Username</label>
+            <label htmlFor="username" className="mb-1.5 block text-xs font-medium text-fg-3">Username</label>
             <input
               id="username" name="username" autoComplete="username" autoFocus required maxLength={64}
               value={username} onChange={(event) => setUsername(event.target.value)}
@@ -48,7 +51,7 @@ export default function LoginPage() {
             />
           </div>
           <div>
-            <label htmlFor="password" className="mb-1 block text-xs font-medium text-slate-600">Password</label>
+            <label htmlFor="password" className="mb-1.5 block text-xs font-medium text-fg-3">Password</label>
             <input
               id="password" name="password" type="password" autoComplete="current-password" required maxLength={256}
               value={password} onChange={(event) => setPassword(event.target.value)}
@@ -59,7 +62,7 @@ export default function LoginPage() {
           <Button type="submit" variant="primary" disabled={busy || !username || !password} className="w-full">
             {busy ? "Signing in…" : "Sign in"}
           </Button>
-          <p className="text-xs leading-relaxed text-slate-500">
+          <p className="text-xs leading-relaxed text-fg-4">
             Seeded accounts: <code>analyst1</code> and <code>analyst2</code> review alerts, <code>supervisor1</code> and{" "}
             <code>supervisor2</code> approve freezes, <code>admin</code> sees oversight only. They share the password set as{" "}
             <code>FRAUDLENS_SEED_PASSWORD</code> when the database was seeded.

@@ -34,9 +34,9 @@ export default function CasesPage() {
         sub="One case per wallet under investigation. Held payments stay held until a reviewer closes the case with a verdict."
       />
       <Card flush>
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-slate-100 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-line px-4 py-3">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-xs font-medium text-slate-500">Status</span>
+            <span className="mr-1 text-xs font-medium text-fg-3">Status</span>
             {STATUSES.map((status) => (
               <Chip
                 key={status}
@@ -48,30 +48,30 @@ export default function CasesPage() {
             ))}
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-xs font-medium text-slate-500">Assigned</span>
+            <span className="mr-1 text-xs font-medium text-fg-3">Assigned</span>
             <Chip on={assigned === ""} onClick={() => pick(setAssigned, "")}>Anyone</Chip>
             <Chip on={assigned === "me"} onClick={() => pick(setAssigned, "me")}>Me</Chip>
             <Chip on={assigned === "unassigned"} onClick={() => pick(setAssigned, "unassigned")}>Nobody</Chip>
           </div>
-          <span className="ml-auto text-xs text-slate-500">{cases.data ? `${num(total)} cases` : ""}</span>
+          <span className="ml-auto text-xs text-fg-3">{cases.data ? `${num(total)} cases` : ""}</span>
         </div>
         <Async state={cases}>
           {(data) =>
             data.cases.length ? (
               <Table head={["Case", "Priority", "Status", "Wallet", "Alerts", "Held", "Assigned to", "Opened", "Review due", "Verdict"]}>
                 {data.cases.map((row) => (
-                  <tr key={row.id} className="hover:bg-slate-50">
-                    <Td><Link href={`/cases/${row.id}`} className="font-medium text-sky-700 hover:underline">#{row.id}</Link></Td>
+                  <tr key={row.id} className="hover:bg-wash">
+                    <Td><Link href={`/cases/${row.id}`} className="font-medium text-info hover:underline">#{row.id}</Link></Td>
                     <Td><TierBadge tier={row.priority} /></Td>
                     <Td><StatusBadge status={row.status} /></Td>
                     <Td><Id value={row.subject_id} caseId={row.id} /></Td>
                     <Td right>{num(row.alerts)}</Td>
                     <Td right className="whitespace-nowrap">
-                      {row.held ? `${taka(row.held_amount)} · ${num(row.held)}` : <span className="text-slate-400">–</span>}
+                      {row.held ? `${taka(row.held_amount)} · ${num(row.held)}` : <span className="text-fg-4">–</span>}
                     </Td>
-                    <Td>{row.assignee ?? <span className="text-slate-400">nobody</span>}</Td>
-                    <Td className="whitespace-nowrap text-slate-600">{when(row.opened_at)}</Td>
-                    <Td className="whitespace-nowrap text-slate-600">
+                    <Td>{row.assignee ?? <span className="text-fg-4">nobody</span>}</Td>
+                    <Td className="whitespace-nowrap text-fg-2">{when(row.opened_at)}</Td>
+                    <Td className="whitespace-nowrap text-fg-2">
                       {row.sla_due_at ? when(row.sla_due_at) : "–"} {row.overdue && <Badge tone="red">overdue</Badge>}
                     </Td>
                     <Td><StatusBadge status={row.verdict} /></Td>
@@ -83,7 +83,7 @@ export default function CasesPage() {
             )
           }
         </Async>
-        <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+        <div className="flex items-center justify-between border-t border-line px-4 py-2 text-xs text-fg-3">
           <span>Page {page + 1} of {num(pages)}</span>
           <span className="flex gap-2">
             <Button small disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</Button>
