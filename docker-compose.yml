@@ -19,11 +19,15 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    # REDIS_PASSWORD (from the shell or a .env next to this file) turns on
+    # authentication. Unset, Redis has none and relies on the loopback-only port.
+    command: ["redis-server", "--appendonly", "no", "--save", "", "--requirepass", "${REDIS_PASSWORD:-}"]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:-}
     ports:
       - "127.0.0.1:6380:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -39,7 +43,7 @@ services:
         required: false
     environment:
       FRAUDLENS_DATABASE_URL: postgresql+psycopg://fraudlens:${POSTGRES_PASSWORD:-fraudlens_dev}@postgres:5432/fraudlens
-      FRAUDLENS_REDIS_URL: redis://redis:6379/0
+      FRAUDLENS_REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy

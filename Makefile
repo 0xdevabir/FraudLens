@@ -1,4 +1,4 @@
-.PHONY: help setup up down data features train policy insights pipeline test lint fmt \
+.PHONY: help setup up redis down data features train policy insights pipeline test lint fmt \
 	migrate seed load api replay replay-live verify platform \
 	review retrain shadow models promote console console-build smoke \
 	demo demo-reset
@@ -30,6 +30,9 @@ setup: ## Install backend and console dependencies
 
 up: ## Start Postgres and Redis
 	docker compose up -d --wait
+
+redis: ## Start Redis only, for a Postgres that runs on the host (set FRAUDLENS_DATABASE_URL)
+	docker compose up -d --wait redis
 
 down: ## Stop everything (the demo too) and keep the data
 	docker compose --profile demo down

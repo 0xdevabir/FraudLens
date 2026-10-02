@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # Password for the demo accounts created by `fraudlens.platform.seed`.
     # Unset: a random one is generated per account and printed once.
     seed_password: SecretStr | None = None
+    # One-click sign-in as a demo account, with no password. For a demo on a machine
+    # only you can reach; ignored in production, where the API also refuses to start.
+    demo_login: bool = False
 
     # Case notes from the language model. Off unless enabled and ANTHROPIC_API_KEY is set.
     llm_notes: bool = False

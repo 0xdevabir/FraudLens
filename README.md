@@ -16,7 +16,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
 ![Redis Streams](https://img.shields.io/badge/Redis-Streams-DC382D?logo=redis&logoColor=white)
 ![Tailwind](https://img.shields.io/badge/Tailwind-v4-06B6D4?logo=tailwindcss&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-179-success)
+![Tests](https://img.shields.io/badge/tests-180-success)
 ![Served = evaluated](https://img.shields.io/badge/served%20vs%20offline-0%20differences-success)
 
 [Quick start](#-run-it-in-one-command) · [How it works](#-how-it-works) · [Results](#-results) · [Console tour](#%EF%B8%8F-console-tour) · [Three-minute demo](#-three-minute-demo) · [Limits](#%EF%B8%8F-what-this-is-not)
@@ -224,8 +224,8 @@ pie showData
 | 🕵️ **Mule wallets** | 94 of 145 mules detected, **70 of them before any victim had paid**, a median 40.2 hours ahead of the victim's report |
 | 🕸️ **Rings** | 34 rings covering 331 wallets; 94% of ring members are true fraud-cell wallets |
 | 🏪 **Agents** | No labels used: 90.9% precision in a review list of 22, finding all commission-farming agents |
-| 🔁 **Feedback loop** | Measured on the previous model version and not repeated for this one: retraining on analyst verdicts raised PR-AUC from 0.759 to 0.904 on later data (reviewers were simulated and always right, so this is an upper bound) |
-| 👥 **Shadow mode** | Also from the previous version: the challenger scored all 136,180 served decisions without deciding any, and agreed on the tier for 98.5% |
+| 🔁 **Feedback loop** | Retraining on analyst verdicts raised PR-AUC from 0.774 to 0.912 on later data (reviewers were simulated and always right, so this is an upper bound) |
+| 👥 **Shadow mode** | The retrained challenger scored all 136,180 served decisions without deciding any, and agreed on the tier for 98.5%; it would hold 1.06% of payments against 0.78% |
 
 ---
 
@@ -248,10 +248,10 @@ A fraud system that cannot be checked is not one a bank can run. These are the c
 | Milliseconds | p50 | p95 | p99 |
 |---|---:|---:|---:|
 | One decision in process: features, models, policy, reasons | 3.1 | **3.4** | n/a |
-| Served, features + models + policy + reasons (busy machine) | 8.1 | 13.0 | 21.7 |
-| Served, full round trip including the database commit (busy machine) | 26.9 | 47.9 | 86.1 |
+| Served, features + models + policy + reasons | 1.9 | 2.3 | 3.6 |
+| Served, full round trip including the database commit | 5.5 | 7.0 | 10.6 |
 
-The served rows were measured while the laptop was also running a second API and two consoles, so they are an upper bound; the previous model version, on a quiet machine, served at 4.9 ms and 15.1 ms p95, and the current one has not been measured that way ([PLATFORM.md §11](docs/PLATFORM.md)). The stream worker replayed 292,567 events in under six minutes, and the service is ready 8–10 seconds after a restart with the feature state rebuilt exactly.
+The first row is an average over a sample that is two-thirds alerts, which cost more to explain; the served rows are over real traffic, which is mostly allowed, and were measured with Postgres on the host. They move a lot with what else the laptop is doing: the same model measured 13.0 ms and 47.9 ms p95 on a busy machine ([PLATFORM.md §11](docs/PLATFORM.md)). The stream worker replayed 292,567 events in under six minutes, and the service is ready 8–10 seconds after a restart with the feature state rebuilt exactly.
 
 **Guardrails that are enforced in code, not left to configuration:**
 
@@ -332,7 +332,7 @@ FraudLens/
 │   │   ├── platform/    # scorer, cases, freezes, stream worker, audit
 │   │   ├── mlops/       # verdicts as labels, retraining, shadow, drift
 │   │   └── api/         # HTTP routes, schemas, middleware
-│   └── tests/           # 179 tests
+│   └── tests/           # 180 tests
 ├── frontend/            # the analyst console
 ├── docs/                # architecture, model card, policy, platform, demo script
 ├── docker-compose.yml
@@ -391,6 +391,8 @@ make retrain       # train a challenger on those verdicts (promotes nothing)
 make console       # console on http://localhost:3100
 ```
 
+To use a Postgres that is already installed on the host instead of the one in Docker, create a role with `CREATEDB` (the tests make and drop their own database) and a database it owns, set `FRAUDLENS_DATABASE_URL` in `backend/.env`, and run `make redis` in place of `make up`. `backend/.env.example` shows the URL and how to give Redis a password.
+
 To run a challenger in shadow mode, set `FRAUDLENS_SHADOW_MODEL_VERSION` to its version (`make models` lists them) in `backend/.env` and restart the API. `make help` lists every target.
 
 </details>
@@ -399,7 +401,7 @@ To run a challenger in shadow mode, set `FRAUDLENS_SHADOW_MODEL_VERSION` to its 
 <summary><b>Check it</b></summary>
 
 ```bash
-make test     # 179 backend tests; the platform tests need `make up`
+make test     # 180 backend tests; the platform tests need `make up`
 make lint     # ruff, tsc, eslint
 make smoke    # opens every console page as each role in a headless browser
 ```

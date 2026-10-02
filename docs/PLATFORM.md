@@ -193,7 +193,12 @@ and each request still needs its own approval by a second person.
   held in `sessionStorage`, so the policy is what stands between an injected
   script and the token.
 - **Production guard.** With `FRAUDLENS_ENVIRONMENT=production` the API refuses to
-  start with the development signing secret, and the interactive docs are off.
+  start with the development signing secret, the development database password,
+  a Redis URL without a password, or `*` as a CORS origin, and the interactive
+  docs are off.
+- **Redis password.** Optional in development: `REDIS_PASSWORD` in a `.env` next
+  to `docker-compose.yml` turns it on, and `FRAUDLENS_REDIS_URL` carries the same
+  password. Without it Redis relies on its port being bound to 127.0.0.1.
 - **Language model.** Optional, off by default, and only for the wording of a case
   note after the decision exists (DECISION_POLICY §7).
 
@@ -249,11 +254,12 @@ bit-identical features to the one that lived through it.
 
 ## 11. Measured
 
-A laptop (Apple silicon), API with one process, Postgres and Redis in Docker on
-the same machine. Reports are written to `backend/artifacts/reports/`. The
-verification table, the latency table and the stream rate are from the run of
-model v4. The concurrency, restart and slow-endpoint figures are from the
-earlier run of the previous model and were not repeated.
+A laptop (Apple silicon), API with one process. Reports are written to
+`backend/artifacts/reports/`. The verification table, the latency table and the
+stream rate are from the run of model v4, with Postgres 16 installed on the host
+and Redis in Docker. The concurrency, restart and slow-endpoint figures are from
+the earlier run of the previous model, with Postgres in Docker, and were not
+repeated.
 
 **The served decisions are the evaluated ones.** The whole test period (25 days,
 304,734 transactions and 133 fraud flags) was replayed into the running service:
@@ -272,29 +278,29 @@ days 95–118 through the event stream, day 119 one HTTP request at a time.
 So the numbers in MODEL_CARD and DECISION_POLICY describe what this service
 actually does, not a separate offline code path. (136,180 includes the 1,635
 transactions with an ambiguous role that the model report leaves out of its
-metrics.) The replay produced 1,065 holds.
+metrics.) The replay produced 1,065 holds grouped into 224 cases.
 
 **Latency**, day 119 over HTTP, sequential, one connection (12,297 transactions,
 5,152 of them scored):
 
 | Milliseconds | p50 | p95 | p99 |
 | --- | --- | --- | --- |
-| Features + models + policy + reasons, scored transactions | 8.1 | 13.0 | 21.7 |
-| Full round trip, scored transactions (incl. database commit) | 26.9 | 47.9 | 86.1 |
-| Full round trip, all transactions | 18.1 | 39.5 | 73.1 |
+| Features + models + policy + reasons, scored transactions | 1.9 | 2.3 | 3.6 |
+| Full round trip, scored transactions (incl. database commit) | 5.5 | 7.0 | 10.6 |
+| Full round trip, all transactions | 3.6 | 6.4 | 9.0 |
 
-These are slower than the previous model's run (3.8 / 4.9 / 7.1 ms for the first
-row, 10.6 / 15.1 / 23.3 for the second), and the two runs are **not comparable**:
-this one shared the laptop with a second API process, two consoles and other
-work (load average 6 to 9 on 10 cores), and the database round trip, which the
-model change does not touch, slowed by the same factor. What the model change
-itself costs is the offline figure: one decision takes 3.1 ms at the median
-against 2.4 ms before (DECISION_POLICY §6). A run of v4 on a quiet machine has
-not been made, so the table above is the only served measurement of v4 and
-should be read as an upper bound.
+The slowest single request took 98 ms. The laptop was not idle (load average
+about 5 on 10 cores). Two things limit what this table says. The previous
+model's run measured 3.8 / 4.9 / 7.1 ms for the first row and 10.6 / 15.1 / 23.3
+for the second, but with Postgres in Docker and under a different load, so the
+difference is not the model: offline, one v4 decision costs more than a v2 one
+(3.1 ms against 2.4 ms at the median over a sample that is two-thirds alerts,
+DECISION_POLICY §6). And an earlier v4 run on the same laptop while it was busy
+with a second API and two consoles measured 13.0 ms and 47.9 ms at p95 for the
+same two rows: the figures depend heavily on what else the machine is doing.
 
 **Throughput.** In the v4 run the stream worker handled the full replay of
-292,567 events in just under six minutes, about 840 events a second. In the
+292,567 events in just under six minutes, about 855 events a second. In the
 earlier run eight concurrent what-if callers got 194 answers a second with a p95
 of 51 ms: scoring is serialised in one process, so concurrency adds waiting, not
 capacity (§10). For scale: the simulated system averages 0.14 transactions a
@@ -375,7 +381,7 @@ deadlines by the same amount. Audit rows carry the real time.
 step on the host:
 
 ```
-make up          # Postgres and Redis
+make up          # Postgres and Redis (or `make redis` with a Postgres on the host)
 make pipeline    # data, features, models, policy (once)
 make platform    # migrate, create the demo accounts, load the history
 make api         # API and worker on http://127.0.0.1:8010
@@ -385,7 +391,7 @@ make verify      # served decisions against the offline evaluation
 make review      # close the older cases with the simulation's ground truth (demo scaffolding)
 make retrain     # a challenger trained on those verdicts
 make console     # the console on http://localhost:3100
-make test        # 179 tests; the platform and MLOps ones run against real Postgres and Redis
+make test        # 180 tests; the platform and MLOps ones run against real Postgres and Redis
 ```
 
 The demo accounts (`analyst1`, `analyst2`, `supervisor1`, `supervisor2`, `admin`,

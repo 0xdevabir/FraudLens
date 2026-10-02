@@ -20,6 +20,10 @@ class Login(Body):
     password: str = Field(min_length=1, max_length=256)
 
 
+class DemoLogin(Body):
+    username: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,64}$")
+
+
 class Events(Body):
     events: list[EventIn] = Field(min_length=1, max_length=500)
 

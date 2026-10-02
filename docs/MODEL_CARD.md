@@ -8,8 +8,9 @@ to real traffic.
 
 Version numbers count registrations in one registry. This card was written on a
 machine whose registry holds `v1` (trained on the first simulator, §11), `v2`
-(the previous served model, 57 features), `v3` (a challenger trained on analyst
-verdicts, §13) and `v4`, the model described here. On a fresh checkout
+(the previous served model, 57 features), `v3` (its challenger), `v4`, the model
+described here, and `v5` (a challenger retrained from v4 on analyst verdicts,
+§13, not promoted). On a fresh checkout
 (`make demo`) the same model, with the same numbers, is registered as `v1`.
 Versions older than `v4` were trained on a shorter feature list and the service
 refuses to load them with the current code (§11).
@@ -328,14 +329,12 @@ interrupted (warn or above). Overall it is 0.53%, and 0.04% are held. Groups und
 
 ### Verdicts as labels
 
-**This subsection and the next (shadow mode) were measured with the previous
-served model, v2, and its challenger v3. They have not been re-run for v4**, so
-"served model" below means v2. Re-running takes `make review retrain`, then
-`make shadow VERSION=<new>` and a replay.
+This subsection and the next (shadow mode) were measured with v4 as the served
+model and `v5`, the challenger retrained from it.
 
-After the replay, 206 older cases were closed: 102 confirmed fraud, 93
-legitimate, 11 inconclusive (which label nothing). The retraining job added 957
-labelled alerts (821 fraud, 136 legitimate), with the features that were served
+After the replay, 176 older cases were closed: 105 confirmed fraud, 62
+legitimate, 9 inconclusive (which label nothing). The retraining job added 970
+labelled alerts (873 fraud, 97 legitimate), with the features that were served
 for them, to the original training data and registered a challenger. It promotes
 nothing.
 
@@ -344,10 +343,10 @@ model could have learnt from through feedback):
 
 | | Served model | Retrained on verdicts |
 | --- | --- | --- |
-| PR-AUC | 0.759 | 0.904 |
-| Precision at the 1% alert budget | 74.7% | 95.1% |
-| Victim transfers caught | 67.3% | 76.6% |
-| Money caught | 71.7% | 85.7% |
+| PR-AUC | 0.774 | 0.912 |
+| Precision at the 1% alert budget | 75.0% | 95.1% |
+| Victim transfers caught | 65.5% | 76.6% |
+| Money caught | 69.8% | 86.8% |
 
 Read this with three cautions:
 
@@ -368,11 +367,14 @@ Read this with three cautions:
 ### Shadow mode
 
 The challenger scored all 136,180 served decisions next to the served model. The
-two agree on the tier for 98.5% of them. The challenger would alert on 1.76% of
-traffic against 1.67%, and hold 1.07% against 0.80%: it is more willing to hold,
+two agree on the tier for 98.5% of them. The challenger would alert on 1.78% of
+traffic against 1.61%, and hold 1.06% against 0.78%: it is more willing to hold,
 which means more review work, and that is a decision for a person to weigh before
-promotion. Outcomes are known only for alerts an analyst has closed, so what the
-challenger alone would have caught is reported as a count without an outcome.
+promotion. Among alerts an analyst has closed, it would hold all 923 confirmed
+frauds and allow 89 of the 100 false positives, which is expected and proves
+little: those are the labels it was trained on. Outcomes are known only for
+closed alerts, so the 910 payments the challenger alone would alert on are a
+count without an outcome.
 
 ### Drift
 
@@ -394,7 +396,7 @@ the same on the latest decisions actually served.
 ```
 make data features train     # about one minute; writes backend/artifacts/models/<version>/
 make policy insights         # policy_report.json and insights.json (fairness, drift, threshold sweep)
-make test                    # 179 tests, including leakage and round-trip checks
+make test                    # 180 tests, including leakage and round-trip checks
 ```
 
 `report.json` holds every number above; `manifest.json` holds thresholds,

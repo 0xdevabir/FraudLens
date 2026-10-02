@@ -23,7 +23,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from fraudlens.api import create_app
 from fraudlens.api.middleware import MAX_BODY_BYTES
-from fraudlens.config import Settings
+from fraudlens.config import DEV_JWT_SECRET, Settings
 from fraudlens.decision import evaluate, insights
 from fraudlens.features import FEATURES, Txn
 from fraudlens.mlops import drift, feedback, review
@@ -45,6 +45,7 @@ from fraudlens.platform.models import (
     Wallet,
     WalletFlag,
 )
+from fraudlens.platform.security import check_production
 from fraudlens.platform.seed import seed_users
 from fraudlens.platform.stream import DEAD_SUFFIX, alert_feed
 
@@ -270,6 +271,41 @@ def test_login_is_rate_limited_per_account(client, settings):
     Redis.from_url(settings.redis_url).delete("fraudlens:limit:login:admin:testclient")
 
 
+def test_demo_login_is_off_unless_enabled_and_never_in_production(client, p, monkeypatch):
+    assert client.get("/v1/auth/demo").json() == {"accounts": []}
+    assert client.post("/v1/auth/demo-login", json={"username": "analyst1"}).status_code == 404
+
+    monkeypatch.setattr(p.settings, "demo_login", True)
+    offered = {a["username"]: a["role"] for a in client.get("/v1/auth/demo").json()["accounts"]}
+    assert offered["supervisor1"] == "supervisor" and len(offered) == 5
+    assert not {"upay-core", "review-sim"} & set(offered)
+    response = client.post("/v1/auth/demo-login", json={"username": "supervisor1"})
+    assert response.status_code == 200
+    mine = {"Authorization": f"Bearer {response.json()['access_token']}"}
+    assert client.get("/v1/auth/me", headers=mine).json()["username"] == "supervisor1"
+    with p.sessions() as s:
+        row = s.scalars(select(AuditLog).where(AuditLog.action == "auth.login")).all()[-1]
+    assert row.actor == "supervisor1" and row.detail == {"demo": True}
+    # Not a service account, not an account the seed did not create, not a disabled one.
+    for username in ("upay-core", "review-sim", "nobody"):
+        refused = client.post("/v1/auth/demo-login", json={"username": username})
+        assert refused.status_code == 404
+    with p.sessions() as s:
+        s.execute(update(User).where(User.username == "analyst2").values(is_active=False))
+        s.commit()
+    try:
+        refused = client.post("/v1/auth/demo-login", json={"username": "analyst2"})
+        assert refused.status_code == 404
+    finally:
+        with p.sessions() as s:
+            s.execute(update(User).where(User.username == "analyst2").values(is_active=True))
+            s.commit()
+
+    monkeypatch.setattr(p.settings, "environment", "production")
+    assert client.get("/v1/auth/demo").json() == {"accounts": []}
+    assert client.post("/v1/auth/demo-login", json={"username": "analyst1"}).status_code == 404
+
+
 def test_roles_are_enforced(client, tokens, p, replayed, spare):
     body = send(p, spare(), spare())
     assert client.post("/v1/score", headers=tokens("analyst1"), json=body).status_code == 403
@@ -296,6 +332,28 @@ def test_a_forged_or_stale_token_is_refused(client, tokens, p):
             s.execute(update(User).where(User.username == "analyst2").values(is_active=True))
             s.commit()
     assert client.get("/v1/auth/me", headers={"Authorization": good}).status_code == 200
+
+
+def test_production_refuses_development_defaults():
+    safe = {
+        "environment": "production",
+        "jwt_secret": "k" * 32,
+        "database_url": "postgresql+psycopg://fraudlens:a-private-password@db:5432/fraudlens",
+        "redis_url": "redis://:a-private-password@cache:6379/0",
+        "cors_origins": ["https://console.example"],
+    }
+    check_production(Settings(**safe))
+    for unsafe in (
+        {"jwt_secret": DEV_JWT_SECRET},
+        {"jwt_secret": "short"},
+        {"database_url": "postgresql+psycopg://fraudlens:fraudlens_dev@db:5432/fraudlens"},
+        {"redis_url": "redis://cache:6379/0"},
+        {"cors_origins": ["*"]},
+        {"demo_login": True},
+    ):
+        with pytest.raises(RuntimeError):
+            check_production(Settings(**(safe | unsafe)))
+    check_production(Settings(**(safe | unsafe | {"environment": "development"})))
 
 
 # ------------------------------------------------------ request handling

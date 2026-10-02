@@ -3,7 +3,9 @@
 import { useState } from "react";
 
 import { Button, ErrorNote, inputClass } from "@/components/ui";
-import { api, setToken } from "@/lib/api";
+import { api, setToken, useApi } from "@/lib/api";
+
+type DemoAccount = { username: string; display_name: string; role: string };
 
 /** Only same-site paths are followed after login, so a crafted link cannot send the user elsewhere. */
 function safeNext(): string {
@@ -17,18 +19,25 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
+  // Empty unless the API runs with FRAUDLENS_DEMO_LOGIN, which production refuses.
+  const demo = useApi<{ accounts: DemoAccount[] }>("/v1/auth/demo").data?.accounts ?? [];
+
+  async function signIn(path: string, body: Record<string, string>) {
     setBusy(true);
     setError(null);
     try {
-      const { access_token } = await api<{ access_token: string }>("/v1/auth/login", { username: username.trim(), password });
+      const { access_token } = await api<{ access_token: string }>(path, body);
       setToken(access_token);
       window.location.assign(safeNext());
     } catch (problem) {
       setError(problem as Error);
       setBusy(false);
     }
+  }
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    void signIn("/v1/auth/login", { username: username.trim(), password });
   }
 
   return (
@@ -62,6 +71,21 @@ export default function LoginPage() {
           <Button type="submit" variant="primary" disabled={busy || !username || !password} className="w-full">
             {busy ? "Signing in…" : "Sign in"}
           </Button>
+          {demo.length > 0 && (
+            <div className="border-t border-white/10 pt-4">
+              <p className="mb-2 text-xs font-medium text-fg-3">Demo sign-in, no password</p>
+              <div className="grid grid-cols-2 gap-2">
+                {demo.map((account) => (
+                  <Button
+                    key={account.username} small disabled={busy} title={account.display_name}
+                    onClick={() => void signIn("/v1/auth/demo-login", { username: account.username })}
+                  >
+                    {account.username}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
           <p className="text-xs leading-relaxed text-fg-4">
             Seeded accounts: <code>analyst1</code> and <code>analyst2</code> review alerts, <code>supervisor1</code> and{" "}
             <code>supervisor2</code> approve freezes, <code>admin</code> sees oversight only. They share the password set as{" "}

@@ -234,5 +234,5 @@ check.
 
 ```
 make policy     # writes policy_report.json and similar_cases.npz next to the model
-make test       # 179 tests; 68 cover this layer
+make test       # 180 tests; 68 cover this layer
 ```

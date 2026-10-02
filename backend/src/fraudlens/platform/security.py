@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 
 import jwt
 from argon2 import PasswordHasher
@@ -114,5 +115,9 @@ def check_production(settings: Settings) -> None:
         raise RuntimeError("FRAUDLENS_JWT_SECRET must be a private key of 32+ characters")
     if "fraudlens_dev" in settings.database_url:
         raise RuntimeError("FRAUDLENS_DATABASE_URL still uses the development password")
+    if not urlsplit(settings.redis_url).password:
+        raise RuntimeError("FRAUDLENS_REDIS_URL must carry a password")
     if "*" in settings.cors_origins:
         raise RuntimeError("FRAUDLENS_CORS_ORIGINS must list the allowed origins")
+    if settings.demo_login:
+        raise RuntimeError("FRAUDLENS_DEMO_LOGIN signs people in without a password")
