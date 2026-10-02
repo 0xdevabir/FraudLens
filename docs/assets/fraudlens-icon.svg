@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112 112" role="img" aria-label="FraudLens">
+  <rect width="112" height="112" rx="26" fill="#1b1b1b"/>
+  <rect x="0.5" y="0.5" width="111" height="111" rx="25.5" fill="none" stroke="#404040"/>
+  <!-- The lens: a ring, with the one payment it is looking at inside it. -->
+  <circle cx="50" cy="50" r="24" fill="none" stroke="#a8bca1" stroke-width="7"/>
+  <path d="M68 68 86 86" stroke="#a8bca1" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="50" cy="50" r="7" fill="#96eefb"/>
+</svg>
