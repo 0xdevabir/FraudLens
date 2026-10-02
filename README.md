@@ -156,6 +156,7 @@ The warning a customer reads before sending to a suspected mule:
 | **Network explorer · Mule rings · Agent risk** | Follow the money, see shared handsets, rank agents against their peers |
 | **Model monitoring** | Performance by tier and scam type, drift, the model registry, shadow mode, the feedback loop |
 | **Fairness report · Decision policy · Audit log** | False alarms by group, the exact rules and texts in force, and who did what |
+| **Fraud types** | The eight kinds of fraud wallet customers in Bangladesh meet, what detects each and how well; check a suspicious message, verify a claimed payment against the ledger |
 
 ---
 
@@ -226,6 +227,7 @@ pie showData
 | 🏪 **Agents** | No labels used: 90.9% precision in a review list of 22, finding all commission-farming agents |
 | 🔁 **Feedback loop** | Retraining on analyst verdicts raised PR-AUC from 0.774 to 0.912 on later data (reviewers were simulated and always right, so this is an upper bound) |
 | 👥 **Shadow mode** | The retrained challenger scored all 136,180 served decisions without deciding any, and agreed on the tier for 98.5%; it would hold 1.06% of payments against 0.78% |
+| 💬 **Scam messages** | A classifier for English, Bangla and Banglish messages, with a link check, flags 90.2% of scam messages in new wording and 81.0% from scripts it never saw, at 0.23% and 0% of harmless ones. The corpus is synthetic; naming the exact fraud type on unseen scripts is weak ([FRAUD_TAXONOMY.md](docs/FRAUD_TAXONOMY.md)) |
 
 ---
 
@@ -401,7 +403,7 @@ To run a challenger in shadow mode, set `FRAUDLENS_SHADOW_MODEL_VERSION` to its 
 <summary><b>Check it</b></summary>
 
 ```bash
-make test     # 203 backend tests; the platform tests need `make up`
+make test     # 227 backend tests; the platform tests need `make up`
 make lint     # ruff, tsc, eslint
 make smoke    # opens every console page as each role in a headless browser
 ```
@@ -438,6 +440,7 @@ Keep two browser windows open: one as `analyst1`, one private window as `supervi
 | [MODEL_CARD.md](docs/MODEL_CARD.md) | Models, results, ablations, fairness, limits |
 | [DECISION_POLICY.md](docs/DECISION_POLICY.md) | Tiers, rules, thresholds, explanations, the language model's role |
 | [PLATFORM.md](docs/PLATFORM.md) | API, workflow, security, stream, measured latency |
+| [FRAUD_TAXONOMY.md](docs/FRAUD_TAXONOMY.md) | Eight kinds of fraud in the Bangladesh context, what detects each, the scam-message classifier and its limits |
 | [DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | The walk-through |
 
 ## ⚠️ What this is not

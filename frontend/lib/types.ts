@@ -152,6 +152,21 @@ export interface PaymentProof {
   text: MessageCheck | null;
 }
 
+/** A claim the demo has ready for the payment-proof check, and what the check answers for it. */
+export interface PaymentClaim {
+  id: string;
+  wallet_id: string;
+  txn_id: string | null;
+  amount: number | null;
+  message: string;
+  expects: PaymentProof["status"];
+}
+
+export interface PaymentClaims {
+  wallet_id: string | null;
+  claims: PaymentClaim[];
+}
+
 export interface FraudCategory {
   id: string;
   number: number;

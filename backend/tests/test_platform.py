@@ -1454,6 +1454,22 @@ def test_a_payment_is_verified_from_the_ledger_for_its_receiver_only(client, tok
     assert peek["status"] == "not_found" and peek["transaction"] is None
     assert peek["checks"] == verify(curious, txn_id=str(2**40))["checks"]
 
+    # The demo offers the newest completed payment as ready claims, each labelled
+    # with what the check answers for it.
+    analyst = tokens("analyst1")
+    assert client.get("/v1/demo/payment-claims", headers=service).status_code == 403
+    ready = client.get("/v1/demo/payment-claims", headers=analyst).json()
+    assert {c["id"]: c["expects"] for c in ready["claims"]} == {
+        "real": "verified",
+        "edited_amount": "mismatch",
+        "forged_sms": "not_found",
+    }
+    for claim in ready["claims"]:
+        asked = {k: claim[k] for k in ("wallet_id", "txn_id", "amount", "message")}
+        played = client.post("/v1/demo/payment-verify", headers=analyst, json=asked)
+        assert played.json()["status"] == claim["expects"]
+        assert claim["wallet_id"] == ready["wallet_id"]
+
     assert (
         client.post(
             "/v1/customer/payment-verify", headers=service, json={"wallet_id": seller}

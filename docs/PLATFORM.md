@@ -78,11 +78,13 @@ served at `/docs` outside production.
 | | `POST /rings/{ring_id}/freeze-requests` (one request per member wallet, §5) | analyst, supervisor |
 | Network | `GET /wallets/{id}`, `GET /wallets/{id}/network`, `GET /rings`, `GET /rings/{ring_id}`, `GET /agents/risk`, `GET /agents/{id}`, `GET /past-cases/{id}` | analyst, supervisor |
 | Customer | `POST /customer/recipient-check`, `POST /customer/transactions/{txn_id}/respond`, `POST /customer/reports` | service |
+| | `POST /customer/message-check`, `POST /customer/payment-verify` ([FRAUD_TAXONOMY.md](FRAUD_TAXONOMY.md)) | service |
+| Fraud types | `GET /intel/taxonomy` | analyst, supervisor, admin |
 | Operations | `GET /metrics/summary`, `GET /metrics/daily`, `GET /model`, `GET /model/report`, `GET /policy` | analyst, supervisor, admin |
 | After deployment (§12) | `GET /models`, `GET /model/shadow`, `GET /metrics/drift`, `GET /feedback` | analyst, supervisor, admin |
 | Audit | `GET /audit` | supervisor, admin |
 | | `POST /audit/reveals` (§7) | analyst, supervisor |
-| Demo (§14), absent in production | `GET /demo/scenarios`, `GET /demo/payment-draft`, `POST /demo/pay\|respond\|report\|recipient-check\|advance-clock` | analyst, supervisor, admin |
+| Demo (§14), absent in production | `GET /demo/scenarios`, `GET /demo/payment-draft`, `GET /demo/payment-claims`, `POST /demo/pay\|respond\|report\|recipient-check\|message-check\|payment-verify\|advance-clock` | analyst, supervisor, admin |
 | | `GET /health`, `GET /ready` | none |
 
 Errors always have the same shape, with the request id that is also in the
@@ -163,6 +165,13 @@ and each request still needs its own approval by a second person.
   report on its own flags nobody and releases nothing; its text is never used as
   an instruction to anything. Limited to 5 an hour per reporter, on the demo
   endpoint as well.
+- **Checking a message.** "Is this a scam?" Returns `none`, `caution` or `high`,
+  the kinds of fraud the message looks like, why, and fixed advice in English and
+  Bangla. Advice only, and the text is not stored. 20 a minute per wallet.
+- **Verifying a payment.** "They say they paid me." Answered from the ledger, not
+  from the SMS or screenshot shown, and only for payments made to the asking
+  wallet. 10 a minute per wallet. Both are described in
+  [FRAUD_TAXONOMY.md](FRAUD_TAXONOMY.md).
 
 ## 7. Security
 
@@ -370,7 +379,7 @@ shown by role, and the API enforces the same roles whatever the console shows.
 
 | Pages | Roles |
 | --- | --- |
-| Executive summary, impact simulator, model dashboard, fairness report, decision policy, customer phone demo | analyst, supervisor, admin |
+| Executive summary, impact simulator, model dashboard, fairness report, decision policy, fraud types, customer phone demo | analyst, supervisor, admin |
 | Alert queue, payment, cases, freeze approvals, network explorer, wallet, rings, agent risk | analyst, supervisor |
 | Audit log | supervisor, admin |
 

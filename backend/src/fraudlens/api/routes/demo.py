@@ -241,6 +241,38 @@ def payment_verify(body: PaymentVerify, p: Plat, s: Db, ctx: Staff) -> dict:
     return found
 
 
+@router.get("/payment-claims")
+def payment_claims(p: Plat, s: Db, ctx: Staff) -> dict:
+    """Ready claims for the payment-proof check, built on the newest completed payment:
+    the real one, the same one with the amount edited, and a forged SMS. `expects`
+    is what the check itself answers for each, so the label cannot go stale."""
+    txn = s.scalars(
+        select(Transaction)
+        .where(Transaction.type == "SEND_MONEY", Transaction.status == "completed")
+        .order_by(Transaction.ts.desc())
+        .limit(1)
+    ).first()
+    if txn is None:
+        return {"wallet_id": None, "claims": []}
+    forged = (
+        f"Cash In Tk {txn.amount + 4_000:,.2f} from 01711000000 successful. TrxID 8QW2ZX91LM. "
+        "Bhai vul kore beshi taka chole geche, 4,000 taka ferot pathan please."
+    )
+    ready = {
+        "real": (str(txn.txn_id), txn.amount, ""),
+        "edited_amount": (str(txn.txn_id), min(txn.amount * 10, 10_000_000), ""),
+        "forged_sms": (None, None, forged),
+    }
+    claims = []
+    for name, (txn_id, amount, message) in ready.items():
+        body = PaymentVerify(
+            wallet_id=txn.receiver_id, txn_id=txn_id, amount=amount, message=message
+        )
+        expects = verify_payment(p, s, body)["status"]
+        claims.append({"id": name, **body.model_dump(), "expects": expects})
+    return {"wallet_id": txn.receiver_id, "claims": claims}
+
+
 @router.post("/advance-clock")
 def advance_clock(body: DemoClock, p: Plat, s: Db, ctx: Staff) -> dict:
     """Move the platform's clock forward, so a cooling-off period can be shown ending.
