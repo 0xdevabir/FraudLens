@@ -511,7 +511,7 @@ UNUSUAL = {"amount": 20_000.0, "s_amount_z": 6.0, "s_place_share": 0.0}
 
 def test_v2_keeps_v1_and_adds_the_behaviour_rules(policy):
     v2 = load_policy("v2")
-    assert load_policy().version == "v2"  # what is served unless a version is named
+    assert load_policy().version == "v3"  # what is served unless a version is named
     assert v2.rules[: len(policy.rules)] == policy.rules
     assert [r.id[:3] for r in v2.rules[len(policy.rules) :]] == ["R05", "R06", "R07"]
     assert not any(rule.hard for rule in v2.rules[len(policy.rules) :])
@@ -713,8 +713,14 @@ def test_context_comes_from_the_confirmed_fraud_flags(world):
     engine = FeatureEngine()
     txn = next(iter_txns(world.txns[world.txns["type"] == "SEND_MONEY"].iloc[[0]].reset_index()))
     context = context_from_engine(engine, txn)
-    assert set(context) == set(policy_eval.CONTEXT_COLUMNS)
+    # The blocklist is live state: the offline frames have no column for it.
+    assert set(context) - {"recipient_blocklisted"} == set(policy_eval.CONTEXT_COLUMNS)
     assert context["sender_flagged"] == 0 and context["recipient_flagged"] == 0
+    assert context["recipient_blocklisted"] == 0
+    listed = {txn.receiver_id: None, "W-other": 1.0}
+    assert context_from_engine(engine, txn, listed)["recipient_blocklisted"] == 1
+    expired = {txn.receiver_id: txn.ts - 1}
+    assert context_from_engine(engine, txn, expired)["recipient_blocklisted"] == 0
     # A wallet with no history has no habits to compare against.
     assert math.isnan(context["s_place_share"]) and math.isnan(context["s_network_share"])
     engine.flagged[txn.receiver_id] = txn.ts - 60
@@ -763,7 +769,7 @@ def test_policy_evaluation_runs_end_to_end(trained):
     data_dir, root, model_report = trained
     report = policy_eval.run(data_dir, models_root=root)
     saved = json.loads((root / "v1" / policy_eval.REPORT_FILE).read_text())
-    assert saved["policy_version"] == "v2" and saved["model_version"] == "v1"
+    assert saved["policy_version"] == "v3" and saved["model_version"] == "v1"
     assert {"R05_LARGE_PAYMENT_FROM_UNUSUAL_PLACE"} <= set(saved["rules"])
     assert (root / "v1" / "similar_cases.npz").is_file()
 
@@ -784,3 +790,29 @@ def test_policy_evaluation_runs_end_to_end(trained):
     assert single["case_notes_failing_grounding"] == 0, single["grounding_failures"]
     assert single["alerts_without_a_raising_reason"] == 0
     assert not math.isnan(single["decide_ms"]["p95"])
+
+
+# ------------------------------------------- v3: the blocklist
+
+
+def test_v3_keeps_v2_and_adds_only_the_blocklist_rule():
+    v2, v3 = load_policy("v2"), load_policy("v3")
+    assert v3.rules[: len(v2.rules)] == v2.rules
+    assert [r.id for r in v3.rules[len(v2.rules) :]] == ["R08_RECIPIENT_ON_BLOCKLIST"]
+    assert v3.tiers == v2.tiers and v3.messages == v2.messages and v3.fallback == v2.fallback
+    assert not any(rule.hard for rule in v3.rules[len(v2.rules) :])
+
+
+def test_a_listed_receiver_asks_for_verification_and_never_holds_on_its_own():
+    v3 = load_policy("v3")
+    listed = {"recipient_blocklisted": 1.0}
+    outcome = apply_policy(v3, "SEND_MONEY", listed, LOW, THRESHOLDS)
+    assert (outcome.tier, outcome.decided_by) == ("step_up", "rule:R08_RECIPIENT_ON_BLOCKLIST")
+    # A cash-out is not a payment to the listed wallet, and a model hold is left alone.
+    assert apply_policy(v3, "CASH_OUT", listed, LOW, THRESHOLDS).tier == "allow"
+    assert apply_policy(v3, "SEND_MONEY", listed, HIGH, THRESHOLDS).tier == "hold"
+    # Without the fact (an offline frame, an unlisted wallet) the rule says nothing.
+    assert apply_policy(v3, "SEND_MONEY", {}, LOW, THRESHOLDS).tier == "allow"
+    assert apply_policy(v3, "SEND_MONEY", {"recipient_blocklisted": 0.0}, LOW, THRESHOLDS).tier == (
+        "allow"
+    )

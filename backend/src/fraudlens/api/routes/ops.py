@@ -14,9 +14,9 @@ from sqlalchemy import Date, cast, func, select, text
 from ...decision.evaluate import REPORT_FILE as POLICY_REPORT_FILE
 from ...decision.insights import INSIGHTS_FILE
 from ...models import registry
-from ...platform.audit import WorkflowError
+from ...platform.audit import WorkflowError, audit
 from ...platform.models import AuditLog, Case, Decision, FreezeRequest, Transaction
-from ..deps import Db, Oversight, Plat, Staff
+from ..deps import Db, Oversight, Plat, Staff, Supervisor
 
 router = APIRouter(tags=["operations"])
 health = APIRouter(tags=["operations"])
@@ -44,7 +44,27 @@ def ready(p: Plat, response: Response) -> dict:
     ok = all(checks.values())
     if not ok:
         response.status_code = 503
-    return {"status": "ready" if ok else "not_ready", "checks": checks, "mode": p.scorer.mode}
+    return {
+        "status": "ready" if ok else "not_ready",
+        "checks": checks,
+        "mode": p.scorer.mode,
+        # How the state was rebuilt at start-up, and how far the log is past the last snapshot.
+        "recovery": p.scorer.recovered_from
+        | {"events_since_snapshot": p.scorer.seq - p.scorer.snapshot_seq},
+    }
+
+
+@router.post("/snapshot")
+def snapshot(p: Plat, ctx: Supervisor) -> dict:
+    """Save the scorer's state to disk now, so the next restart replays only what follows.
+    Scoring pauses for the seconds this takes."""
+    written = p.scorer.write_snapshot()
+    if written is None:
+        raise WorkflowError(503, "not_ready", "the scorer is rebuilding its state")
+    with p.sessions() as s:
+        audit(s, ctx, "ops.snapshot", "scorer", None, **written)
+        s.commit()
+    return written
 
 
 @router.get("/audit")

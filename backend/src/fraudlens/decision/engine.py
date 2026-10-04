@@ -45,12 +45,18 @@ def display_score(risk: float, thresholds: Mapping[str, float]) -> int:
     return int(math.floor(value[0] + 1e-9))
 
 
-def context_from_engine(engine: FeatureEngine, txn: Txn) -> dict[str, float]:
-    """Facts the policy needs that are not model features: confirmed-fraud flags, and
-    how usual this place and this network are for the sender."""
+def context_from_engine(
+    engine: FeatureEngine, txn: Txn, blocklist: Mapping[str, float | None] | None = None
+) -> dict[str, float]:
+    """Facts the policy needs that are not model features: confirmed-fraud flags, whether
+    the receiver is on the blocklist (wallet -> expiry or None), and how usual this place
+    and this network are for the sender."""
+    expires = (blocklist or {}).get(txn.receiver_id, 0.0)
+    listed = txn.receiver_id in (blocklist or {}) and (expires is None or expires > txn.ts)
     return {
         "sender_flagged": float(txn.sender_id in engine.flagged),
         "recipient_flagged": float(txn.receiver_id in engine.flagged),
+        "recipient_blocklisted": float(listed),
         **dict(zip(BEHAVIOUR_FIELDS, engine.behaviour(txn), strict=True)),
     }
 

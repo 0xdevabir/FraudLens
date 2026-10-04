@@ -31,7 +31,7 @@ interface Habits {
 }
 interface Check { level: "none" | "caution" | "high"; message: Text2 | null }
 interface Outcome { status: string; status_reason: string | null }
-interface Reported { report_id: number; case_id: number }
+interface Reported { report_id: number; case_id: number; reference: string }
 
 // Addresses from the ranges reserved for documentation: they belong to nobody.
 const NETWORKS = [
@@ -538,6 +538,8 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
           <p className="mt-3 text-center text-xs text-fg-2">
             <span lang="bn">অভিযোগ গ্রহণ করা হয়েছে।</span> Report received.{" "}
             {canReview ? <Link href={`/cases/${reported.case_id}`} className="text-info hover:underline">It is on case #{reported.case_id}</Link> : `It is on case #${reported.case_id}`}.
+            {" "}Reference <code>{reported.reference}</code>:{" "}
+            <Link href="/track" target="_blank" className="text-info hover:underline">follow it</Link>.
           </p>
         )}
         {error && <div className="mt-3"><ErrorNote error={error} /></div>}

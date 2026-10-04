@@ -32,13 +32,14 @@ ALERT_TIERS = TIERS[1:]
 CONTEXT_FIELDS = (
     "sender_flagged",
     "recipient_flagged",
+    "recipient_blocklisted",
     "recipient_mule_alert",
     *BEHAVIOUR_FIELDS,
 )
 FIELDS = frozenset(FEATURES) | frozenset(CONTEXT_FIELDS)
 
 POLICY_DIR = Path(__file__).parent / "policies"
-DEFAULT_POLICY = "v2"
+DEFAULT_POLICY = "v3"
 
 _OPS = {
     "==": operator.eq,

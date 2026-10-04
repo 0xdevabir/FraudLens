@@ -209,7 +209,7 @@ def report(body: ScamReport, p: Plat, ctx: Staff) -> dict:
         p.scorer, ctx, body.reporter_id, body.reported_wallet_id, body.txn_id,
         body.category, body.description,
     )  # fmt: skip
-    return {"report_id": made.id, "case_id": made.case_id}
+    return {"report_id": made.id, "case_id": made.case_id, "reference": made.reference}
 
 
 @router.post("/recipient-check")
@@ -222,7 +222,7 @@ def recipient_check(body: RecipientCheck, p: Plat, ctx: Staff) -> dict:
 def message_check(body: MessageCheck, p: Plat, s: Db, ctx: Staff) -> dict:
     """The demo customer asks whether a message is a scam. The text is not recorded."""
     _limit(p.message_limit, body.wallet_id)
-    found = check_text(p, body.text)
+    found = check_text(p, body.text, s)
     audit(
         s, ctx, "demo.message_checked", "wallet", body.wallet_id,
         level=found["level"], categories=[c["id"] for c in found["categories"]],

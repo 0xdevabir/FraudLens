@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import case as sql_case
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ...intel.attribute import categorise_report
 from ...intel.taxonomy import load_taxonomy
 from ...platform import cases as workflow
-from ...platform.audit import WorkflowError
+from ...platform.audit import WorkflowError, audit
+from ...platform.cases import AT_RISK_FRACTION, sla_state
 from ...platform.events import Identifier
 from ...platform.models import (
     Case,
@@ -23,8 +26,9 @@ from ...platform.models import (
     Transaction,
     User,
 )
-from ...platform.pii import redact
+from ...platform.pii import mask_id, redact
 from ..deps import REVIEWERS, Db, Plat, Reviewer, RowId, Supervisor
+from ..export import MAX_ROWS, check_reveal, check_too_large, csv_response
 from ..schemas import (
     Assign,
     Escalate,
@@ -58,19 +62,17 @@ def reviewers(s: Db, ctx: Reviewer) -> list[dict]:
     return [user_view(u) for u in users]
 
 
-@router.get("/cases")
-def list_cases(
-    p: Plat,
-    s: Db,
-    ctx: Reviewer,
-    status: Annotated[
-        list[Literal["open", "in_review", "escalated", "closed"]] | None, Query()
-    ] = None,
-    assigned: Literal["me", "unassigned"] | None = None,
-    subject_id: Identifier | None = None,
-    limit: Annotated[int, Query(ge=1, le=200)] = 50,
-    offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
-) -> dict:
+CaseStatus = Literal["open", "in_review", "escalated", "closed"]
+Priority = Literal["hold", "step_up", "warn"]
+SlaState = Literal["ok", "at_risk", "breached"]
+FinalVerdict = Literal["confirmed_fraud", "legitimate", "inconclusive"]
+CaseQ = Annotated[str | None, Query(max_length=32, pattern=r"^[A-Za-z0-9_-]+$")]
+
+
+def _case_where(
+    now, ctx, status, assigned, assignee_id, subject_id, priority, sla, verdict,
+    opened_since, opened_until, q,
+) -> list:  # fmt: skip
     where = []
     if status:
         where.append(Case.status.in_(status))
@@ -78,10 +80,44 @@ def list_cases(
         where.append(Case.assigned_to == ctx.user_id)
     elif assigned == "unassigned":
         where.append(Case.assigned_to.is_(None))
+    if assignee_id is not None:
+        where.append(Case.assigned_to == assignee_id)
     if subject_id is not None:
         where.append(Case.subject_id == subject_id)
+    if priority:
+        where.append(Case.priority.in_(priority))
+    if verdict:
+        where.append(Case.verdict == verdict)
+    if opened_since is not None:
+        where.append(Case.opened_at >= opened_since)
+    if opened_until is not None:
+        where.append(Case.opened_at < opened_until)
+    if sla:
+        live = (Case.status != "closed") & Case.sla_due_at.is_not(None)
+        due_at, window = (
+            func.extract("epoch", Case.sla_due_at),
+            func.extract("epoch", Case.sla_due_at - Case.opened_at),
+        )
+        risky_from = due_at - window * AT_RISK_FRACTION
+        at = now.timestamp()
+        states = {
+            "breached": live & (Case.sla_due_at < now),
+            "at_risk": live & (Case.sla_due_at >= now) & (risky_from <= at),
+            "ok": live & (Case.sla_due_at >= now) & (risky_from > at),
+        }
+        where.append(or_(*(states[name] for name in sla)))
+    if q:
+        # A case number, or the start of the wallet id under investigation.
+        match = [Case.subject_id.startswith(q, autoescape=True)]
+        if q.isdigit() and len(q) < 10:
+            match.append(Case.id == int(q))
+        where.append(or_(*match))
+    return where
+
+
+def _case_alerts():
     held = Transaction.status == "held"
-    alerts = (
+    return (
         select(
             Decision.case_id,
             func.count().label("alerts"),
@@ -93,6 +129,32 @@ def list_cases(
         .group_by(Decision.case_id)
         .subquery()
     )
+
+
+@router.get("/cases")
+def list_cases(
+    p: Plat,
+    s: Db,
+    ctx: Reviewer,
+    status: Annotated[list[CaseStatus] | None, Query()] = None,
+    assigned: Literal["me", "unassigned"] | None = None,
+    assignee_id: Annotated[int | None, Query(ge=1, le=2**31 - 1)] = None,
+    subject_id: Identifier | None = None,
+    priority: Annotated[list[Priority] | None, Query()] = None,
+    sla: Annotated[list[SlaState] | None, Query()] = None,
+    verdict: FinalVerdict | None = None,
+    opened_since: datetime | None = None,
+    opened_until: datetime | None = None,
+    q: CaseQ = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
+) -> dict:
+    now = p.scorer.now()
+    where = _case_where(
+        now, ctx, status, assigned, assignee_id, subject_id, priority, sla, verdict,
+        opened_since, opened_until, q,
+    )  # fmt: skip
+    alerts = _case_alerts()
     rows = s.execute(
         select(Case, alerts.c.alerts, alerts.c.held, alerts.c.held_amount)
         .outerjoin(alerts, alerts.c.case_id == Case.id)
@@ -109,7 +171,6 @@ def list_cases(
     ).all()
     total = s.scalar(select(func.count()).select_from(Case).where(*where))
     names = _names(s, [c.assigned_to for c, *_ in rows])
-    now = p.scorer.now()
     return {
         "total": total,
         "cases": [
@@ -122,6 +183,125 @@ def list_cases(
             for c, n, n_held, amount in rows
         ],
     }
+
+
+CASE_COLUMNS = (
+    "case_id", "status", "priority", "sla_state", "wallet_id", "assignee", "alerts",
+    "held_payments", "held_amount", "opened_at", "sla_due_at", "verdict", "reason_code",
+)  # fmt: skip
+
+
+@router.get("/cases.csv")
+def export_cases(
+    p: Plat,
+    s: Db,
+    ctx: Reviewer,
+    status: Annotated[list[CaseStatus] | None, Query()] = None,
+    assigned: Literal["me", "unassigned"] | None = None,
+    assignee_id: Annotated[int | None, Query(ge=1, le=2**31 - 1)] = None,
+    subject_id: Identifier | None = None,
+    priority: Annotated[list[Priority] | None, Query()] = None,
+    sla: Annotated[list[SlaState] | None, Query()] = None,
+    verdict: FinalVerdict | None = None,
+    opened_since: datetime | None = None,
+    opened_until: datetime | None = None,
+    q: CaseQ = None,
+    reveal: bool = False,
+) -> StreamingResponse:
+    """The case list as CSV, for the same filters. Masked unless a supervisor passes
+    `reveal=true`. Every export is audited."""
+    check_reveal(ctx.role, reveal)
+    now = p.scorer.now()
+    where = _case_where(
+        now, ctx, status, assigned, assignee_id, subject_id, priority, sla, verdict,
+        opened_since, opened_until, q,
+    )  # fmt: skip
+    total = s.scalar(select(func.count()).select_from(Case).where(*where))
+    check_too_large(total)
+    alerts = _case_alerts()
+    rows = s.execute(
+        select(Case, alerts.c.alerts, alerts.c.held, alerts.c.held_amount)
+        .outerjoin(alerts, alerts.c.case_id == Case.id)
+        .where(*where)
+        .order_by(Case.id.desc())
+        .limit(MAX_ROWS)
+    ).all()
+    names = _names(s, [c.assigned_to for c, *_ in rows])
+    show = (lambda v: v) if reveal else mask_id
+    out = [
+        (
+            c.id, c.status, c.priority, sla_state(c, now), show(c.subject_id),
+            names.get(c.assigned_to), n or 0, n_held or 0, float(amount or 0),
+            c.opened_at.isoformat(), c.sla_due_at and c.sla_due_at.isoformat(),
+            c.verdict, c.reason_code,
+        )
+        for c, n, n_held, amount in rows
+    ]  # fmt: skip
+    audit(
+        s, ctx, "export.cases", "cases", None,
+        rows=len(out), revealed=reveal,
+        filters={
+            "status": status, "assigned": assigned, "priority": priority, "sla": sla,
+            "verdict": verdict, "q": bool(q),
+        },
+    )  # fmt: skip
+    s.commit()
+    return csv_response("fraudlens-cases", CASE_COLUMNS, out, total)
+
+
+@router.get("/cases/workload")
+def workload(p: Plat, s: Db, ctx: Reviewer) -> dict:
+    """Open cases per reviewer: how many, how urgent, how old. Unassigned work is its own row."""
+    now = p.scorer.now()
+    rows = s.scalars(select(Case).where(Case.status != "closed").order_by(Case.opened_at)).all()
+    names = _names(s, [c.assigned_to for c in rows])
+    held = {}
+    if rows:
+        held = dict(
+            s.execute(
+                select(Decision.case_id, func.sum(Transaction.amount))
+                .join(Transaction, Transaction.txn_id == Decision.txn_id)
+                .where(Decision.case_id.in_([c.id for c in rows]), Transaction.status == "held")
+                .group_by(Decision.case_id)
+            ).all()
+        )
+    board: dict[int | None, dict] = {}
+    for c in rows:
+        row = board.setdefault(
+            c.assigned_to,
+            {
+                "assignee_id": c.assigned_to,
+                "assignee": names.get(c.assigned_to),
+                "open": 0, "escalated": 0, "at_risk": 0, "breached": 0,
+                "held_amount": 0.0, "oldest_opened_at": c.opened_at, "next_due_at": None,
+            },
+        )  # fmt: skip
+        state = sla_state(c, now)
+        row["open"] += 1
+        row["escalated"] += c.status == "escalated"
+        row["at_risk"] += state == "at_risk"
+        row["breached"] += state == "breached"
+        row["held_amount"] += float(held.get(c.id, 0))
+        if c.sla_due_at is not None and state != "breached":
+            due = row["next_due_at"]
+            row["next_due_at"] = c.sla_due_at if due is None else min(due, c.sla_due_at)
+    people = sorted(board.values(), key=lambda r: (-r["breached"], -r["at_risk"], -r["open"]))
+    return {
+        "now": now,
+        "at_risk_fraction": AT_RISK_FRACTION,
+        "totals": {
+            key: sum(r[key] for r in people)
+            for key in ("open", "escalated", "at_risk", "breached", "held_amount")
+        },
+        "reviewers": people,
+    }
+
+
+@router.post("/cases/sla-sweep")
+def sla_sweep(p: Plat, ctx: Supervisor) -> dict:
+    """Record the cases that have missed their review deadline now, instead of waiting
+    for the periodic check."""
+    return {"breached": workflow.sweep_sla(p.scorer, p.settings.sla_auto_escalate)}
 
 
 @router.post("/cases", status_code=201)
@@ -203,7 +383,9 @@ def escalate(case_id: RowId, body: Escalate, p: Plat, ctx: Reviewer) -> dict:
 @router.post("/cases/{case_id}/verdict")
 def verdict(case_id: RowId, body: Verdict, p: Plat, ctx: Reviewer) -> dict:
     """The human decision: closes the case and releases or blocks the held money."""
-    outcome = workflow.give_verdict(p.scorer, ctx, case_id, body.verdict, body.note)
+    outcome = workflow.give_verdict(
+        p.scorer, ctx, case_id, body.verdict, body.note, body.reason_code
+    )
     return {
         "case": case_view(outcome["case"], p.scorer.now()),
         "released": outcome["released"],

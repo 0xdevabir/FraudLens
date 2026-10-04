@@ -5,13 +5,22 @@ import { useState } from "react";
 
 import { Id, useSession } from "@/components/session";
 import { AlertTable, FreezeList } from "@/components/tables";
-import { Async, Badge, Button, Card, CategoryBadges, Empty, ErrorNote, Facts, inputClass, PageHeader, ReasonDialog, StatusBadge, TierBadge } from "@/components/ui";
+import { Async, Badge, Button, Card, CategoryBadges, Empty, ErrorNote, Facts, inputClass, PageHeader, ReasonDialog, SlaBadge, StatusBadge, TierBadge } from "@/components/ui";
 import { FreezeButton, NetworkCard, RiskProfile } from "@/components/wallet";
 import { api, useApi } from "@/lib/api";
 import { taka, when, words } from "@/lib/format";
 import type { CaseDetail, CaseEvent, Me } from "@/lib/types";
 
 type Verdict = "confirmed_fraud" | "legitimate" | "inconclusive";
+
+/** Why a reviewer called an alert a false alarm. Read in the feedback view; nothing trains on it. */
+const REASONS: [string, string][] = [
+  ["known_recipient", "The sender knows the recipient"],
+  ["family_transfer", "Family transfer or remittance"],
+  ["merchant", "A genuine seller or merchant"],
+  ["new_phone", "The customer changed phone"],
+  ["other", "Something else"],
+];
 
 const VERDICTS: Record<Verdict, { button: string; variant: "danger" | "good" | "primary"; intro: string }> = {
   confirmed_fraud: {
@@ -39,10 +48,11 @@ function eventText(event: CaseEvent): string {
     case "assigned": return `Assigned to ${data.assignee}`;
     case "note": return "Note";
     case "escalated": return "Escalated to a supervisor";
+    case "sla_breached": return "Review deadline missed";
     case "verdict": {
       const released = (data.released as number[] | undefined)?.length ?? 0;
       const blocked = (data.blocked as number[] | undefined)?.length ?? 0;
-      return `Verdict: ${words(String(data.verdict))}${blocked ? ` · ${blocked} payment${blocked > 1 ? "s" : ""} blocked` : ""}${released ? ` · ${released} released` : ""}`;
+      return `Verdict: ${words(String(data.verdict))}${data.reason_code ? ` (${words(String(data.reason_code)).toLowerCase()})` : ""}${blocked ? ` · ${blocked} payment${blocked > 1 ? "s" : ""} blocked` : ""}${released ? ` · ${released} released` : ""}`;
     }
     case "freeze_requested": return "Freeze requested";
     case "freeze_approved": return "Freeze approved: the wallet is frozen";
@@ -135,6 +145,7 @@ function Assign({ data, onDone }: { data: CaseDetail; onDone: () => void }) {
 function Detail({ data, reload }: { data: CaseDetail; reload: () => void }) {
   const { me, canReview, canApprove } = useSession();
   const [dialog, setDialog] = useState<Verdict | "escalate" | null>(null);
+  const [reason, setReason] = useState("");
   const open = data.status !== "closed";
   const mayDecide = canReview && open && (canApprove || (data.status !== "escalated" && (data.assigned_to == null || data.assigned_to === me.id)));
   const waiting = data.alerts.filter((alert) => alert.status === "held" || alert.status === "pending_customer");
@@ -166,8 +177,9 @@ function Detail({ data, reload }: { data: CaseDetail; reload: () => void }) {
             <Facts
               rows={[
                 ["Assigned to", data.assignee ?? "nobody"],
-                ["Review due", data.sla_due_at ? when(data.sla_due_at) : "no deadline"],
+                ["Review due", data.sla_due_at ? <span key="d">{when(data.sla_due_at)} <SlaBadge state={data.sla_state} seconds={data.sla_remaining_seconds} /></span> : "no deadline"],
                 ["Verdict", data.verdict ? <StatusBadge key="v" status={data.verdict} /> : "not yet"],
+                ...(data.reason_code ? [["Why a false alarm", words(data.reason_code)] as [string, string]] : []),
                 ...(data.closed_at ? [["Closed", `${when(data.closed_at)} by ${data.closer ?? "–"}`] as [string, string]] : []),
               ]}
             />
@@ -176,7 +188,7 @@ function Detail({ data, reload }: { data: CaseDetail; reload: () => void }) {
                 <div className="flex flex-wrap items-center gap-2"><Assign data={data} onDone={reload} /></div>
                 <div className="flex flex-wrap gap-2">
                   {(Object.keys(VERDICTS) as Verdict[]).map((verdict) => (
-                    <Button key={verdict} variant={VERDICTS[verdict].variant} disabled={!mayDecide} onClick={() => setDialog(verdict)}>
+                    <Button key={verdict} variant={VERDICTS[verdict].variant} disabled={!mayDecide} onClick={() => { setReason(""); setDialog(verdict); }}>
                       {VERDICTS[verdict].button}
                     </Button>
                   ))}
@@ -246,10 +258,20 @@ function Detail({ data, reload }: { data: CaseDetail; reload: () => void }) {
           variant={VERDICTS[dialog].variant}
           onClose={() => setDialog(null)}
           onSubmit={async (note) => {
-            await api(`/v1/cases/${data.id}/verdict`, { verdict: dialog, note });
+            await api(`/v1/cases/${data.id}/verdict`, { verdict: dialog, note, ...(dialog === "legitimate" && reason ? { reason_code: reason } : {}) });
             reload();
           }}
-        />
+        >
+          {dialog === "legitimate" && (
+            <label className="block text-xs font-medium text-fg-2">
+              Why was it a false alarm? <span className="font-normal text-fg-3">(optional)</span>
+              <select className={`${inputClass} mt-1 block w-full`} value={reason} onChange={(event) => setReason(event.target.value)}>
+                <option value="">Not given</option>
+                {REASONS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+              </select>
+            </label>
+          )}
+        </ReasonDialog>
       )}
     </>
   );

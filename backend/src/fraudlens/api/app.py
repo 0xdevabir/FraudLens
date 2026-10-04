@@ -21,12 +21,28 @@ from ..intel.text import load_text_model
 from ..platform.audit import WorkflowError
 from ..platform.db import make_engine, make_sessions
 from ..platform.graph import Graph
+from ..platform.notify import Dispatcher
 from ..platform.scoring import Scorer
 from ..platform.security import RateLimiter, check_production
 from ..platform.stream import Worker
 from .deps import Platform
 from .middleware import RequestContext, error_body
-from .routes import alerts, auth, cases, customer, demo, intel, mlops, network, ops, scoring
+from .routes import (
+    alerts,
+    apikeys,
+    auth,
+    blocklist,
+    cases,
+    customer,
+    demo,
+    intel,
+    mlops,
+    network,
+    ops,
+    public,
+    scoring,
+    webhooks,
+)
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +95,10 @@ def build_platform(settings: Settings) -> Platform:
         message_limit=RateLimiter(redis, "message-check", 20, 60),
         # Tighter: each call is a question about the ledger.
         proof_limit=RateLimiter(redis, "payment-verify", 10, 60),
+        dispatcher=Dispatcher(sessions, settings),
+        # Following a report needs no account, so it is limited hard: per address and per report.
+        public_ip_limit=RateLimiter(redis, "public-ip", 30, 3600),
+        public_ref_limit=RateLimiter(redis, "public-ref", 5, 3600),
     )
 
 
@@ -96,13 +116,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.aredis = aioredis.from_url(settings.redis_url, decode_responses=True)
         if settings.run_worker:
             platform.worker.start()
+        if settings.run_dispatcher:
+            platform.dispatcher.start()
         log.info("fraudlens api ready: scoring in %s mode", platform.scorer.mode)
         try:
             yield
         finally:
             platform.worker.stop()
-            if platform.worker.is_alive():
-                platform.worker.join(timeout=5.0)
+            platform.dispatcher.stop()
+            for thread in (platform.worker, platform.dispatcher):
+                if thread.is_alive():
+                    thread.join(timeout=5.0)
+            if settings.snapshot_on_shutdown:  # after the worker stopped: nothing is half applied
+                try:
+                    platform.scorer.write_snapshot()
+                except Exception:
+                    log.exception("could not save the live snapshot at shutdown")
             await app.state.aredis.aclose()
             platform.redis.close()
             platform.db.dispose()
@@ -165,7 +194,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     for kind in (OperationalError, InterfaceError, RedisError):
         app.add_exception_handler(kind, unavailable)
 
-    for module in (auth, scoring, alerts, cases, network, customer, intel, ops, mlops):
+    for module in (
+        auth,
+        scoring,
+        alerts,
+        cases,
+        network,
+        customer,
+        intel,
+        ops,
+        mlops,
+        blocklist,
+        webhooks,
+        apikeys,
+        public,
+    ):
         app.include_router(module.router, prefix="/v1")
     if not settings.production:  # stand-ins for the customer app; see routes/demo.py
         app.include_router(demo.router, prefix="/v1")

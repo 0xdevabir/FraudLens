@@ -42,7 +42,9 @@ from ..decision.policy import RANK
 from ..features import SCORED_TYPES, FeatureEngine, Txn
 from ..mlops.shadow import Shadow
 from ..models import registry
+from . import notify, snapshots
 from .audit import WorkflowError
+from .blocklist import wallets as blocklist_wallets
 from .events import FlagEvent, TxnEvent, moment
 from .models import (
     Agent,
@@ -159,11 +161,14 @@ class Scorer:
         self.engine = FeatureEngine()
         self.clock = Clock(0.0)
         self.frozen: set[str] = set()
+        self.blocklist: dict[str, float | None] = {}  # listed wallets -> expiry (epoch) or None
         self.mule_scores: dict[str, float] = {}  # wallets the mule model has alerted on
         self.seq = 0  # last position written to the log
         self._new_wallets: list[dict] = []
         self._new_agents: list[dict] = []
         self.ready = False  # False while the in-memory state may not match the database
+        self.snapshot_seq = 0  # the log position of the last live snapshot
+        self.recovered_from: dict = {}  # how the last recovery started, for /ready
         self.recover()
 
     @property
@@ -203,10 +208,45 @@ class Scorer:
 
     # ------------------------------------------------------------- recovery
 
-    def recover(self) -> None:
-        """Rebuild the in-memory state from the baseline snapshot and the database."""
+    @property
+    def _baseline_path(self):
+        return self.settings.dataset_dir / BASELINE_SNAPSHOT
+
+    @property
+    def _live_path(self):
+        return self.settings.dataset_dir / snapshots.LIVE_SNAPSHOT
+
+    def _usable_snapshot(self, s: Session) -> tuple[FeatureEngine, snapshots.Meta] | None:
+        """The live snapshot, if it still describes the database it is being read against."""
+        found = snapshots.read(self._live_path)
+        if found is None:
+            return None
+        engine, meta = found
+        applied = s.scalar(
+            select(func.count()).where(
+                Transaction.applied_seq.is_not(None), Transaction.applied_seq <= meta.seq
+            )
+        )
+        flags = s.scalar(
+            select(func.count()).where(
+                WalletFlag.applied_seq.is_not(None), WalletFlag.applied_seq <= meta.seq
+            )
+        )
+        if meta.baseline != snapshots.stamp(self._baseline_path) or (applied, flags) != (
+            meta.applied,
+            meta.flags,
+        ):
+            log.warning(
+                "live snapshot at seq %d no longer matches the database; discarding", meta.seq
+            )
+            snapshots.discard(self._live_path)
+            return None
+        return engine, meta
+
+    def recover(self, use_snapshot: bool = True) -> None:
+        """Rebuild the in-memory state: from the live snapshot when one is valid, else from
+        the baseline snapshot, then everything the database says happened after it."""
         t0 = time.perf_counter()
-        engine = FeatureEngine.load(self.settings.dataset_dir / BASELINE_SNAPSHOT)
         columns = (
             Transaction.txn_id, Transaction.ts, Transaction.type, Transaction.sender_id,
             Transaction.sender_type, Transaction.receiver_id, Transaction.receiver_type,
@@ -216,6 +256,12 @@ class Scorer:
         )  # fmt: skip
         applied = seq = 0
         with self.sessions() as s:
+            start = self._usable_snapshot(s) if use_snapshot else None
+            if start is not None:
+                engine, meta = start
+                seq = floor = meta.seq
+            else:
+                engine, floor = FeatureEngine.load(self._baseline_path), 0
             # Parties first seen after the baseline were registered in the database.
             for w in s.execute(select(Wallet.wallet_id, Wallet.created_at, Wallet.district)):
                 if w.wallet_id not in engine.wallets:
@@ -224,13 +270,13 @@ class Scorer:
                 engine.register_agent(a.agent_id, a.district)
             flags = s.execute(
                 select(WalletFlag.wallet_id, WalletFlag.flagged_at, WalletFlag.applied_seq)
-                .where(WalletFlag.applied_seq.is_not(None))
+                .where(WalletFlag.applied_seq.is_not(None), WalletFlag.applied_seq > floor)
                 .order_by(WalletFlag.applied_seq)
             ).all()
             j = 0
             rows = s.execute(
                 select(*columns)
-                .where(Transaction.applied_seq.is_not(None))
+                .where(Transaction.applied_seq.is_not(None), Transaction.applied_seq > floor)
                 .order_by(Transaction.applied_seq)
                 .execution_options(yield_per=20_000)
             )
@@ -245,6 +291,7 @@ class Scorer:
             if flags:
                 seq = max(seq, flags[-1].applied_seq)
             frozen = set(s.scalars(select(Wallet.wallet_id).where(Wallet.status == "frozen")))
+            blocklist = blocklist_wallets(s)
             mule_scores: dict[str, float] = {}
             if self.decision.mule_threshold is not None:
                 top = func.max(Decision.scores["mule"].as_float())
@@ -258,12 +305,23 @@ class Scorer:
                 )
         with self.lock:
             self.engine, self.frozen, self.mule_scores = engine, frozen, mule_scores
+            self.blocklist = blocklist
             self.seq = seq
+            self.snapshot_seq = floor
             self.ready = True
             self.clock = Clock(engine.last_ts)
+        took = time.perf_counter() - t0
+        self.recovered_from = {
+            "source": "live_snapshot" if floor else "baseline",
+            "snapshot_seq": floor or None,
+            "replayed_transactions": applied,
+            "replayed_flags": len(flags),
+            "seconds": round(took, 2),
+        }
         log.info(
-            "scorer state rebuilt in %.1fs: %d transactions and %d flags applied since baseline",
-            time.perf_counter() - t0,
+            "scorer state rebuilt in %.1fs from the %s: %d transactions and %d flags replayed",
+            took,
+            self.recovered_from["source"].replace("_", " "),
             applied,
             len(flags),
         )
@@ -283,6 +341,7 @@ class Scorer:
                 with self.sessions() as s:
                     results = self._process(s, events)
                     s.commit()
+                self._maybe_snapshot()
             except Exception:
                 # The engine may be ahead of what was committed. Rebuild it from the log;
                 # if that fails too (database down), the next call tries again first.
@@ -299,7 +358,7 @@ class Scorer:
         results: list[Result] = []
         txn_rows: list[dict] = []
         self._new_wallets, self._new_agents, self._shadow_rows = [], [], []
-        decided: list[tuple[Result, Txn, EngineDecision, dict]] = []
+        decided: list[tuple[Result, Txn, EngineDecision, dict, str]] = []
         for event in events:
             if isinstance(event, FlagEvent):
                 self.flag(s, event.wallet_id, event.ts, event.reason, event.source)
@@ -318,7 +377,7 @@ class Scorer:
             txn_rows.append(row)
             results.append(result)
             if decision_row is not None:
-                decided.append((result, t, *decision_row))
+                decided.append((result, t, *decision_row, event.source))
 
         if self._new_wallets:
             s.execute(pg_insert(Wallet).on_conflict_do_nothing(), self._new_wallets)
@@ -327,10 +386,12 @@ class Scorer:
         if txn_rows:
             s.execute(insert(Transaction), txn_rows)
         decision_rows = []
-        for result, t, decision, row in decided:
+        for result, t, decision, row, source in decided:
             if decision.tier != "allow":
                 row["case_id"] = self._attach_to_case(s, t, decision.tier)
                 result.decision["case_id"] = result.alert["case_id"] = row["case_id"]
+                if source == "live":  # a replay or a history load tells nobody
+                    self._announce(s, t, decision, result, row["case_id"])
             decision_rows.append(row)
         if decision_rows:
             s.flush()
@@ -368,7 +429,9 @@ class Scorer:
 
         t0 = time.perf_counter()
         features = self.engine.features(t)
-        decision = self.decision.decide(t, features, context_from_engine(self.engine, t))
+        decision = self.decision.decide(
+            t, features, context_from_engine(self.engine, t, self.blocklist)
+        )
         latency_ms = (time.perf_counter() - t0) * 1000
         if self.shadow is not None and decision.risk is not None:
             self._shadow_score(t.txn_id, features)  # after the clock stopped: not in latency_ms
@@ -503,6 +566,22 @@ class Scorer:
         s.add(CaseEvent(case_id=case.id, kind=kind, data={"txn_id": t.txn_id, "tier": tier}))
         return case.id
 
+    def _announce(
+        self, s: Session, t: Txn, decision: EngineDecision, result: Result, case_id: int | None
+    ) -> None:
+        """Queue the webhook and SMS for a live alert, inside the same transaction."""
+        event = f"decision.{decision.tier}"
+        sms = None
+        message = decision.customer_message
+        if self.settings.notify_adapter != "off" and decision.tier in notify.SMS_TIERS and message:
+            sms = {"wallet_id": t.sender_id, "text_bn": message["bn"], "text_en": message["en"]}
+        notify.enqueue(
+            s, event,
+            {"txn_id": t.txn_id, "tier": decision.tier, "status": result.status,
+             "case_id": case_id, "sender_id": t.sender_id},
+            sms=sms,
+        )  # fmt: skip
+
     def _publish(self, alerts: list[dict]) -> None:
         if not alerts or self.redis is None:
             return
@@ -529,6 +608,7 @@ class Scorer:
                 try:
                     yield s
                     s.commit()
+                    self._maybe_snapshot()
                 except WorkflowError:
                     s.rollback()
                     raise
@@ -540,6 +620,48 @@ class Scorer:
 
     def now(self) -> datetime:
         return moment(self.clock.now())
+
+    def write_snapshot(self) -> dict | None:
+        """Save the live state now. Call it only when nothing is half applied: after a commit,
+        or at shutdown. Returns what was written, or None if the state is not trustworthy."""
+        with self.lock:
+            if not self.ready:
+                return None
+            with self.sessions() as s:
+                applied = s.scalar(
+                    select(func.count()).where(
+                        Transaction.applied_seq.is_not(None), Transaction.applied_seq <= self.seq
+                    )
+                )
+                flags = s.scalar(
+                    select(func.count()).where(
+                        WalletFlag.applied_seq.is_not(None), WalletFlag.applied_seq <= self.seq
+                    )
+                )
+            meta = snapshots.Meta(
+                self.seq, applied, flags, snapshots.stamp(self._baseline_path), time.time()
+            )
+            seconds = snapshots.write(self._live_path, self.engine, meta)
+            self.snapshot_seq = self.seq
+        log.info("live snapshot written at seq %d in %.1fs", meta.seq, seconds)
+        return {"seq": meta.seq, "applied": applied, "flags": flags, "seconds": round(seconds, 2)}
+
+    def _maybe_snapshot(self) -> None:
+        """After a commit: save a snapshot once enough has been applied since the last one.
+        A failure here is logged and never fails the work that was just committed."""
+        every = self.settings.snapshot_every_events
+        if not every or self.seq - self.snapshot_seq < every:
+            return
+        try:
+            self.write_snapshot()
+        except Exception:
+            log.exception("could not write a live snapshot; will try again later")
+            self.snapshot_seq = self.seq  # do not retry on every batch
+
+    def load_blocklist(self, s: Session) -> None:
+        """Re-read the listed wallets, inside the change that altered them."""
+        with self.lock:
+            self.blocklist = blocklist_wallets(s)
 
     # The methods below are called inside `transaction()`.
 
@@ -592,4 +714,6 @@ class Scorer:
                 if party not in known[kind]:
                     raise KeyError(party)  # scoring it would create state for it
             features = self.engine.features(t)
-            return self.decision.decide(t, features, context_from_engine(self.engine, t))
+            return self.decision.decide(
+                t, features, context_from_engine(self.engine, t, self.blocklist)
+            )

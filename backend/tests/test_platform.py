@@ -8,11 +8,16 @@ development ones. The tests share one replayed world and run in file order.
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import ipaddress
 import itertools
 import json
+import re
 import shutil
+from datetime import UTC, datetime, timedelta
 
+import httpx
 import numpy as np
 import pytest
 import redis.asyncio as aioredis
@@ -22,7 +27,7 @@ from sqlalchemy import create_engine, delete, func, select, text, update
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
-from fraudlens.api import create_app
+from fraudlens.api import create_app, export
 from fraudlens.api.middleware import MAX_BODY_BYTES
 from fraudlens.config import DEV_JWT_SECRET, Settings
 from fraudlens.decision import evaluate, insights
@@ -31,22 +36,29 @@ from fraudlens.features.engine import DISTRICT_COORDS, travel_km
 from fraudlens.mlops import drift, feedback, review
 from fraudlens.mlops import shadow as shadow_mode
 from fraudlens.models.train import FEEDBACK_COLUMNS
-from fraudlens.platform import replay, verify
+from fraudlens.platform import notify, replay, snapshots, verify
 from fraudlens.platform.db import make_engine, make_sessions, migrate
 from fraudlens.platform.events import moment, network_of
 from fraudlens.platform.load import load
 from fraudlens.platform.models import (
+    ApiKey,
     AuditLog,
+    BlocklistEntry,
     Case,
+    CaseEvent,
     CustomerReport,
     Decision,
+    Delivery,
     FreezeRequest,
     ShadowScore,
     Transaction,
+    TranslationReview,
     User,
     Wallet,
     WalletFlag,
+    WebhookEndpoint,
 )
+from fraudlens.platform.notify import make_notifier
 from fraudlens.platform.security import check_production
 from fraudlens.platform.seed import seed_users
 from fraudlens.platform.stream import DEAD_SUFFIX, alert_feed
@@ -95,6 +107,9 @@ def settings(trained, tmp_path_factory):
         events_stream="fraudlens-test:events",
         alerts_channel="fraudlens-test:alerts",
         run_worker=False,  # the tests drive the worker themselves
+        run_dispatcher=False,  # and the dispatcher
+        webhook_allow_private=True,
+        notify_adapter="console",
         seed_password=PASSWORD,
         llm_notes=False,
         demo_login=False,
@@ -598,7 +613,7 @@ def test_a_large_payment_from_an_unusual_place_and_network_needs_proof(
     result = client.post("/v1/score", headers=service, json=body).json()
     assert result["decision"]["tier"] in ("step_up", "hold")
     record = client.get(f"/v1/decisions/{body['txn_id']}", headers=analyst).json()
-    assert record["policy_version"] == "v2"
+    assert record["policy_version"] == "v3"
     assert {r["id"][:3] for r in record["rule_trace"] if r["status"] == "fired"} >= {"R05", "R07"}
     assert {"UNUSUAL_PLACE", "UNFAMILIAR_NETWORK"} <= {r["code"] for r in record["reasons"]}
     assert "CONFIRM_PLACE" in [a["id"] for a in record["recommended_actions"]]
@@ -1575,3 +1590,982 @@ def test_the_schema_matches_the_models(settings):
     config = Config(str(BACKEND_DIR / "alembic.ini"))
     config.attributes["url"] = settings.database_url
     command.check(config)  # raises if a migration is missing
+
+
+# ------------------------------------------- reviewer tools: SLA, filters, export
+
+
+def _set_due(p, case_id: int, minutes_from_now: float) -> None:
+    with p.sessions() as s:
+        case = s.get(Case, case_id)
+        case.sla_due_at = p.scorer.now() + timedelta(minutes=minutes_from_now)
+        case.opened_at = case.sla_due_at - timedelta(minutes=30)
+        s.commit()
+
+
+def test_a_case_shows_how_close_it_is_to_its_deadline(client, tokens, p, replayed, spare):
+    _, result = held_payment(client, tokens, p, spare)
+    case_id = result["decision"]["case_id"]
+    analyst = tokens("analyst1")
+    states = {}
+    for label, minutes in (("ok", 25), ("at_risk", 5), ("breached", -1)):
+        _set_due(p, case_id, minutes)
+        case = client.get(f"/v1/cases/{case_id}", headers=analyst).json()
+        states[label] = case["sla_state"]
+        assert (case["sla_remaining_seconds"] < 0) == (label == "breached")
+        listed = client.get(f"/v1/cases?sla={label}&q={case_id}", headers=analyst).json()
+        assert case_id in [c["id"] for c in listed["cases"]], label
+        others = {"ok", "at_risk", "breached"} - {label}
+        for other in others:
+            hit = client.get(f"/v1/cases?sla={other}&q={case_id}", headers=analyst).json()
+            assert case_id not in [c["id"] for c in hit["cases"]], (label, other)
+    assert states == {"ok": "ok", "at_risk": "at_risk", "breached": "breached"}
+
+    board = client.get("/v1/cases/workload", headers=analyst).json()
+    assert board["totals"]["breached"] >= 1
+    assert {r["assignee"] for r in board["reviewers"]} >= {None}
+    assert board["reviewers"] == sorted(
+        board["reviewers"], key=lambda r: (-r["breached"], -r["at_risk"], -r["open"])
+    )
+    assert client.get("/v1/cases/workload", headers=tokens("admin")).status_code == 403
+
+
+def test_a_missed_deadline_is_recorded_once_and_escalates_only_when_enabled(
+    client, tokens, p, replayed, spare, monkeypatch
+):
+    first = held_payment(client, tokens, p, spare)[1]["decision"]["case_id"]
+    second = held_payment(client, tokens, p, spare)[1]["decision"]["case_id"]
+    _set_due(p, first, -5)
+    _set_due(p, second, 20)
+    assert client.post("/v1/cases/sla-sweep", headers=tokens("analyst1")).status_code == 403
+    swept = client.post("/v1/cases/sla-sweep", headers=tokens("supervisor1")).json()
+    assert first in swept["breached"] and second not in swept["breached"]
+    assert (
+        client.post("/v1/cases/sla-sweep", headers=tokens("supervisor1"))
+        .json()["breached"]
+        .count(first)
+        == 0
+    )  # recorded once
+    with p.sessions() as s:
+        case = s.get(Case, first)
+        kinds = list(s.scalars(select(CaseEvent.kind).where(CaseEvent.case_id == first)))
+        audited = s.scalar(
+            select(func.count())
+            .select_from(AuditLog)
+            .where(AuditLog.action == "case.sla_breached", AuditLog.object_id == str(first))
+        )
+    assert kinds.count("sla_breached") == 1 and audited == 1
+    assert case.status == "open"  # not escalated: the setting is off by default
+
+    monkeypatch.setattr(p.settings, "sla_auto_escalate", True)
+    _set_due(p, second, -5)
+    client.post("/v1/cases/sla-sweep", headers=tokens("supervisor1"))
+    with p.sessions() as s:
+        assert s.get(Case, second).status == "escalated"
+        txn_status = s.scalar(
+            select(Transaction.status)
+            .join(Decision, Decision.txn_id == Transaction.txn_id)
+            .where(Decision.case_id == second)
+        )
+    assert txn_status == "held"  # the money waits for a person either way
+
+
+def test_a_false_alarm_can_say_why_and_the_reasons_are_counted(client, tokens, p, replayed, spare):
+    analyst = tokens("analyst1")
+    case_id = held_payment(client, tokens, p, spare)[1]["decision"]["case_id"]
+    wrong = client.post(
+        f"/v1/cases/{case_id}/verdict",
+        headers=analyst,
+        json={"verdict": "legitimate", "note": REASON, "reason_code": "bribe"},
+    )
+    assert wrong.status_code == 422
+    fraud = client.post(
+        f"/v1/cases/{case_id}/verdict",
+        headers=analyst,
+        json={"verdict": "confirmed_fraud", "note": REASON, "reason_code": "merchant"},
+    )
+    assert fraud.status_code == 422
+    assert fraud.json()["error"]["code"] == "reason_code_needs_legitimate"
+    before = {
+        r["reason_code"]: r["cases"]
+        for r in client.get("/v1/feedback", headers=analyst).json()["false_alarm_reasons"]
+    }
+    done = client.post(
+        f"/v1/cases/{case_id}/verdict",
+        headers=analyst,
+        json={"verdict": "legitimate", "note": REASON, "reason_code": "family_transfer"},
+    )
+    assert done.status_code == 200 and done.json()["case"]["reason_code"] == "family_transfer"
+    rows = client.get("/v1/feedback", headers=analyst).json()["false_alarm_reasons"]
+    after = {r["reason_code"]: r["cases"] for r in rows}
+    assert after["family_transfer"] == before.get("family_transfer", 0) + 1
+    assert abs(sum(r["share"] for r in rows) - 1) < 1e-9
+    # A reason changes no label: the training rows are the same with or without one.
+    with p.sessions() as s:
+        frame = feedback.labels(s)
+    assert set(frame.columns) >= {"y", "verdict"} and "reason_code" not in frame.columns
+
+
+def test_the_alert_queue_filters_and_searches(client, tokens, p, replayed, spare):
+    body, result = held_payment(client, tokens, p, spare)
+    analyst = tokens("analyst1")
+    txn_id, mule = body["txn_id"], body["receiver_id"]
+
+    def ids(query: str) -> list[int]:
+        response = client.get(f"/v1/alerts?{query}", headers=analyst)
+        assert response.status_code == 200, response.text
+        return [a["txn_id"] for a in response.json()["alerts"]]
+
+    assert txn_id in ids(f"q={txn_id}")
+    assert txn_id in ids(f"q={mule[:6]}&limit=200")
+    assert txn_id in ids(f"amount_min={body['amount'] - 1}&amount_max={body['amount'] + 1}")
+    assert txn_id not in ids(f"amount_min={body['amount'] + 1}")
+    assert txn_id not in ids(f"amount_max={body['amount'] - 1}")
+    assert txn_id in ids(f"district={body['district']}&tier=hold&limit=200")
+    assert txn_id not in ids("until=2000-01-01T00:00:00Z")
+    assert client.get("/v1/alerts?q=%25", headers=analyst).status_code == 422  # no wildcards
+
+
+def test_an_export_is_masked_limited_and_audited(client, tokens, p, replayed, spare, monkeypatch):
+    body, _ = held_payment(client, tokens, p, spare)
+    analyst, supervisor = tokens("analyst1"), tokens("supervisor1")
+    url = f"/v1/alerts.csv?q={body['txn_id']}"
+    response = client.get(url, headers=analyst)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+    rows = list(csv.DictReader(io.StringIO(response.text)))
+    assert [r["txn_id"] for r in rows] == [str(body["txn_id"])]
+    assert rows[0]["receiver_id"] == f"{body['receiver_id'][0]}***{body['receiver_id'][-4:]}"
+    assert body["receiver_id"] not in response.text and body["sender_id"] not in response.text
+
+    assert client.get(url + "&reveal=true", headers=analyst).status_code == 403
+    assert client.get(url, headers=tokens("admin")).status_code == 403
+    raw = client.get(url + "&reveal=true", headers=supervisor)
+    assert body["receiver_id"] in raw.text
+
+    cases = client.get("/v1/cases.csv?status=open&status=escalated", headers=analyst)
+    assert cases.status_code == 200
+    assert list(csv.reader(io.StringIO(cases.text)))[0][:3] == ["case_id", "status", "priority"]
+
+    with p.sessions() as s:
+        exports = s.execute(
+            select(AuditLog.action, AuditLog.detail).where(AuditLog.action.like("export.%"))
+        ).all()
+    assert {"export.alerts", "export.cases"} <= {a for a, _ in exports}
+    assert any(d["revealed"] for a, d in exports if a == "export.alerts")
+    assert not any(body["receiver_id"] in json.dumps(d) for _, d in exports)  # no identifiers
+
+    monkeypatch.setattr(export, "MAX_ROWS", 1)
+    too_big = client.get("/v1/alerts.csv?tier=hold&tier=warn", headers=analyst)
+    assert too_big.status_code == 413 and too_big.json()["error"]["code"] == "export_too_large"
+
+
+def test_text_that_looks_like_a_formula_is_made_inert_in_an_export():
+    assert export._cell("=HYPERLINK(...)") == "'=HYPERLINK(...)"
+    assert export._cell("-1+1") == "'-1+1"
+    assert export._cell("hold") == "hold" and export._cell(12.5) == 12.5
+
+
+# ------------------------------------------------ blocklist and Bangla sign-off
+
+
+def _pay(client, tokens, p, sender, receiver, **over) -> dict:
+    response = client.post(
+        "/v1/score", headers=tokens("upay-core"), json=send(p, sender, receiver, **over)
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_a_listed_wallet_asks_the_sender_to_verify_and_blocks_nothing(
+    client, tokens, p, replayed, spare
+):
+    supervisor, analyst = tokens("supervisor1"), tokens("analyst1")
+    target, sender = spare(), spare()
+    before = _pay(client, tokens, p, sender, target, amount=50.0)
+    assert before["decision"]["tier"] == "allow"
+
+    body = {"kind": "wallet", "value": target, "reason": REASON}
+    assert client.post("/v1/blocklist", headers=analyst, json=body).status_code == 403
+    assert client.post("/v1/blocklist", headers=tokens("admin"), json=body).status_code == 403
+    made = client.post("/v1/blocklist", headers=supervisor, json=body)
+    assert made.status_code == 201, made.text
+    entry = made.json()
+    assert entry["state"] == "active" and entry["source"] == "manual"
+    again = client.post("/v1/blocklist", headers=supervisor, json=body)
+    assert again.status_code == 409 and again.json()["error"]["code"] == "already_listed"
+    bad = client.post(
+        "/v1/blocklist",
+        headers=supervisor,
+        json={"kind": "wallet", "value": "a b", "reason": REASON},
+    )
+    assert bad.status_code == 422
+
+    after = _pay(client, tokens, p, sender, target, amount=50.0)
+    assert after["decision"]["tier"] in ("step_up", "hold")
+    assert after["status"] in ("pending_customer", "held")  # waits for a person; not blocked
+    record = client.get(f"/v1/decisions/{after['txn_id']}", headers=analyst).json()
+    fired = [r["id"] for r in record["rule_trace"] if r["status"] == "fired"]
+    assert "R08_RECIPIENT_ON_BLOCKLIST" in fired
+    # Another wallet paying someone else is untouched.
+    assert _pay(client, tokens, p, sender, spare(), amount=50.0)["decision"]["tier"] == "allow"
+
+    listing = client.get(f"/v1/blocklist?q={target[:5]}", headers=analyst).json()
+    assert entry["id"] in [e["id"] for e in listing["entries"]]
+    removed = client.post(
+        f"/v1/blocklist/{entry['id']}/remove", headers=supervisor, json={"reason": REASON}
+    )
+    assert removed.status_code == 200 and removed.json()["state"] == "removed"
+    assert target not in p.scorer.blocklist
+    free = _pay(client, tokens, p, spare(), target, amount=50.0)
+    assert free["decision"]["tier"] == "allow"
+    gone = client.get(f"/v1/blocklist?state=removed&q={target[:5]}", headers=analyst).json()
+    assert entry["id"] in [e["id"] for e in gone["entries"]]
+    with p.sessions() as s:
+        actions = set(s.scalars(select(AuditLog.action).where(AuditLog.object_type == "blocklist")))
+    assert {"blocklist.add", "blocklist.remove"} <= actions
+
+
+def test_a_listing_expires_and_survives_a_restart(client, tokens, p, replayed, spare):
+    supervisor = tokens("supervisor1")
+    target = spare()
+    body = {"kind": "wallet", "value": target, "reason": REASON, "expires_in_days": 7}
+    entry = client.post("/v1/blocklist", headers=supervisor, json=body).json()
+    assert entry["expires_at"] is not None
+    assert target in p.scorer.blocklist
+    p.scorer.recover()  # the list is rebuilt from the database like the rest of the state
+    assert target in p.scorer.blocklist
+    assert _pay(client, tokens, p, spare(), target, amount=50.0)["decision"]["tier"] != "allow"
+    with p.sessions() as s:
+        row = s.get(BlocklistEntry, entry["id"])
+        row.expires_at = p.scorer.now() - timedelta(minutes=1)
+        s.commit()
+    p.scorer.recover()
+    assert _pay(client, tokens, p, spare(), target, amount=50.0)["decision"]["tier"] == "allow"
+    states = client.get(f"/v1/blocklist?q={target[:5]}&state=all", headers=supervisor).json()
+    assert [e["state"] for e in states["entries"] if e["id"] == entry["id"]] == ["expired"]
+
+
+def test_a_confirmed_fraud_verdict_lists_the_wallet(client, tokens, p, replayed, spare):
+    body, result = held_payment(client, tokens, p, spare)
+    case_id, mule = result["decision"]["case_id"], body["receiver_id"]
+    analyst = tokens("analyst1")
+    done = client.post(
+        f"/v1/cases/{case_id}/verdict",
+        headers=analyst,
+        json={"verdict": "confirmed_fraud", "note": REASON},
+    )
+    assert done.status_code == 200
+    entries = client.get(f"/v1/blocklist?q={mule[:6]}&limit=200", headers=analyst).json()["entries"]
+    mine = [e for e in entries if e["value"] == mule]
+    assert len(mine) == 1 and mine[0]["source"] == "verdict" and mine[0]["case_id"] == case_id
+    assert mule in p.scorer.blocklist
+
+
+def test_the_message_check_knows_listed_numbers_and_domains(client, tokens, p, replayed, spare):
+    supervisor, service = tokens("supervisor1"), tokens("upay-core")
+    listed = (("phone", "+8801712345678"), ("url", "https://www.pay-evil.example.com/x"))
+    for kind, value in listed:
+        made = client.post(
+            "/v1/blocklist",
+            headers=supervisor,
+            json={"kind": kind, "value": value, "reason": REASON},
+        )
+        assert made.status_code == 201, made.text
+    wallet = spare()
+
+    def check(text: str) -> dict:
+        response = client.post(
+            "/v1/customer/message-check", headers=service, json={"wallet_id": wallet, "text": text}
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    both = check("Send the fee to 01712-345678 or log in at http://login.pay-evil.example.com now")
+    assert both["level"] == "high" and both["blocklist"] == ["phone", "url"]
+    assert "01712345678" not in json.dumps(both) and "pay-evil" not in json.dumps(both["blocklist"])
+    assert check("Call 01712345678 to claim")["blocklist"] == ["phone"]
+    clean = check("Lunch at 1pm? Bring the notes.")
+    assert clean["blocklist"] == [] and clean["level"] == "none"
+    other = check("Call 01812345678 about the order")
+    assert other["blocklist"] == []
+    # An import adds what is valid and counts the rest.
+    imported = client.post(
+        "/v1/blocklist/import",
+        headers=supervisor,
+        json={
+            "reason": REASON,
+            "entries": [
+                {"kind": "phone", "value": "01912345678"},
+                {"kind": "phone", "value": "01712345678"},  # already listed
+                {"kind": "url", "value": "not a domain"},
+            ],
+        },
+    )
+    assert imported.json() == {"added": 1, "skipped": 2}
+
+
+def test_bangla_texts_are_signed_off_by_a_translator_against_their_exact_wording(
+    client, tokens, p, replayed
+):
+    analyst, admin, supervisor = tokens("analyst1"), tokens("admin"), tokens("supervisor1")
+    sheet = client.get("/v1/policy/translations", headers=analyst).json()
+    total = len(sheet["texts"])
+    assert sheet["policy_version"] == "v3" and total > 20
+    assert sheet["counts"].get("unreviewed", 0) == total
+    key = "message:scam.warn"
+    path = f"/v1/policy/translations/{key}/review"
+    body = {"status": "approved", "reviewer_name": "Rahima Khatun", "note": "Reads naturally."}
+    assert client.post(path, headers=analyst, json=body).status_code == 403
+    assert client.post(path, headers=tokens("upay-core"), json=body).status_code == 403
+    assert (
+        client.post(path.replace(key, "message:nope"), headers=admin, json=body).status_code == 404
+    )
+    assert client.post(path, headers=admin, json=body).status_code == 201
+
+    def texts() -> dict:
+        found = client.get("/v1/policy/translations", headers=analyst).json()["texts"]
+        return {t["key"]: t for t in found}
+
+    states = texts()
+    assert states[key]["status"] == "approved" and states[key]["reviewed_by"] == "Rahima Khatun"
+    changes = body | {"status": "changes_requested", "note": "Too stiff"}
+    client.post(path, headers=supervisor, json=changes)
+    assert texts()[key]["status"] == "changes_requested"  # the latest sign-off wins
+
+    # A sign-off on an earlier wording no longer counts.
+    with p.sessions() as s:
+        newest = s.scalars(
+            select(TranslationReview)
+            .where(TranslationReview.key == key)
+            .order_by(TranslationReview.id.desc())
+        ).first()
+        newest.text_hash = "1" * 64
+        s.commit()
+    assert texts()[key]["status"] == "outdated"
+    sheet_csv = client.get("/v1/policy/translations.csv", headers=analyst)
+    assert sheet_csv.status_code == 200
+    assert next(csv.reader(io.StringIO(sheet_csv.text)))[:4] == ["key", "kind", "english", "bangla"]
+
+
+# ----------------------------------------------------- webhooks and notifications
+
+
+@pytest.fixture
+def receiver(p):
+    """A fake webhook receiver: `calls` records requests, `answer` sets the status returned."""
+    calls: list[httpx.Request] = []
+    state = {"status": 200}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(state["status"])
+
+    old = p.dispatcher.client
+    p.dispatcher.client = httpx.Client(transport=httpx.MockTransport(handler))
+    p.dispatcher.notifier = make_notifier(p.settings, p.dispatcher.client)
+    yield type("Receiver", (), {"calls": calls, "state": state})
+    p.dispatcher.client = old
+
+
+def _endpoint(client, tokens, events, url="https://hooks.example.test/fraudlens") -> dict:
+    response = client.post(
+        "/v1/webhooks",
+        headers=tokens("supervisor1"),
+        json={"url": url, "events": events, "description": "tests"},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _drain(p) -> None:
+    """Make everything pending due now, then send it."""
+    with p.sessions() as s:
+        for d in s.scalars(select(Delivery).where(Delivery.status == "pending")):
+            d.next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+        s.commit()
+    p.dispatcher.run_once(limit=500)
+
+
+def test_only_oversight_manages_webhooks_and_the_secret_is_shown_once(client, tokens, p):
+    body = {"url": "https://hooks.example.test/a", "events": ["decision.hold"]}
+    assert client.post("/v1/webhooks", headers=tokens("analyst1"), json=body).status_code == 403
+    assert client.get("/v1/webhooks", headers=tokens("analyst1")).status_code == 403
+    made = client.post("/v1/webhooks", headers=tokens("admin"), json=body)
+    assert made.status_code == 201 and made.json()["secret"].startswith("whsec_")
+    listed = client.get("/v1/webhooks", headers=tokens("supervisor1")).json()
+    assert made.json()["id"] in [e["id"] for e in listed]
+    assert "secret" not in json.dumps(listed)
+    bad = client.post("/v1/webhooks", headers=tokens("admin"), json=body | {"events": ["nope"]})
+    assert bad.status_code == 422
+    rotated = client.post(
+        f"/v1/webhooks/{made.json()['id']}/rotate-secret", headers=tokens("admin")
+    )
+    assert rotated.json()["secret"] != made.json()["secret"]
+
+
+def test_a_private_address_is_refused_unless_local_testing_allows_it(
+    client, tokens, p, monkeypatch
+):
+    monkeypatch.setattr(p.settings, "webhook_allow_private", False)
+    for url in (
+        "https://127.0.0.1/hook",
+        "https://169.254.169.254/latest/meta-data",
+        "https://10.0.0.5/hook",
+        "http://hooks.example.test/plain",
+        "https://user:pass@hooks.example.test/",
+    ):
+        response = client.post(
+            "/v1/webhooks",
+            headers=tokens("supervisor1"),
+            json={"url": url, "events": ["decision.hold"]},
+        )
+        assert response.status_code == 422, url
+        assert response.json()["error"]["code"] == "unsafe_url"
+
+
+def test_a_live_hold_is_signed_delivered_once_and_carries_identifiers_only(
+    client, tokens, p, replayed, spare, receiver
+):
+    hook = _endpoint(client, tokens, ["decision.hold"])
+    other = _endpoint(client, tokens, ["case.verdict"], url="https://other.example.test/hook")
+    body, result = held_payment(client, tokens, p, spare)
+    _drain(p)
+    mine = [c for c in receiver.calls if str(c.url) == hook["url"]]
+    assert len(mine) == 1 and not [c for c in receiver.calls if str(c.url) == other["url"]]
+    request = mine[0]
+    event = json.loads(request.content)
+    assert (
+        event["type"] == "decision.hold" and request.headers["X-FraudLens-Event"] == "decision.hold"
+    )
+    assert request.headers["X-FraudLens-Delivery"] == event["id"]
+    assert notify.verify(hook["secret"], request.headers["X-FraudLens-Signature"], request.content)
+    assert not notify.verify(
+        other["secret"], request.headers["X-FraudLens-Signature"], request.content
+    )
+    assert event["data"] == {
+        "txn_id": body["txn_id"], "tier": "hold", "status": "held",
+        "case_id": result["decision"]["case_id"], "sender_id": body["sender_id"],
+    }  # fmt: skip
+    text = request.content.decode()
+    assert str(body["amount"]) not in text and body["receiver_id"] not in text
+    _drain(p)
+    assert len([c for c in receiver.calls if str(c.url) == hook["url"]]) == 1  # not sent twice
+
+
+def test_a_failing_receiver_is_retried_with_the_same_event_id_then_dead_lettered(
+    client, tokens, p, replayed, spare, receiver, monkeypatch
+):
+    hook = _endpoint(client, tokens, ["decision.hold"], url="https://flaky.example.test/hook")
+    monkeypatch.setattr(p.settings, "delivery_max_attempts", 3)
+    receiver.state["status"] = 500
+    held_payment(client, tokens, p, spare)
+    p.dispatcher.run_once(limit=500)
+    ids = set()
+    with p.sessions() as s:
+        row = s.scalars(
+            select(Delivery).where(Delivery.endpoint_id == hook["id"]).order_by(Delivery.id)
+        ).one()
+        assert (row.status, row.attempts, row.last_status_code) == ("pending", 1, 500)
+        assert row.next_attempt_at > datetime.now(UTC) + timedelta(seconds=20)  # backed off
+        ids.add(row.event_id)
+        delivery_id = row.id
+    _drain(p)
+    _drain(p)
+    with p.sessions() as s:
+        row = s.get(Delivery, delivery_id)
+        assert (row.status, row.attempts) == ("dead", 3) and "500" in row.last_error
+    sent = [c for c in receiver.calls if str(c.url) == hook["url"]]
+    assert len(sent) == 3 and {c.headers["X-FraudLens-Delivery"] for c in sent} == ids
+
+    listed = client.get("/v1/webhooks/deliveries?status=dead", headers=tokens("supervisor1")).json()
+    assert delivery_id in [d["id"] for d in listed["deliveries"]]
+    assert (
+        client.post(
+            f"/v1/webhooks/deliveries/{delivery_id}/replay", headers=tokens("analyst1")
+        ).status_code
+        == 403
+    )
+    receiver.state["status"] = 200
+    again = client.post(
+        f"/v1/webhooks/deliveries/{delivery_id}/replay", headers=tokens("supervisor1")
+    )
+    assert again.json()["status"] == "pending" and again.json()["attempts"] == 0
+    _drain(p)
+    with p.sessions() as s:
+        assert s.get(Delivery, delivery_id).status == "delivered"
+        assert hook["id"] and s.get(WebhookEndpoint, hook["id"]).consecutive_failures == 0
+
+
+def test_verdicts_and_freezes_are_announced_and_history_is_not(
+    client, tokens, p, replayed, spare, receiver
+):
+    hook = _endpoint(
+        client, tokens, ["case.verdict", "freeze.approved", "decision.hold"],
+        url="https://all.example.test/hook",
+    )  # fmt: skip
+    # An event from a replay is history: nobody is told.
+    victim, mule = spare(), spare()
+    flag(client, tokens, p, mule)
+    quiet = client.post(
+        "/v1/score", headers=tokens("upay-core"), json=send(p, victim, mule, source="replay")
+    ).json()
+    assert quiet["decision"]["tier"] == "hold"
+    with p.sessions() as s:
+        assert (
+            s.scalar(
+                select(func.count()).select_from(Delivery).where(Delivery.endpoint_id == hook["id"])
+            )
+            == 0
+        )
+
+    body, result = held_payment(client, tokens, p, spare)
+    case_id, mule = result["decision"]["case_id"], body["receiver_id"]
+    analyst, supervisor = tokens("analyst1"), tokens("supervisor1")
+    asked = client.post(
+        f"/v1/wallets/{mule}/freeze-requests", headers=analyst,
+        json={"reason": REASON, "case_id": case_id},
+    )  # fmt: skip
+    assert asked.status_code == 201
+    approved = client.post(
+        f"/v1/freeze-requests/{asked.json()['id']}/approve",
+        headers=supervisor,
+        json={"note": REASON},
+    )
+    assert approved.status_code == 200
+    done = client.post(
+        f"/v1/cases/{case_id}/verdict", headers=analyst,
+        json={"verdict": "confirmed_fraud", "note": REASON},
+    )  # fmt: skip
+    assert done.status_code == 200
+    _drain(p)
+    types = [json.loads(c.content)["type"] for c in receiver.calls if str(c.url) == hook["url"]]
+    assert sorted(types) == ["case.verdict", "decision.hold", "freeze.approved"]
+    freeze = next(
+        json.loads(c.content) for c in receiver.calls
+        if json.loads(c.content)["type"] == "freeze.approved"
+    )  # fmt: skip
+    assert freeze["data"]["wallet_id"] == mule and freeze["data"]["case_id"] == case_id
+
+
+def test_a_disabled_endpoint_hears_nothing_and_a_test_ping_reports_the_answer(
+    client, tokens, p, replayed, spare, receiver
+):
+    supervisor = tokens("supervisor1")
+    hook = _endpoint(client, tokens, ["decision.hold"], url="https://quiet.example.test/hook")
+    p.dispatcher.run_once()  # nothing pending for it
+    ping = client.post(f"/v1/webhooks/{hook['id']}/test", headers=supervisor)
+    assert ping.status_code == 200 and ping.json()["event_type"] == "test.ping"
+    assert ping.json()["status"] == "delivered" and ping.json()["last_status_code"] == 200
+    off = client.post(f"/v1/webhooks/{hook['id']}/disable", headers=supervisor)
+    assert off.json()["active"] is False
+    before = len(receiver.calls)
+    held_payment(client, tokens, p, spare)
+    _drain(p)
+    assert not [c for c in receiver.calls[before:] if str(c.url) == hook["url"]]
+    on = client.post(f"/v1/webhooks/{hook['id']}/enable", headers=supervisor)
+    assert on.json()["active"] is True
+
+
+def test_a_customer_is_texted_the_fixed_policy_wording_for_step_up_and_hold(
+    client, tokens, p, replayed, spare, receiver
+):
+    body, result = held_payment(client, tokens, p, spare)
+    with p.sessions() as s:
+        sms = s.scalars(
+            select(Delivery).where(Delivery.kind == "sms").order_by(Delivery.id.desc())
+        ).first()
+        payload = dict(sms.payload)
+    message = result["decision"]["customer_message"]
+    assert payload["wallet_id"] == body["sender_id"]
+    assert (payload["text_bn"], payload["text_en"]) == (message["bn"], message["en"])
+    assert set(payload) == {"type", "wallet_id", "text_bn", "text_en"}  # nothing else leaves
+    _drain(p)
+    with p.sessions() as s:
+        assert s.get(Delivery, sms.id).status == "delivered"
+    # A warning is shown in the app, not texted.
+    with p.sessions() as s:
+        warned = s.scalar(
+            select(func.count())
+            .select_from(Delivery)
+            .where(Delivery.kind == "sms", Delivery.event_type == "decision.warn")
+        )
+    assert warned == 0
+
+
+# ------------------------------------------------- partner API keys, report tracking
+
+
+def _txn_event(p, sender, receiver) -> dict:
+    return {"kind": "txn"} | send(p, sender, receiver)
+
+
+def _make_key(client, tokens, **over) -> dict:
+    body = {"name": "Acme Wallet", "scopes": ["score", "events"]} | over
+    response = client.post("/v1/api-keys", headers=tokens("supervisor1"), json=body)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_only_oversight_makes_keys_and_the_key_is_shown_once(client, tokens, p):
+    body = {"name": "Acme", "scopes": ["score"]}
+    assert client.post("/v1/api-keys", headers=tokens("analyst1"), json=body).status_code == 403
+    made = _make_key(client, tokens)
+    assert made["key"].startswith(made["prefix"] + "_")
+    listed = client.get("/v1/api-keys", headers=tokens("admin")).json()
+    assert made["id"] in [k["id"] for k in listed]
+    assert made["key"] not in json.dumps(listed) and "key_hash" not in json.dumps(listed)
+    with p.sessions() as s:
+        stored = s.get(ApiKey, made["id"])
+        assert stored.key_hash != made["key"] and made["key"] not in stored.key_hash
+    bad = client.post("/v1/api-keys", headers=tokens("admin"), json=body | {"scopes": ["root"]})
+    assert bad.status_code == 422
+
+
+def test_a_key_scores_within_its_scope_and_is_audited_by_prefix(client, tokens, p, replayed, spare):
+    key = _make_key(client, tokens, scopes=["score"])
+    headers = {"X-API-Key": key["key"]}
+    sender, receiver = spare(), spare()
+    ok = client.post("/v1/score", headers=headers, json=send(p, sender, receiver, amount=50.0))
+    assert ok.status_code == 200 and ok.json()["decision"]["tier"] == "allow"
+    events = client.post(
+        "/v1/events",
+        headers=headers,
+        json={"events": [{"kind": "txn"} | send(p, sender, receiver)]},
+    )
+    assert events.status_code == 403  # no `events` scope
+    assert client.post("/v1/wallet-flags", headers=headers, json={}).status_code == 401
+    wrong = client.post(
+        "/v1/score", headers={"X-API-Key": key["key"][:-3] + "abc"}, json=send(p, sender, receiver)
+    )
+    assert wrong.status_code == 401
+    assert client.post("/v1/score", json=send(p, sender, receiver)).status_code == 401
+    with p.sessions() as s:
+        used = s.get(ApiKey, key["id"]).last_used_at
+        actors = set(s.scalars(select(AuditLog.actor).where(AuditLog.action == "apikey.create")))
+    assert used is not None and actors
+    # The service account's token still works as before.
+    assert _pay(client, tokens, p, spare(), spare(), amount=50.0)["decision"]["tier"] == "allow"
+
+
+def test_a_key_is_limited_per_minute_and_per_day_and_can_be_revoked(
+    client, tokens, p, replayed, spare
+):
+    fast = _make_key(client, tokens, rate_per_minute=2)
+    headers = {"X-API-Key": fast["key"]}
+    sender = spare()
+    codes = [
+        client.post(
+            "/v1/score", headers=headers, json=send(p, sender, spare(), amount=50.0)
+        ).status_code
+        for _ in range(3)
+    ]
+    assert codes == [200, 200, 429]
+    limited = client.post("/v1/score", headers=headers, json=send(p, sender, spare()))
+    assert limited.json()["error"]["code"] == "rate_limited"
+    assert int(limited.headers["Retry-After"]) >= 1
+
+    capped = _make_key(client, tokens, daily_quota=1)
+    headers = {"X-API-Key": capped["key"]}
+    assert (
+        client.post(
+            "/v1/score", headers=headers, json=send(p, sender, spare(), amount=50.0)
+        ).status_code
+        == 200
+    )
+    over = client.post("/v1/score", headers=headers, json=send(p, sender, spare()))
+    assert over.status_code == 429 and over.json()["error"]["code"] == "quota_exceeded"
+
+    revoke = client.post(f"/v1/api-keys/{capped['id']}/revoke", headers=tokens("supervisor1"))
+    assert revoke.status_code == 200 and revoke.json()["revoked_at"]
+    assert (
+        client.post(
+            f"/v1/api-keys/{capped['id']}/revoke", headers=tokens("supervisor1")
+        ).status_code
+        == 409
+    )
+    gone = client.post("/v1/score", headers=headers, json=send(p, sender, spare()))
+    assert gone.status_code == 401
+
+    usage = client.get(f"/v1/api-keys/{fast['id']}/usage?days=3", headers=tokens("admin")).json()
+    today = usage["days"][-1]
+    # Two went through; the two refused ones count as errors, not as usage.
+    assert today["requests"] == 2 and today["errors"] == 2 and len(usage["days"]) == 3
+
+
+def test_a_sandbox_key_gets_every_outcome_and_changes_nothing(client, tokens, p, replayed, spare):
+    key = _make_key(client, tokens, sandbox=True)
+    headers = {"X-API-Key": key["key"]}
+    sender, receiver = spare(), spare()
+    with p.sessions() as s:
+        before = (
+            s.scalar(select(func.count()).select_from(Transaction)),
+            s.scalar(select(func.count()).select_from(Case)),
+            s.scalar(select(func.count()).select_from(Delivery)),
+        )
+    seen = {}
+    for cents, tier in ((0.01, "allow"), (0.02, "warn"), (0.03, "step_up"), (0.04, "hold")):
+        body = send(p, sender, receiver, amount=100 + cents)
+        got = client.post("/v1/score", headers=headers, json=body)
+        assert got.status_code == 200, got.text
+        out = got.json()
+        assert out["sandbox"] is True and out["decision"]["tier"] == tier
+        assert out["decision"]["mode"] == "sandbox" and out["decision"]["case_id"] is None
+        seen[tier] = out["status"]
+        if tier != "allow":
+            assert out["decision"]["customer_message"]["bn"]
+    assert seen == {
+        "allow": "completed", "warn": "pending_customer",
+        "step_up": "pending_customer", "hold": "held",
+    }  # fmt: skip
+    accepted = client.post(
+        "/v1/events",
+        headers=headers,
+        json={"events": [{"kind": "txn"} | send(p, sender, receiver)]},
+    )
+    assert accepted.status_code in (202, 403)  # scope `events` was granted
+    with p.sessions() as s:
+        after = (
+            s.scalar(select(func.count()).select_from(Transaction)),
+            s.scalar(select(func.count()).select_from(Case)),
+            s.scalar(select(func.count()).select_from(Delivery)),
+        )
+    assert after == before
+    assert p.worker.backlog() == 0
+
+
+@pytest.fixture
+def sms(p):
+    """Captures the texts the platform sends to customers."""
+    sent: list[tuple] = []
+
+    class Capture:
+        def send(self, wallet_id, text_bn, text_en, event_type):
+            sent.append((wallet_id, text_bn, text_en, event_type))
+
+    old = p.dispatcher.notifier
+    p.dispatcher.notifier = Capture()
+    yield sent
+    p.dispatcher.notifier = old
+
+
+def _report(client, tokens, p, spare) -> tuple[dict, str, str]:
+    victim, mule = spare(), spare()
+    response = client.post(
+        "/v1/customer/reports",
+        headers=tokens("upay-core"),
+        json={
+            "reporter_id": victim, "reported_wallet_id": mule,
+            "category": "impersonation", "description": "A caller said they were from upay.",
+        },
+    )  # fmt: skip
+    assert response.status_code == 201, response.text
+    return response.json(), victim, mule
+
+
+def test_a_report_gets_a_reference_and_its_status_follows_the_case(
+    client, tokens, p, replayed, spare, sms
+):
+    made, victim, mule = _report(client, tokens, p, spare)
+    reference = made["reference"]
+    assert re.fullmatch(r"FL-[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}", reference)
+
+    def ask(ref, code):
+        return client.post("/v1/public/reports/status", json={"reference": ref, "code": code})
+
+    def code_for(ref) -> str:
+        sms.clear()
+        assert client.post("/v1/public/reports/code", json={"reference": ref}).status_code == 202
+        assert sms, "a code was sent to the reporter"
+        wallet, bn, en, kind = sms[-1]
+        assert wallet == victim and kind == "report.code" and reference in en
+        return re.search(r"\b(\d{6})\b", en).group(1)
+
+    code = code_for(reference.lower())  # typed loosely
+    wrong = ask(reference, "000000" if code != "000000" else "111111")
+    assert wrong.status_code == 400 and wrong.json()["error"]["code"] == "invalid_code"
+    unknown = ask("FL-ZZZZ-ZZZZ", code)
+    assert unknown.status_code == 400 and unknown.json() == wrong.json() | {
+        "error": wrong.json()["error"] | {"request_id": unknown.json()["error"]["request_id"]}
+    }
+
+    first = ask(reference, code).json()
+    assert first["status"] == "received" and first["reference"] == reference
+    assert first["title"]["bn"] and first["detail"]["en"]
+    assert set(first) == {"reference", "status", "title", "detail", "reported_at", "updated_at"}
+    assert mule not in json.dumps(first) and victim not in json.dumps(first)
+
+    analyst = tokens("analyst1")
+    client.post(f"/v1/cases/{made['case_id']}/assign", headers=analyst, json={})
+    assert ask(reference, code).json()["status"] == "investigating"
+    client.post(
+        f"/v1/cases/{made['case_id']}/notes", headers=analyst, json={"body": "secret analyst note"}
+    )
+    done = client.post(
+        f"/v1/cases/{made['case_id']}/verdict",
+        headers=analyst,
+        json={"verdict": "confirmed_fraud", "note": REASON},
+    )
+    assert done.status_code == 200
+    final = ask(reference, code).json()
+    assert final["status"] == "action_taken" and final["updated_at"] is not None
+    assert "secret analyst note" not in json.dumps(final) and "confirmed" not in json.dumps(final)
+
+
+def test_the_report_lookup_gives_a_guesser_nothing(client, tokens, p, replayed, spare, sms):
+    made, victim, _ = _report(client, tokens, p, spare)
+    reference = made["reference"]
+    # The same answer for a reference that exists and one that does not, and no text for the latter.
+    sms.clear()
+    real = client.post("/v1/public/reports/code", json={"reference": reference})
+    ghost = client.post("/v1/public/reports/code", json={"reference": "FL-QQQQ-QQQQ"})
+    assert real.status_code == ghost.status_code == 202 and real.json() == ghost.json()
+    assert len(sms) == 1
+    code = re.search(r"\b(\d{6})\b", sms[0][2]).group(1)
+    # Five wrong guesses burn the code: even the right one no longer works.
+    bad = "000000" if code != "000000" else "111111"
+    for _ in range(5):
+        assert (
+            client.post(
+                "/v1/public/reports/status", json={"reference": reference, "code": bad}
+            ).status_code
+            == 400
+        )
+    burnt = client.post("/v1/public/reports/status", json={"reference": reference, "code": code})
+    assert burnt.status_code == 400
+    # A reference may ask for a code only a few times an hour.
+    codes = [
+        client.post("/v1/public/reports/code", json={"reference": reference}).status_code
+        for _ in range(6)
+    ]
+    assert 429 in codes
+    # The code format is checked before anything else.
+    assert (
+        client.post(
+            "/v1/public/reports/status", json={"reference": reference, "code": "12ab56"}
+        ).status_code
+        == 422
+    )
+
+
+# ------------------------------------------------------------ live snapshots
+
+
+def _probes(scorer, p) -> list:
+    """Probe transactions at one fixed moment, to compare the state before and after."""
+    with p.sessions() as s:
+        recent = s.scalars(
+            select(Transaction)
+            .where(Transaction.type.in_(("SEND_MONEY", "CASH_OUT")))
+            .order_by(Transaction.txn_id.desc())
+            .limit(300)
+        ).all()
+    now = max(scorer.clock.now(), scorer.engine.last_ts) + 60
+    probes = [
+        Txn(10**12 + i, now, t.type, t.sender_id, t.sender_type, t.receiver_id, t.receiver_type,
+            float(t.amount), 10_000.0, t.device_id, t.channel, t.district)
+        for i, t in enumerate(recent)
+        if t.sender_id in scorer.engine.wallets
+    ]  # fmt: skip
+    assert len(probes) > 100
+    return probes
+
+
+def _probe_state(scorer, probes) -> tuple:
+    """Features for the probes, plus the state around them."""
+    engine = scorer.engine
+    features = np.array([engine.features(t) for t in probes], dtype=np.float64)
+    return (
+        np.nan_to_num(features, nan=-12345.0), scorer.seq, set(scorer.frozen),
+        dict(engine.flagged), engine.last_ts, dict(scorer.blocklist),
+    )  # fmt: skip
+
+
+def test_a_restart_from_a_snapshot_gives_the_same_state_as_a_full_replay(
+    client, tokens, p, replayed, spare
+):
+    scorer = p.scorer
+    written = client.post("/v1/snapshot", headers=tokens("supervisor1"))
+    assert written.status_code == 200 and written.json()["seq"] == scorer.seq
+    assert client.post("/v1/snapshot", headers=tokens("analyst1")).status_code == 403
+    at = scorer.seq
+    # Life goes on after the snapshot: payments, a hold, a verdict, a late flag, a listing.
+    for _ in range(3):
+        _pay(client, tokens, p, spare(), spare(), amount=75.0)
+    body, result = held_payment(client, tokens, p, spare)
+    client.post(
+        f"/v1/cases/{result['decision']['case_id']}/verdict",
+        headers=tokens("analyst1"),
+        json={"verdict": "legitimate", "note": REASON},
+    )
+    flag(client, tokens, p, spare())
+    assert scorer.seq > at
+
+    probes = _probes(scorer, p)
+    before = _probe_state(scorer, probes)
+    scorer.recover(use_snapshot=False)
+    full = _probe_state(scorer, probes)
+    assert scorer.recovered_from["source"] == "baseline"
+    full_replayed = scorer.recovered_from["replayed_transactions"]
+    scorer.recover()
+    quick = _probe_state(scorer, probes)
+    assert scorer.recovered_from["source"] == "live_snapshot"
+    assert scorer.recovered_from["snapshot_seq"] == at
+    assert scorer.recovered_from["replayed_transactions"] < full_replayed  # only the tail
+
+    for other in (full, quick):
+        assert (before[0] == other[0]).all(), f"{(before[0] != other[0]).any(axis=1).sum()} differ"
+        assert before[1:] == other[1:]
+    ready = client.get("/ready").json()
+    assert ready["status"] == "ready" and ready["recovery"]["source"] == "live_snapshot"
+
+
+def test_a_snapshot_that_no_longer_matches_the_database_is_ignored(client, tokens, p, replayed):
+    scorer = p.scorer
+    scorer.write_snapshot()
+    path = scorer._live_path
+    assert path.exists()
+    # The database moved on without it (a restore, a reset): the counts no longer agree.
+    with p.sessions() as s:
+        victim = (
+            s.scalars(select(Transaction).where(Transaction.applied_seq == scorer.seq - 1)).first()
+            or s.scalars(select(Transaction).where(Transaction.applied_seq.is_not(None))).first()
+        )
+        original = victim.applied_seq
+        victim.applied_seq = None
+        s.commit()
+    try:
+        scorer.recover()
+        assert scorer.recovered_from["source"] == "baseline"
+        assert not path.exists()  # discarded, so it is not tried again
+    finally:
+        with p.sessions() as s:
+            s.get(Transaction, victim.txn_id).applied_seq = original
+            s.commit()
+        scorer.recover()
+
+
+def test_a_corrupt_snapshot_falls_back_to_the_baseline(client, p, replayed):
+    scorer = p.scorer
+    scorer.write_snapshot()
+    scorer._live_path.write_bytes(b"not a pickle")
+    scorer.recover()
+    assert scorer.recovered_from["source"] == "baseline" and scorer.ready
+    scorer.write_snapshot()  # leave a good one behind
+
+
+def test_snapshots_are_written_as_the_log_grows(client, tokens, p, replayed, spare, monkeypatch):
+    scorer = p.scorer
+    scorer.write_snapshot()
+    start = scorer.snapshot_seq
+    monkeypatch.setattr(p.settings, "snapshot_every_events", 3)
+    for _ in range(4):
+        _pay(client, tokens, p, spare(), spare(), amount=75.0)
+    assert scorer.snapshot_seq > start
+    meta = snapshots.read(scorer._live_path)[1]
+    assert meta.seq == scorer.snapshot_seq and meta.applied > 0
+    monkeypatch.setattr(p.settings, "snapshot_every_events", 0)
+    before = scorer.snapshot_seq
+    _pay(client, tokens, p, spare(), spare(), amount=75.0)
+    assert scorer.snapshot_seq == before  # off means off

@@ -1,6 +1,7 @@
 """Paths and runtime settings shared by every layer."""
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,7 +21,7 @@ class Settings(BaseSettings):
     # Model and policy the API serves. None means the promoted (CURRENT) model version.
     models_root: Path | None = None
     model_version: str | None = None
-    policy_version: str = "v2"
+    policy_version: str = "v3"
     # A challenger scored next to the served model on every decision. It is recorded
     # for comparison and never decides anything.
     shadow_model_version: str | None = None
@@ -30,6 +31,28 @@ class Settings(BaseSettings):
     events_stream: str = "fraudlens:events"
     alerts_channel: str = "fraudlens:alerts"
     run_worker: bool = True  # consume the event stream inside the API process
+
+    # How often the worker records cases past their review deadline (0: never). A breach
+    # is always written to the timeline; with `sla_auto_escalate` the case also goes to
+    # the supervisors. The held money stays held either way.
+    sla_sweep_seconds: int = 60
+    sla_auto_escalate: bool = False
+
+    # Outbound messages: webhooks to other systems and SMS/push to customers. Both go
+    # through the `deliveries` outbox and are retried; see platform/notify.py.
+    run_dispatcher: bool = True  # send them from inside the API process
+    delivery_max_attempts: int = 6  # then the delivery is dead-lettered
+    # Webhook URLs must be public https by default. Private addresses are for local tests.
+    webhook_allow_private: bool = False
+    notify_adapter: Literal["off", "console", "http"] = "off"
+    sms_gateway_url: str | None = None
+    sms_gateway_token: SecretStr | None = None
+
+    # Save the scorer's state to disk after this many applied transactions and flags, so a
+    # restart replays only what came after (0: never; the end-of-history baseline is used).
+    # Saving pauses scoring for the seconds it takes. A snapshot is also saved at shutdown.
+    snapshot_every_events: int = 50_000
+    snapshot_on_shutdown: bool = True
 
     # Signing key for access tokens. The default is for local development only;
     # the API refuses to start with it when environment == "production".

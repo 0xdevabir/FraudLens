@@ -230,7 +230,10 @@ export interface CaseRow {
   opened_at: string;
   sla_due_at: string | null;
   overdue: boolean;
+  sla_state: "ok" | "at_risk" | "breached" | null;
+  sla_remaining_seconds: number | null;
   verdict: string | null;
+  reason_code: string | null;
   closed_at: string | null;
   closed_by: number | null;
   closer?: string | null;
@@ -598,6 +601,7 @@ export interface Feedback {
   cases: Record<string, number>;
   labels: { fraud: number; legitimate: number };
   last_verdict_at: string | null;
+  false_alarm_reasons: { reason_code: string; cases: number; alerts: number; share: number }[];
   versions_trained_on_feedback: { version: string; created_at: string; rows: number; last_label_at: string }[];
 }
 
@@ -618,4 +622,107 @@ export interface Scenario {
   id: string;
   expected_tier: Tier;
   payment: { sender_id: string; receiver_id: string; amount: number; type: string; district: string; sender_balance_before: number };
+}
+
+export interface Workload {
+  now: string;
+  at_risk_fraction: number;
+  totals: { open: number; escalated: number; at_risk: number; breached: number; held_amount: number };
+  reviewers: {
+    assignee_id: number | null;
+    assignee: string | null;
+    open: number;
+    escalated: number;
+    at_risk: number;
+    breached: number;
+    held_amount: number;
+    oldest_opened_at: string;
+    next_due_at: string | null;
+  }[];
+}
+
+export interface BlocklistEntry {
+  id: number;
+  kind: "wallet" | "phone" | "url";
+  value: string;
+  reason: string;
+  source: "manual" | "verdict" | "import";
+  case_id: number | null;
+  created_by: string;
+  created_at: string;
+  expires_at: string | null;
+  state: "active" | "expired" | "removed";
+  removed_at: string | null;
+  removed_by: string | null;
+  remove_reason: string | null;
+}
+
+export interface TranslationText {
+  key: string;
+  kind: "rule" | "customer_message" | "recommendation";
+  label: string;
+  en: string;
+  bn: string;
+  status: "approved" | "changes_requested" | "unreviewed" | "outdated";
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  note: string | null;
+}
+
+export interface Translations {
+  policy_version: string;
+  counts: Record<string, number>;
+  texts: TranslationText[];
+}
+
+export interface WebhookEndpoint {
+  id: number;
+  url: string;
+  description: string;
+  events: string[];
+  active: boolean;
+  consecutive_failures: number;
+  created_at: string;
+  pending?: number;
+  dead?: number;
+  secret?: string;
+}
+
+export interface DeliveryRow {
+  id: number;
+  kind: "webhook" | "sms";
+  endpoint_id: number | null;
+  event_type: string;
+  event_id: string;
+  status: "pending" | "delivered" | "dead";
+  attempts: number;
+  next_attempt_at: string;
+  last_status_code: number | null;
+  last_error: string | null;
+  delivered_at: string | null;
+  created_at: string;
+}
+
+export interface ApiKeyRow {
+  id: number;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  sandbox: boolean;
+  rate_per_minute: number;
+  daily_quota: number | null;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  requests_today: number | null;
+  key?: string;
+}
+
+export interface ReportStatus {
+  reference: string;
+  status: "received" | "investigating" | "action_taken" | "closed";
+  title: Text2;
+  detail: Text2;
+  reported_at: string;
+  updated_at: string | null;
 }

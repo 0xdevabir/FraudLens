@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import AsyncIterator, Sequence
 
 from pydantic import BaseModel, ValidationError
@@ -53,6 +54,9 @@ class Worker(threading.Thread):
         self.processed = self.dead_lettered = self.failures = 0
         self._stopping = threading.Event()
         self._caught_up = False  # entries delivered before a crash are handled first
+        self.sla_every = settings.sla_sweep_seconds
+        self.sla_escalates = settings.sla_auto_escalate
+        self._swept_at = time.monotonic()
 
     def ensure_group(self) -> None:
         try:
@@ -141,11 +145,24 @@ class Worker(threading.Thread):
                 self.ensure_group()
                 while not self._stopping.is_set():
                     self.run_once(self.block_ms)
+                    self._sweep()
             except Exception:
                 self.failures += 1
                 self._caught_up = False  # whatever was delivered is still pending
                 log.exception("stream worker error; retrying in 2s")
                 self._stopping.wait(2.0)
+
+    def _sweep(self) -> None:
+        """Now and then, record cases that have missed their review deadline."""
+        if not self.sla_every or time.monotonic() - self._swept_at < self.sla_every:
+            return
+        self._swept_at = time.monotonic()
+        try:
+            from .cases import sweep_sla
+
+            sweep_sla(self.scorer, self.sla_escalates)
+        except Exception:
+            log.exception("SLA sweep failed; it will run again")
 
     def stop(self) -> None:
         self._stopping.set()

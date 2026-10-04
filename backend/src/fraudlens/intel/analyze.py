@@ -8,6 +8,8 @@ other piece of customer free text in the platform, never treated as an instructi
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from .links import check_links, worst
 from .taxonomy import Taxonomy
 from .text import TextModel
@@ -22,10 +24,19 @@ _LINK_CATEGORIES = {
 }
 
 
-def check_message(text: str, model: TextModel | None, taxonomy: Taxonomy) -> dict:
-    """`model` is None when the classifier has not been trained; links are still checked."""
+def check_message(
+    text: str, model: TextModel | None, taxonomy: Taxonomy, listed: Sequence[str] = ()
+) -> dict:
+    """`model` is None when the classifier has not been trained; links are still checked.
+
+    `listed` names the kinds ('phone', 'url') of blocklist entries the message mentions:
+    a phone number or domain people have already been scammed through is high risk
+    whatever the words say. The entries themselves are never returned.
+    """
     links = check_links(text, taxonomy.brands)
     level, risk, named, signals = worst(links), None, {}, []
+    if listed:
+        level = "high"
 
     if model is not None:
         scores = model.score([text])[0]
@@ -62,6 +73,7 @@ def check_message(text: str, model: TextModel | None, taxonomy: Taxonomy) -> dic
         "categories": categories,
         "signals": signals,
         "links": links,
+        "blocklist": list(listed),
         "advice": advice,
         "model_version": model.version if model is not None else None,
     }

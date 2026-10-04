@@ -92,6 +92,30 @@ export async function api<T = unknown>(path: string, body?: unknown, signal?: Ab
   return (await response.json()) as T;
 }
 
+/** Save a CSV the API builds for the current filters. The token goes in a header, so this is a fetch, not a link. */
+export async function download(path: string, fallbackName: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(API_URL + path, { headers: authHeaders(), cache: "no-store" });
+  } catch {
+    throw new ApiError(0, "unreachable", `Cannot reach the FraudLens API at ${API_URL}`);
+  }
+  if (response.status === 401) {
+    toLogin();
+    throw new ApiError(401, "signed_out", "Your session has ended. Please sign in again.");
+  }
+  if (!response.ok) throw await failure(response);
+  const name = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") ?? "")?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export interface Loaded<T> {
   data: T | undefined;
   error: ApiError | null;

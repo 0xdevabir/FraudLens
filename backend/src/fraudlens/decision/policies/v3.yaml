@@ -1,0 +1,352 @@
+# FraudLens decision policy.
+#
+# The models give a risk score; this file says what upay does with it. It is the
+# only place business rules live, it is versioned, and every decision records the
+# policy version and the rules it went through. Change it by adding v4.yaml, not
+# by editing this file.
+#
+# How each rule was chosen (measured on the validation period, never on test) is
+# written up in docs/DECISION_POLICY.md.
+
+version: v3
+description: >-
+  v2 plus the blocklist: a payment to a wallet a supervisor (or a confirmed-fraud
+  verdict) has listed asks the customer to verify and wait. It never blocks money.
+
+# Score cut-offs per tier come from the model version (chosen on validation data to
+# meet a precision target within an alert budget). Override one here only as a
+# deliberate, reviewed change, for example: overrides: {hold: 0.08}
+thresholds:
+  source: model
+  overrides: {}
+
+tiers:
+  allow:
+    action: proceed
+  warn:
+    action: show_warning          # the customer sees a warning and can continue
+  step_up:
+    action: step_up_auth          # extra authentication and a cooling-off wait
+    cooling_off_minutes: 30
+  hold:
+    action: hold_for_review       # money is held until an analyst decides
+    human_review: true
+    review_sla_minutes: 30
+
+# A rule is: all `when` conditions true -> effect. A condition on a missing value
+# is never true. `raise_to` lifts the tier, `cap_at` lowers it; a `hard` rule
+# cannot be lowered by a cap. Rules never lower a tier on their own.
+rules:
+  - id: R01_RECIPIENT_CONFIRMED_FRAUD
+    description: The receiving wallet has been confirmed as fraud by an investigation.
+    description_bn: তদন্তে প্রাপক ওয়ালেটটি প্রতারণায় জড়িত বলে নিশ্চিত হয়েছে।
+    applies_to: [SEND_MONEY]
+    when:
+      - {field: recipient_flagged, op: "==", value: 1}
+    effect: raise_to
+    tier: hold
+    hard: true
+    reason: RECIPIENT_CONFIRMED_FRAUD
+    scenario: scam
+
+  - id: R02_SENDER_CONFIRMED_FRAUD
+    description: The sending wallet has been confirmed as fraud by an investigation.
+    description_bn: তদন্তে প্রেরক ওয়ালেটটি প্রতারণায় জড়িত বলে নিশ্চিত হয়েছে।
+    when:
+      - {field: sender_flagged, op: "==", value: 1}
+    effect: raise_to
+    tier: hold
+    hard: true
+    reason: SENDER_CONFIRMED_FRAUD
+
+  - id: R03_FRAUD_HANDSET_NEW_ON_WALLET
+    description: First transaction from a handset that is new to this wallet and has been used by a confirmed fraud wallet.
+    description_bn: ওয়ালেটে নতুন এমন একটি হ্যান্ডসেট থেকে প্রথম লেনদেন, যেটি নিশ্চিত প্রতারণার একটি ওয়ালেট ব্যবহার করেছে।
+    when:
+      - {field: s_new_device, op: "==", value: 1}
+      - {field: s_device_flagged, op: "==", value: 1}
+    effect: raise_to
+    tier: step_up
+    reason: SENDER_DEVICE
+    scenario: takeover
+
+  - id: R04_RECIPIENT_LOOKS_LIKE_MULE
+    description: The mule model scores the receiving wallet above its alert threshold, whatever the sender's behaviour looks like.
+    description_bn: প্রেরকের আচরণ যেমনই হোক, মিউল মডেল প্রাপক ওয়ালেটকে সতর্কতা-সীমার উপরে স্কোর দিয়েছে।
+    applies_to: [SEND_MONEY]
+    when:
+      - {field: recipient_mule_alert, op: "==", value: 1}
+    effect: raise_to
+    tier: warn
+    reason: RECIPIENT_MULE_SCORE
+
+  # The behaviour profile. s_place_share is the share of the wallet's earlier
+  # transactions made from this district or one next to it (home, office and campus
+  # all count as usual); s_network_share is the same for the network the request
+  # came over. Both are missing, so these rules say nothing, until the wallet has
+  # enough history, and the network one also when the channel sends no address.
+  # Being somewhere new is not suspicious by itself: each rule also needs an amount
+  # far above what this wallet normally sends.
+  - id: R05_LARGE_PAYMENT_FROM_UNUSUAL_PLACE
+    description: An unusually large payment from a place this wallet is not normally used from.
+    description_bn: ওয়ালেটটি সাধারণত যেখান থেকে ব্যবহৃত হয় না, সেখান থেকে অস্বাভাবিক বড় লেনদেন।
+    when:
+      - {field: s_place_share, op: "<=", value: 0.02}
+      - {field: s_amount_z, op: ">=", value: 3}
+    effect: raise_to
+    tier: warn
+    reason: UNUSUAL_PLACE
+    scenario: unusual_access
+
+  - id: R06_LARGE_PAYMENT_FROM_UNFAMILIAR_NETWORK
+    description: An unusually large payment over a network this wallet has never been used from.
+    description_bn: ওয়ালেটটি আগে কখনো যে নেটওয়ার্ক থেকে ব্যবহৃত হয়নি, সেখান থেকে অস্বাভাবিক বড় লেনদেন।
+    when:
+      - {field: s_network_share, op: "==", value: 0}
+      - {field: s_amount_z, op: ">=", value: 3}
+    effect: raise_to
+    tier: warn
+    reason: UNFAMILIAR_NETWORK
+    scenario: unusual_access
+
+  - id: R07_LARGE_PAYMENT_FROM_UNUSUAL_PLACE_AND_NETWORK
+    description: An unusually large payment from an unusual place, over a network this wallet has never been used from.
+    description_bn: অস্বাভাবিক জায়গা ও আগে কখনো ব্যবহৃত হয়নি এমন নেটওয়ার্ক থেকে অস্বাভাবিক বড় লেনদেন।
+    when:
+      - {field: s_place_share, op: "<=", value: 0.02}
+      - {field: s_network_share, op: "==", value: 0}
+      - {field: s_amount_z, op: ">=", value: 3}
+    effect: raise_to
+    tier: step_up
+    reason: UNUSUAL_PLACE
+    scenario: unusual_access
+
+  - id: R08_RECIPIENT_ON_BLOCKLIST
+    description: The receiving wallet is on the blocklist of wallets known to be used for fraud.
+    description_bn: প্রাপক ওয়ালেটটি প্রতারণায় ব্যবহৃত বলে জানা ওয়ালেটের নিষিদ্ধ তালিকায় আছে।
+    applies_to: [SEND_MONEY]
+    when:
+      - {field: recipient_blocklisted, op: "==", value: 1}
+    effect: raise_to
+    tier: step_up
+    reason: RECIPIENT_BLOCKLISTED
+    scenario: scam
+
+# Used only when no model score is available (model missing or scoring failed).
+# Each signal that is true counts one point. Without a model the system never
+# holds money on points alone: the most it does is ask for extra authentication.
+fallback:
+  max_tier: step_up
+  points: {warn: 4, step_up: 5}
+  signals:
+    - id: first_payment_to_receiver
+      when: [{field: pair_prior_count, op: "==", value: 0}]
+    - id: receiver_wallet_under_30_days
+      when: [{field: r_age_days, op: "<", value: 30}]
+    - id: half_of_balance_or_more
+      when: [{field: amount_to_balance, op: ">=", value: 0.5}]
+    - id: first_use_of_handset
+      when: [{field: s_new_device, op: "==", value: 1}]
+    - id: amount_5000_or_more
+      when: [{field: amount, op: ">=", value: 5000}]
+    - id: receiver_moves_money_on_fast
+      when: [{field: r_fast_exit_share, op: ">=", value: 0.5}]
+    - id: handset_on_wallet_under_1_hour
+      when: [{field: s_device_age_secs, op: "<", value: 3600}]
+
+# What the customer sees. No scores, no accusation, one clear question.
+# A rule that names a scenario gets that wording (the first such rule that fired).
+# Otherwise the takeover wording is used when these conditions hold, cash-outs get
+# the cash-out wording and transfers the scam wording.
+takeover_when:
+  - {field: s_device_age_secs, op: "<", value: 3600}
+
+messages:
+  scam:
+    warn:
+      en: >-
+        Pause before you send. Scammers pose as upay staff, lottery officials or
+        investment agents and ask people to send money to wallets like this one.
+        Do you know this person, and did you decide to pay them yourself?
+      bn: >-
+        টাকা পাঠানোর আগে একটু থামুন। প্রতারকরা উপায় কর্মকর্তা, লটারি কর্তৃপক্ষ বা
+        বিনিয়োগ এজেন্ট সেজে এ ধরনের ওয়ালেটে টাকা পাঠাতে বলে। আপনি কি এই ব্যক্তিকে
+        চেনেন, এবং নিজের সিদ্ধান্তেই টাকা পাঠাচ্ছেন?
+    step_up:
+      en: >-
+        This payment looks like ones that turned out to be scams. To protect you,
+        please confirm with your PIN again and wait a short time before it is
+        sent. upay will never ask you to send money to unlock a prize, a refund
+        or your account. If someone is on the phone telling you what to do, hang up.
+      bn: >-
+        এই লেনদেনটি আগে প্রতারণা বলে প্রমাণিত লেনদেনগুলোর মতো। আপনার সুরক্ষার জন্য
+        আবার পিন দিয়ে নিশ্চিত করুন এবং পাঠানোর আগে কিছুক্ষণ অপেক্ষা করুন। পুরস্কার,
+        রিফান্ড বা অ্যাকাউন্ট চালু করার জন্য উপায় কখনো টাকা পাঠাতে বলে না। কেউ ফোনে
+        নির্দেশ দিতে থাকলে ফোন কেটে দিন।
+    hold:
+      en: >-
+        We have paused this payment to check it, because it closely matches known
+        scams. Your money is still in your wallet. A upay officer will review it
+        shortly and may call you from our official number. You do not need to do
+        anything, and you should not share your PIN or OTP with anyone.
+      bn: >-
+        পরিচিত প্রতারণার সাথে মিল থাকায় আমরা এই লেনদেনটি যাচাইয়ের জন্য স্থগিত
+        রেখেছি। আপনার টাকা আপনার ওয়ালেটেই আছে। একজন উপায় কর্মকর্তা শীঘ্রই এটি
+        পর্যালোচনা করবেন এবং আমাদের অফিসিয়াল নম্বর থেকে আপনাকে ফোন করতে পারেন।
+        আপনাকে কিছু করতে হবে না; পিন বা ওটিপি কাউকে দেবেন না।
+  takeover:
+    warn:
+      en: >-
+        This payment is being made from a phone we have not seen on your wallet
+        for long. If this is not you, do not continue and change your PIN now.
+      bn: >-
+        এই লেনদেনটি এমন একটি ফোন থেকে করা হচ্ছে যা আপনার ওয়ালেটে অল্প সময় ধরে
+        ব্যবহৃত হচ্ছে। এটি আপনি না হলে লেনদেন বন্ধ করুন এবং এখনই পিন পরিবর্তন করুন।
+    step_up:
+      en: >-
+        We need to make sure this is really you. This payment comes from a phone
+        that is new to your wallet. Please verify your identity to continue.
+      bn: >-
+        আমাদের নিশ্চিত হতে হবে যে এটি সত্যিই আপনি। এই লেনদেনটি আপনার ওয়ালেটে নতুন
+        একটি ফোন থেকে আসছে। চালিয়ে যেতে আপনার পরিচয় যাচাই করুন।
+    hold:
+      en: >-
+        We have paused this payment because your wallet is being used from a new
+        phone in an unusual way. Your money is still in your wallet. A upay
+        officer will review it shortly and contact you on your registered number.
+      bn: >-
+        আপনার ওয়ালেট একটি নতুন ফোন থেকে অস্বাভাবিকভাবে ব্যবহৃত হওয়ায় আমরা এই
+        লেনদেনটি স্থগিত রেখেছি। আপনার টাকা আপনার ওয়ালেটেই আছে। একজন উপায়
+        কর্মকর্তা শীঘ্রই এটি পর্যালোচনা করে আপনার নিবন্ধিত নম্বরে যোগাযোগ করবেন।
+  unusual_access:
+    warn:
+      en: >-
+        This is a large payment from a place or network where your wallet is not
+        normally used. If this is not you, do not continue and change your PIN now.
+      bn: >-
+        এটি একটি বড় অঙ্কের লেনদেন, যা এমন জায়গা বা নেটওয়ার্ক থেকে করা হচ্ছে যেখান
+        থেকে আপনার ওয়ালেট সাধারণত ব্যবহৃত হয় না। এটি আপনি না হলে লেনদেন বন্ধ করুন
+        এবং এখনই পিন পরিবর্তন করুন।
+    step_up:
+      en: >-
+        We need to make sure this is really you. This large payment comes from a
+        place or a network where your wallet is not normally used. Please verify
+        your identity to continue.
+      bn: >-
+        আমাদের নিশ্চিত হতে হবে যে এটি সত্যিই আপনি। এই বড় অঙ্কের লেনদেনটি এমন জায়গা বা
+        নেটওয়ার্ক থেকে আসছে যেখান থেকে আপনার ওয়ালেট সাধারণত ব্যবহৃত হয় না। চালিয়ে
+        যেতে আপনার পরিচয় যাচাই করুন।
+    hold:
+      en: >-
+        We have paused this payment because your wallet is being used in an
+        unusual way, from somewhere it is not normally used. Your money is still
+        in your wallet. A upay officer will review it shortly and contact you on
+        your registered number.
+      bn: >-
+        আপনার ওয়ালেট সাধারণত যেখান থেকে ব্যবহৃত হয় না এমন জায়গা থেকে অস্বাভাবিকভাবে
+        ব্যবহৃত হওয়ায় আমরা এই লেনদেনটি স্থগিত রেখেছি। আপনার টাকা আপনার ওয়ালেটেই
+        আছে। একজন উপায় কর্মকর্তা শীঘ্রই এটি পর্যালোচনা করে আপনার নিবন্ধিত নম্বরে
+        যোগাযোগ করবেন।
+  cash_out:
+    warn:
+      en: >-
+        Please check this cash-out. If someone asked you to withdraw money that
+        another person sent you, it may be part of a scam.
+      bn: >-
+        এই ক্যাশ-আউটটি যাচাই করে নিন। অন্য কারও পাঠানো টাকা তুলে দিতে কেউ আপনাকে
+        বলে থাকলে এটি প্রতারণার অংশ হতে পারে।
+    step_up:
+      en: >-
+        This cash-out needs an extra check. Please verify your identity to continue.
+      bn: >-
+        এই ক্যাশ-আউটের জন্য বাড়তি যাচাই প্রয়োজন। চালিয়ে যেতে আপনার পরিচয় যাচাই করুন।
+    hold:
+      en: >-
+        We have paused this cash-out to check it. The money is still in the
+        wallet. A upay officer will review it shortly.
+      bn: >-
+        যাচাইয়ের জন্য আমরা এই ক্যাশ-আউটটি স্থগিত রেখেছি। টাকা ওয়ালেটেই আছে। একজন
+        উপায় কর্মকর্তা শীঘ্রই এটি পর্যালোচনা করবেন।
+
+# Next steps offered to the analyst. These are suggestions for a person; the
+# system does not carry any of them out by itself.
+recommendations:
+  - id: CALL_SENDER
+    min_tier: step_up
+    applies_to: [SEND_MONEY]
+    en: Call the sender on their registered number and ask who asked them to make this payment. Do not use a number given during the transaction.
+    bn: প্রেরককে তার নিবন্ধিত নম্বরে ফোন করে জানুন কে তাকে এই টাকা পাঠাতে বলেছে। লেনদেনের সময় দেওয়া কোনো নম্বর ব্যবহার করবেন না।
+
+  - id: FREEZE_RECIPIENT_REVIEW
+    min_tier: step_up
+    applies_to: [SEND_MONEY]
+    when:
+      - {field: recipient_mule_alert, op: "==", value: 1}
+    en: Open a freeze review on the receiving wallet. A freeze takes effect only after a second analyst approves it.
+    bn: প্রাপক ওয়ালেটের জন্য ফ্রিজ পর্যালোচনা শুরু করুন। দ্বিতীয় একজন বিশ্লেষক অনুমোদন করলে তবেই ফ্রিজ কার্যকর হবে।
+    needs_second_approver: true
+
+  - id: CHECK_OTHER_SENDERS
+    min_tier: step_up
+    applies_to: [SEND_MONEY]
+    when:
+      - {field: r_fan_in_7d, op: ">=", value: 3}
+    en: Check the other wallets that paid this receiver in the last 7 days. Some may be victims who have not reported yet.
+    bn: গত ৭ দিনে এই প্রাপককে টাকা পাঠানো অন্য ওয়ালেটগুলো দেখুন। তাদের কেউ কেউ এখনো অভিযোগ না করা ভুক্তভোগী হতে পারেন।
+
+  - id: SECURE_ACCOUNT
+    min_tier: step_up
+    when:
+      - {field: s_device_age_secs, op: "<", value: 3600}
+    en: Treat as a possible account takeover. Confirm the handset change with the customer, then reset the PIN and sign out other devices.
+    bn: সম্ভাব্য অ্যাকাউন্ট দখল হিসেবে বিবেচনা করুন। গ্রাহকের সাথে হ্যান্ডসেট পরিবর্তন নিশ্চিত করুন, তারপর পিন রিসেট করে অন্য ডিভাইস থেকে সাইন আউট করুন।
+
+  - id: CONFIRM_PLACE
+    min_tier: step_up
+    when:
+      - {field: s_place_share, op: "<=", value: 0.02}
+    en: Ask the customer, on their registered number, whether they are travelling.
+    bn: গ্রাহককে তার নিবন্ধিত নম্বরে ফোন করে জানুন তিনি ভ্রমণে আছেন কি না।
+
+  - id: CONFIRM_NETWORK
+    min_tier: step_up
+    when:
+      - {field: s_network_share, op: "==", value: 0}
+    en: Ask the customer whether they changed their internet connection or SIM.
+    bn: গ্রাহক তার ইন্টারনেট সংযোগ বা সিম পরিবর্তন করেছেন কি না জিজ্ঞাসা করুন।
+
+  - id: REVIEW_SENDER_HANDSET
+    min_tier: warn
+    when:
+      - {field: s_device_flagged, op: "==", value: 1}
+    en: Review every wallet that has used the sender's handset. It has been used by a confirmed fraud wallet.
+    bn: প্রেরকের হ্যান্ডসেট ব্যবহার করা সব ওয়ালেট পর্যালোচনা করুন। এটি নিশ্চিত প্রতারণার একটি ওয়ালেট ব্যবহার করেছে।
+
+  - id: REVIEW_RECIPIENT_HANDSET
+    min_tier: warn
+    applies_to: [SEND_MONEY]
+    when:
+      - {field: r_device_flagged, op: "==", value: 1}
+    en: Review every wallet that shares the receiver's handset. It has been used by a confirmed fraud wallet.
+    bn: প্রাপকের হ্যান্ডসেট ব্যবহার করা সব ওয়ালেট পর্যালোচনা করুন। এটি নিশ্চিত প্রতারণার একটি ওয়ালেট ব্যবহার করেছে।
+
+  - id: TRACE_INCOMING_FUNDS
+    min_tier: step_up
+    applies_to: [CASH_OUT]
+    when:
+      - {field: s_secs_since_last_in, op: "<", value: 1800}
+    en: Trace the transfers this wallet received just before the cash-out and contact those senders. This may be scam money being withdrawn.
+    bn: ক্যাশ-আউটের ঠিক আগে এই ওয়ালেটে আসা টাকাগুলো খুঁজে দেখুন এবং সেই প্রেরকদের সাথে যোগাযোগ করুন। এটি প্রতারণার টাকা তুলে নেওয়া হতে পারে।
+
+  - id: REVIEW_AGENT
+    min_tier: step_up
+    applies_to: [CASH_OUT]
+    when:
+      - {field: a_flagged_customers, op: ">=", value: 1}
+    en: Review this agent's recent cash-outs. Some of the agent's customers were confirmed as fraud.
+    bn: এই এজেন্টের সাম্প্রতিক ক্যাশ-আউটগুলো পর্যালোচনা করুন। এজেন্টের কিছু গ্রাহক প্রতারণায় জড়িত বলে নিশ্চিত হয়েছে।
+
+  - id: RECORD_OUTCOME
+    min_tier: hold
+    en: Decide within the review time, then record the outcome. If the customer confirms the payment and the receiver checks out, release the hold.
+    bn: পর্যালোচনার সময়ের মধ্যে সিদ্ধান্ত নিন এবং ফলাফল লিখে রাখুন। গ্রাহক লেনদেন নিশ্চিত করলে এবং প্রাপক সম্পর্কে সন্দেহ না থাকলে হোল্ড তুলে নিন।

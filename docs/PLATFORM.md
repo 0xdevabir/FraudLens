@@ -69,15 +69,25 @@ served at `/docs` outside production.
 | --- | --- | --- |
 | Auth | `POST /auth/login`, `GET /auth/me`, `POST /auth/logout` | anyone / signed in / signed in |
 | Demo sign-in (§7, off by default) | `GET /auth/demo`, `POST /auth/demo-login` | anyone, when enabled |
-| Scoring | `POST /score`, `POST /events` (up to 500 per call, queued), `POST /wallet-flags` | service |
+| Scoring | `POST /score`, `POST /events` (up to 500 per call, queued) | service, or a partner API key (§15) |
+| | `POST /wallet-flags` | service |
 | | `POST /score/what-if` | service, analyst, supervisor |
-| Alerts | `GET /alerts`, `GET /decisions/{txn_id}`, `GET /decisions/{txn_id}/narrative?lang=en\|bn`, `GET /stream/alerts` (server-sent events) | analyst, supervisor |
-| Cases | `GET /cases`, `POST /cases`, `GET /cases/{id}`, `POST /cases/{id}/assign\|notes\|escalate\|verdict`, `GET /users/reviewers` | analyst, supervisor |
+| Alerts | `GET /alerts` (filters: tier, outcome, wallet, amount range, district, dates, `q` search), `GET /alerts.csv` (§16), `GET /decisions/{txn_id}`, `GET /decisions/{txn_id}/narrative?lang=en\|bn`, `GET /stream/alerts` (server-sent events) | analyst, supervisor |
+| Cases | `GET /cases` (filters: status, assignee, priority, deadline state, verdict, dates, `q`), `GET /cases.csv`, `POST /cases`, `GET /cases/{id}`, `POST /cases/{id}/assign\|notes\|escalate\|verdict` (a legitimate verdict may carry a `reason_code`), `GET /cases/workload`, `GET /users/reviewers` | analyst, supervisor |
+| | `POST /cases/sla-sweep` (§4) | supervisor |
+| Blocklist (§17) | `GET /blocklist` | analyst, supervisor |
+| | `POST /blocklist`, `POST /blocklist/import`, `POST /blocklist/{id}/remove` | supervisor |
+| Bangla review (§17) | `GET /policy/translations`, `GET /policy/translations.csv` | analyst, supervisor, admin |
+| | `POST /policy/translations/{key}/review` | supervisor, admin |
+| Webhooks (§15) | `GET/POST /webhooks`, `POST /webhooks/{id}/test\|enable\|disable\|rotate-secret`, `GET /webhooks/deliveries`, `POST /webhooks/deliveries/{id}/replay`, `GET /webhooks/events` | supervisor, admin |
+| Partner keys (§15) | `GET/POST /api-keys`, `POST /api-keys/{id}/revoke`, `GET /api-keys/{id}/usage` | supervisor, admin |
+| Report tracking (§15) | `POST /public/reports/code`, `POST /public/reports/status` | anyone (limited) |
+| Scorer state (§9) | `POST /snapshot` | supervisor |
 | Freezes | `POST /wallets/{id}/freeze-requests`, `GET /freeze-requests` | analyst, supervisor |
 | | `POST /freeze-requests/{id}/approve\|reject`, `POST /wallets/{id}/unfreeze` | supervisor |
 | | `POST /rings/{ring_id}/freeze-requests` (one request per member wallet, §5) | analyst, supervisor |
 | Network | `GET /wallets/{id}`, `GET /wallets/{id}/network`, `GET /rings`, `GET /rings/{ring_id}`, `GET /agents/risk`, `GET /agents/{id}`, `GET /past-cases/{id}` | analyst, supervisor |
-| Customer | `POST /customer/recipient-check`, `POST /customer/transactions/{txn_id}/respond`, `POST /customer/reports` | service |
+| Customer | `POST /customer/recipient-check`, `POST /customer/transactions/{txn_id}/respond`, `POST /customer/reports` (returns a `reference` the customer can follow) | service |
 | | `POST /customer/message-check`, `POST /customer/payment-verify` ([FRAUD_TAXONOMY.md](FRAUD_TAXONOMY.md)) | service |
 | Fraud types | `GET /intel/taxonomy` | analyst, supervisor, admin |
 | Operations | `GET /metrics/summary`, `GET /metrics/daily`, `GET /model`, `GET /model/report`, `GET /policy` | analyst, supervisor, admin |
@@ -254,14 +264,29 @@ bit-identical features to the one that lived through it. A wallet's usual places
 and networks are part of that state and are rebuilt the same way; a snapshot
 written before they existed is refused at load (`make features` rebuilds it).
 
+### Live snapshots
+
+Replaying everything since the baseline takes longer the more has happened. So the
+scorer also saves its state to `engine_live.pkl` next to the dataset, after every
+`FRAUDLENS_SNAPSHOT_EVERY_EVENTS` applied transactions and flags (default 50,000),
+at shutdown, and on `POST /v1/snapshot`. A restart then loads it and replays only
+what came after its `seq`. A snapshot is used only if the baseline file and the
+number of applied transactions and flags up to its `seq` still match the database;
+otherwise (a reset, a restore) it is deleted and the baseline replay runs. The
+tests check that restarting from a snapshot gives bit-identical features to a full
+replay. `GET /ready` reports how the last start went (`recovery`). Saving pauses
+scoring for the seconds the write takes. See [SCALING.md](SCALING.md).
+
 ## 10. Limits, stated plainly
 
 - **One scorer process.** The feature state is in one process's memory, so the
-  API cannot be scaled by adding copies. Scaling out means partitioning by wallet
-  or moving the state to a shared store; neither is built.
-- **Recovery time grows** with the number of transactions since the snapshot. A
-  production system would write snapshots periodically; this one has only the
-  end-of-history snapshot.
+  API cannot be scaled by adding copies. Scaling out is not built, and
+  [SCALING.md](SCALING.md) says why partitioning by wallet alone is not enough.
+- **Recovery time** is bounded by the snapshot interval (§9), not by the history,
+  but a restart with no snapshot still replays everything since the baseline.
+- **Webhook secrets are stored in the database** because signing needs them. They
+  are never returned after creation, but a database dump contains them; protect it
+  like the signing key. API keys are stored only as a SHA-256 hash.
 - **Rate limits and the login lockout use the address the API sees.** Behind a
   proxy, run uvicorn with `--proxy-headers` and a trusted proxy list, or every
   client shares one address.
@@ -409,7 +434,63 @@ on it. `POST /v1/demo/advance-clock` moves it forward by 1 to 60 minutes so a
 cooling-off period can be shown ending; open cases come closer to their
 deadlines by the same amount. Audit rows carry the real time.
 
-## 15. Run it
+## 15. Partners, webhooks and report tracking
+
+See [PARTNER_API.md](PARTNER_API.md) for the integration guide. In short:
+
+- **API keys** (`flk_<prefix>_<secret>`, header `X-API-Key`) are scoped to
+  `score` and/or `events`, limited per minute and per day, counted, and revocable.
+  Only a hash is stored and the key is shown once. A *sandbox* key gets a canned
+  decision chosen by the cents of the amount and changes nothing.
+- **Webhooks** (`decision.warn|step_up|hold`, `case.verdict`, `freeze.approved`) and
+  customer **SMS** (step-up and hold only, the policy's fixed Bangla and English
+  wording) go through an outbox: the message is written in the same transaction as
+  the change, then sent with retries and exponential backoff. After six failed
+  attempts it is dead-lettered, and a supervisor can replay it. Each delivery is
+  signed (`X-FraudLens-Signature: t=…,v1=HMAC-SHA256(secret, "t.body")`) and carries a
+  stable `X-FraudLens-Delivery` id for de-duplication. Payloads hold identifiers
+  only. Endpoint URLs must be public https (private and link-local addresses are
+  refused when registering and again when sending). Only live decisions notify; a
+  replay or a history load tells nobody. SMS is off unless
+  `FRAUDLENS_NOTIFY_ADAPTER` is `console` (log only) or `http` (a gateway).
+- **Report tracking.** Every scam report gets a reference (`FL-XXXX-XXXX`). The
+  customer enters it on `/track`, receives a six-digit code on the reporting phone,
+  and sees one of four statuses derived from the case. The answer is the same
+  whether or not the reference exists, codes expire after ten minutes and burn
+  after five wrong tries, and nothing about the wallet, notes or model leaves.
+
+## 16. Reviewer tools
+
+- **Deadlines.** A hold's case has a review deadline (§4). It shows as *on time*,
+  *due soon* (a third of the window left, or less) or *overdue*. A worker records
+  each missed deadline once on the case timeline and in the audit log
+  (`FRAUDLENS_SLA_SWEEP_SECONDS`, default 60). With `FRAUDLENS_SLA_AUTO_ESCALATE`
+  the case also goes to the supervisors; the money stays held either way.
+  `GET /cases/workload` shows open, due-soon and overdue cases per reviewer.
+- **Filters, search and export.** The alert and case lists share their filters with
+  `/alerts.csv` and `/cases.csv`. An export is capped at 50,000 rows, masks wallet
+  numbers unless a supervisor passes `reveal=true`, makes spreadsheet formulas inert,
+  and is audited (who, which filters, how many rows, whether identifiers were
+  included). Admins have no export: they see no customer data.
+- **False-alarm reasons.** A *legitimate* verdict may say why
+  (`known_recipient`, `family_transfer`, `merchant`, `new_phone`, `other`). The
+  reasons are counted on the model page for policy reviews. Nothing trains on them.
+
+## 17. Blocklist and Bangla review
+
+The blocklist holds wallets, phone numbers and web domains known to be used for
+fraud. A listed receiving wallet triggers policy rule R08 (policy v3): the sender is
+asked to verify and wait. It never holds or blocks money by itself. A listed phone
+number or domain in a message makes the message check answer *high*. Entries come
+from supervisors, from confirmed-fraud verdicts, or from an import; they can expire,
+and removing one keeps it in the history. A freeze already rejects payments, so
+freezes are not copied into the list.
+
+The Bangla texts in the policy and the report-status wording carry a translator
+sign-off tied to a hash of the exact text; changing a text makes it *unreviewed*
+again. Until a translator has signed them, the console says so.
+
+## 18. Run it
 
 `make demo` does all of the following in containers (see the README). Step by
 step on the host:
