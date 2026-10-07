@@ -28,12 +28,13 @@ from ..config import Settings
 from .audit import Ctx, audit
 from .db import make_engine, migrate
 from .models import Transaction
-from .stream import DEAD_SUFFIX
+from .stream import RESET_SUFFIXES
 
 SYSTEM = Ctx(None, "system", None)
 # Everything the platform writes at run time. Never users, never the audit log.
 RUNTIME_TABLES = (
-    "shadow_scores", "decisions", "case_events", "freeze_requests", "customer_reports",
+    "appeals", "pending_decisions", "shadow_scores", "decisions", "case_events",
+    "freeze_requests", "customer_reports",
     "wallet_flags", "cases", "transactions", "past_cases", "wallets", "agents",
 )  # fmt: skip
 TXN_COLUMNS = (
@@ -118,7 +119,7 @@ def load(engine: Engine, redis: Redis | None, settings: Settings, reset: bool = 
         c.execute(text("ANALYZE"))
     if redis is not None and reset:
         # Events queued for the previous contents make no sense against the new ones.
-        redis.delete(settings.events_stream, settings.events_stream + DEAD_SUFFIX)
+        redis.delete(*(settings.events_stream + suffix for suffix in RESET_SUFFIXES))
     return {**counts, "history_ends": str(cutoff), "seconds": round(time.perf_counter() - t0, 1)}
 
 

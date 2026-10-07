@@ -228,6 +228,12 @@ class FraudPlanner:
         sim = self.sim
         rng = sim.rng
         typology = rng.choice(cell.typologies)
+        if (
+            typology == "account_takeover"
+            and sim.cfg.ato_keep_share < 1.0
+            and rng.random() >= sim.cfg.ato_keep_share
+        ):
+            typology = "impersonation"  # calibrated profile: fewer takeovers, more deception
         if typology == "account_takeover":
             hour = rng.uniform(0, 6) if rng.random() < 0.5 else rng.uniform(0, 24)
         else:

@@ -1,7 +1,7 @@
-.PHONY: help setup up redis down data features train policy insights intel pipeline test lint fmt \
+.PHONY: help setup up redis down data data-calibrated features train policy insights mitigation intel intel-compare adversary pipeline test lint fmt \
 	migrate seed load api replay replay-live verify platform \
-	review retrain shadow models promote console console-build smoke \
-	demo demo-reset
+	review retrain shadow models promote console console-build smoke label-realism e2e-phone \
+	demo demo-reset external
 
 API_PORT ?= 8010
 API_URL ?= http://127.0.0.1:$(API_PORT)
@@ -40,6 +40,9 @@ down: ## Stop everything (the demo too) and keep the data
 data: ## Generate the synthetic dataset
 	cd backend && uv run python -m fraudlens.simulator.generate
 
+data-calibrated: ## Generate the Bangladesh-calibrated dataset into data/full_calibrated
+	cd backend && uv run python -m fraudlens.simulator.generate --profile calibrated
+
 features: ## Replay the dataset through the feature engine
 	cd backend && uv run python -m fraudlens.features.build
 
@@ -52,10 +55,28 @@ policy: ## Evaluate the decision policy and build the similar-case index
 insights: ## Threshold sweep, drift and fairness tables for the dashboards
 	cd backend && uv run python -m fraudlens.decision.insights
 
+mitigation: ## Fit and measure young-wallet thresholds (policy v3) against v2 (docs/DECISION_POLICY.md §11)
+	cd backend && uv run python -m fraudlens.decision.mitigation
+
 intel: ## Train and evaluate the scam-message classifier (docs/FRAUD_TAXONOMY.md)
 	cd backend && uv run python -m fraudlens.intel.train
 
-pipeline: data features train policy insights intel ## Data, features, models and policy end to end
+intel-compare: ## Compare message models, MiniLM included with the transformer extra (compare.json)
+	cd backend && uv run --extra transformer python -m fraudlens.intel.compare
+
+adversary: ## Adaptive scammers vs frozen, retrained and drift-gated models (after `make pipeline`)
+	cd backend && uv run python -m fraudlens.models.adversary
+
+label-realism: ## Retrain on reported-only labels, and with recovery methods; compare on ground truth
+	cd backend && uv run python -m fraudlens.models.label_realism
+
+pipeline: data features train policy insights mitigation intel ## Data, features, models and policy end to end
+
+external: ## Public datasets (PaySim, BAF) and bootstrap intervals; downloads ~560 MB once (docs/MODEL_CARD.md)
+	cd backend && uv run python -m fraudlens.external.download
+	cd backend && uv run python -m fraudlens.external.paysim
+	cd backend && uv run python -m fraudlens.external.baf
+	cd backend && uv run python -m fraudlens.models.bootstrap
 
 migrate: ## Bring the database schema up to date
 	cd backend && uv run alembic upgrade head
@@ -68,6 +89,12 @@ load: ## Load the historical period into the database (replaces what is there)
 
 api: ## Run the API and its stream worker
 	cd backend && uv run uvicorn fraudlens.api:create_app --factory --host 127.0.0.1 --port $(API_PORT)
+
+worker: ## Run one more stream worker next to the API; start as many as needed (docs/SCALING.md)
+	cd backend && uv run python -m fraudlens.platform.worker --port $${PORT:-8081}
+
+loadtest: ## Throughput and latency for 1, 2 and 4 workers; RESETS the database (docs/SCALING.md)
+	cd backend && uv run python -m fraudlens.platform.loadtest --workers 1 2 4
 
 replay: ## Replay the test period, except its last day, through the event stream (needs `make api`)
 	cd backend && uv run python -m fraudlens.platform.replay --via stream --to-day 118
@@ -104,12 +131,33 @@ console-build: ## Production build of the console
 smoke: ## Open every console page in a headless browser as each role (needs the API and the console)
 	cd frontend && pnpm exec playwright install chromium-headless-shell && node scripts/smoke.cjs
 
+e2e-phone: ## The customer phone in Bangla and English, and an appeal round trip (needs the API and the console)
+	cd frontend && pnpm exec playwright install chromium-headless-shell && node scripts/phone-e2e.cjs
+
 test: ## Run backend tests (the platform tests need `make up`)
 	cd backend && uv run pytest -q
 
 lint: ## Lint and format check
 	cd backend && uv run ruff check src tests && uv run ruff format --check src tests
 	cd frontend && pnpm exec tsc --noEmit && pnpm exec eslint .
+
+.PHONY: tls rotate-jwt partner-key keys
+JWT_KEYRING ?= secrets/jwt.json
+INGEST_KEYRING ?= secrets/ingest.json
+
+tls: backend/.env ## The demo behind HTTPS with HSTS on https://localhost:8443 (deploy/Caddyfile)
+	docker compose --profile demo --profile tls up --build
+
+rotate-jwt: ## New token-signing key; sessions signed with the old one last until they expire
+	cd backend && mkdir -p -m 700 secrets && uv run python -m fraudlens.platform.keys rotate-jwt $(JWT_KEYRING)
+
+partner-key: ## New ingest HMAC key: make partner-key PARTNER=upay [CALLBACK=https://...]
+	cd backend && mkdir -p -m 700 secrets && uv run python -m fraudlens.platform.keys rotate-partner \
+		$(INGEST_KEYRING) --partner $(PARTNER) $(if $(CALLBACK),--callback-url $(CALLBACK))
+
+keys: ## List the key ids in both keyrings (never the secrets)
+	cd backend && for f in $(JWT_KEYRING) $(INGEST_KEYRING); do \
+		[ -f $$f ] && uv run python -m fraudlens.platform.keys list $$f; done; true
 
 fmt: ## Auto-format
 	cd backend && uv run ruff check --fix src tests && uv run ruff format src tests

@@ -11,9 +11,12 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Response
 from sqlalchemy import Date, cast, func, select, text
 
+from ...decision.business import Assumptions, business_case
 from ...decision.evaluate import REPORT_FILE as POLICY_REPORT_FILE
 from ...decision.insights import INSIGHTS_FILE
+from ...decision.mitigation import MITIGATION_FILE
 from ...models import registry
+from ...models.label_realism import REPORT_FILE as LABEL_REALISM_FILE
 from ...platform.audit import WorkflowError
 from ...platform.models import AuditLog, Case, Decision, FreezeRequest, Transaction
 from ..deps import Db, Oversight, Plat, Staff
@@ -249,12 +252,19 @@ def model_report(
     """How a model version (default: the served one) and the policy did on the test period.
 
     A back-test with known labels: `model` is the model card's numbers, `policy` the
-    effect of the rules, `insights` the threshold sweep, drift and fairness tables.
+    effect of the rules, `insights` the threshold sweep, drift and fairness tables,
+    `mitigation` the young-wallet segment thresholds measured before and after.
     """
     if version is None and p.scorer.bundle is not None:
         version = p.scorer.bundle.version
     if version is None:
-        return {"model_version": None, "model": None, "policy": None, "insights": None}
+        return {
+            "model_version": None,
+            "model": None,
+            "policy": None,
+            "insights": None,
+            "mitigation": None,
+        }
     if version not in registry.versions(p.settings.models_dir):
         raise WorkflowError(404, "model_not_found", f"no model version {version}")
     directory = p.settings.models_dir / version
@@ -263,7 +273,51 @@ def model_report(
         "model": _report(directory, "report.json"),
         "policy": _report(directory, POLICY_REPORT_FILE),
         "insights": _report(directory, INSIGHTS_FILE),
+        "label_realism": _label_realism(p.settings.artifacts_dir),
+        "mitigation": _report(directory, MITIGATION_FILE),
     }
+
+
+def _business(p: Plat, version: str | None, assumptions: Assumptions) -> dict:
+    if version is None and p.scorer.bundle is not None:
+        version = p.scorer.bundle.version
+    if version is None or version not in registry.versions(p.settings.models_dir):
+        raise WorkflowError(404, "model_not_found", f"no model version {version}")
+    insights = _report(p.settings.models_dir / version, INSIGHTS_FILE)
+    if not insights or not insights.get("impact"):
+        raise WorkflowError(404, "not_evaluated", f"model {version} has no threshold sweep")
+    return business_case(insights, assumptions)
+
+
+@router.get("/model/business")
+def business(
+    p: Plat, ctx: Staff, version: Annotated[str | None, Query(pattern=r"^v\d{1,6}$")] = None
+) -> dict:
+    """The threshold sweep as a monthly profit and loss in taka, under default assumptions.
+
+    Every assumption, its source and its range are in the answer; POST to change them.
+    """
+    return _business(p, version, Assumptions())
+
+
+@router.post("/model/business")
+def business_with(
+    assumptions: Assumptions,
+    p: Plat,
+    ctx: Staff,
+    version: Annotated[str | None, Query(pattern=r"^v\d{1,6}$")] = None,
+) -> dict:
+    """The same, with some assumptions changed. Computes only: nothing is stored."""
+    return _business(p, version, assumptions)
+
+
+def _label_realism(artifacts: Path) -> dict | None:
+    """The under-reporting experiment (`make label-realism`), averaged over seeds."""
+    report = _report(artifacts / "reports", LABEL_REALISM_FILE)
+    if report is None:
+        return None
+    keep = ("created_at", "seeds", "operating_point", "regimes", "summary")
+    return {key: report.get(key) for key in keep}
 
 
 @router.get("/policy")

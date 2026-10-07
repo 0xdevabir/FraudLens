@@ -12,6 +12,8 @@ import ipaddress
 import itertools
 import json
 import shutil
+import threading
+from datetime import datetime
 
 import numpy as np
 import pytest
@@ -33,7 +35,7 @@ from fraudlens.mlops import shadow as shadow_mode
 from fraudlens.models.train import FEEDBACK_COLUMNS
 from fraudlens.platform import replay, verify
 from fraudlens.platform.db import make_engine, make_sessions, migrate
-from fraudlens.platform.events import moment, network_of
+from fraudlens.platform.events import event_adapter, moment, network_of
 from fraudlens.platform.load import load
 from fraudlens.platform.models import (
     AuditLog,
@@ -41,15 +43,17 @@ from fraudlens.platform.models import (
     CustomerReport,
     Decision,
     FreezeRequest,
+    PendingDecision,
     ShadowScore,
     Transaction,
     User,
     Wallet,
     WalletFlag,
 )
+from fraudlens.platform.scoring import SEQUENCE_LOCK, Scorer
 from fraudlens.platform.security import check_production
 from fraudlens.platform.seed import seed_users
-from fraudlens.platform.stream import DEAD_SUFFIX, alert_feed
+from fraudlens.platform.stream import DEAD_SUFFIX, GROUP, Worker, alert_feed
 
 pytestmark = pytest.mark.integration
 
@@ -137,12 +141,33 @@ def tokens(client):
 
 
 @pytest.fixture(scope="module")
-def replayed(client, p, settings):
-    """The whole test period sent through the event stream and scored."""
+def replica(client, p, settings):
+    """A second scorer on the same database: what a stream worker process holds."""
+    return Scorer(settings, p.sessions, p.redis)
+
+
+def catch_up(scorer: Scorer) -> None:
+    with scorer.lock, scorer.sessions() as s:
+        s.execute(SEQUENCE_LOCK)
+        scorer.refresh(s)
+        s.commit()
+
+
+@pytest.fixture(scope="module")
+def replayed(client, p, settings, replica):
+    """The whole test period sent through the event stream and scored by two workers
+    in one consumer group, each with its own copy of the state."""
     events = replay.test_events(settings.dataset_dir)
     sent = replay.via_stream(p.redis, settings.events_stream, events, wait=False)
-    handled = p.worker.drain()
-    return {"sent": sent, "handled": handled}
+    other = Worker(replica, p.redis, settings, consumer="test-worker-b")
+    p.worker.ensure_group()
+    handled = {}
+    thread = threading.Thread(target=lambda: handled.update(b=other.drain()))
+    thread.start()
+    handled["a"] = p.worker.drain()
+    thread.join()
+    catch_up(p.scorer)  # the tests below read the API's state directly
+    return {"sent": sent, "handled": handled["a"] + handled["b"], "workers": handled}
 
 
 _ids = itertools.count(9_000_000_000)
@@ -217,6 +242,9 @@ def held_payment(client, tokens, p, spare) -> tuple[dict, dict]:
 
 def test_replay_through_the_stream_matches_the_offline_evaluation(p, settings, replayed):
     assert replayed["handled"] == replayed["sent"]["events"] > 0
+    assert min(replayed["workers"].values()) > 0, replayed["workers"]  # both took a share
+    with p.sessions() as s:
+        assert s.scalar(select(func.count()).select_from(PendingDecision)) == 0
     assert p.worker.dead_lettered == 0 and p.worker.failures == 0
     assert p.worker.backlog() == 0
     report = verify.verify(p.db, settings)
@@ -438,6 +466,17 @@ def test_dashboard_reads(client, tokens, replayed):
     assert report["model"]["test"]["risk_score"] and report["policy"]["tier_counts"]
     assert report["model_version"] == report["policy"]["model_version"]
 
+    case = client.get("/v1/model/business", headers=analyst).json()
+    assert len(case["points"]) == len(report["insights"]["impact"])
+    assert case["assumptions"] == case["defaults"] and case["sensitivity"]["rows"]
+    bigger = client.post(
+        "/v1/model/business", headers=analyst, json={"monthly_payments": 40_000_000}
+    ).json()
+    assert bigger["scam_loss_at_risk"] == 2 * case["scam_loss_at_risk"]
+    bad = client.post("/v1/model/business", headers=analyst, json={"abandon_rate": 2})
+    assert bad.status_code == 422
+    assert client.post("/v1/model/business", headers=analyst, json={"wage": 1}).status_code == 422
+
     policy = client.get("/v1/policy", headers=analyst).json()
     assert policy["tiers"]["hold"]["human_review"] is True
     assert {"en", "bn"} == set(policy["messages"]["scam"]["hold"])
@@ -445,7 +484,7 @@ def test_dashboard_reads(client, tokens, replayed):
     warn, step_up, hold = (policy["resolved_thresholds"][t] for t in ("warn", "step_up", "hold"))
     assert 0 < warn <= step_up <= hold < 1
 
-    for path in ("/v1/metrics/daily", "/v1/model/report", "/v1/policy"):
+    for path in ("/v1/metrics/daily", "/v1/model/report", "/v1/model/business", "/v1/policy"):
         assert client.get(path).status_code == 401
         assert client.get(path, headers=tokens("upay-core")).status_code == 403
 
@@ -828,8 +867,12 @@ def test_a_freeze_needs_two_people(client, tokens, p, replayed, spare):
 # --------------------------------------------------------------- customers
 
 
-def _pending(client, tokens, p, tier: str) -> dict:
-    """A live payment the policy answers with `tier`, found by asking what-if first."""
+_scored: dict[int, dict] = {}  # what `_pending` was answered, by txn_id
+
+
+def _pending(client, tokens, p, tier: str, by_model: bool = False) -> dict:
+    """A live payment the policy answers with `tier`, found by asking what-if first.
+    `by_model` skips payments into confirmed-fraud wallets, which a rule holds."""
     with p.sessions() as s:
         candidates = s.execute(
             select(Transaction)
@@ -843,6 +886,8 @@ def _pending(client, tokens, p, tier: str) -> dict:
         ]
     service = tokens("upay-core")
     for sender, receiver, amount, device in candidates:
+        if by_model and receiver in p.scorer.engine.flagged:
+            continue
         for scale in (1.0, 0.5, 2.0, 0.25):
             body = send(p, sender, receiver, round(amount * scale, 2), device_id=device)
             probe = client.post("/v1/score/what-if", headers=service, json=body).json()
@@ -850,6 +895,7 @@ def _pending(client, tokens, p, tier: str) -> dict:
                 continue
             result = client.post("/v1/score", headers=service, json=body).json()
             assert result["decision"]["tier"] == tier  # what-if and scoring agree
+            _scored[body["txn_id"]] = result
             return body
     pytest.fail(f"no live payment produced a {tier} decision")
 
@@ -895,6 +941,144 @@ def test_a_step_up_needs_verification_and_the_cooling_off(client, tokens, p, rep
     with p.sessions() as s:
         txn, decision = s.get(Transaction, txn_id), s.get(Decision, txn_id)
         assert txn.applied_at > txn.ts and decision.customer_response == "proceed"
+
+
+# ----------------------------------------------------------------- appeals
+
+
+def _at(iso: str) -> datetime:
+    return datetime.fromisoformat(iso.replace("Z", "+00:00"))
+
+
+def _appeal(client, service, body: dict, **over) -> object:
+    answer = {"wallet_id": body["sender_id"], "relation": "family", "reason": "My brother's rent"}
+    return client.post(
+        f"/v1/customer/transactions/{body['txn_id']}/appeal", headers=service, json=answer | over
+    )
+
+
+def test_a_customer_appeal_releases_a_held_payment_once_a_person_agrees(
+    client, tokens, p, replayed
+):
+    service, analyst = tokens("upay-core"), tokens("analyst1")
+    body = _pending(client, tokens, p, "hold", by_model=True)
+    txn_id, sender = body["txn_id"], body["sender_id"]
+    assert _scored[txn_id]["decision"]["cue"] != "reported_recipient"
+    record = client.get(f"/v1/decisions/{txn_id}", headers=analyst).json()
+    initiated = p.scorer.engine.wallets[sender].n_init
+
+    assert _appeal(client, service, body, wallet_id="W0").status_code == 404  # not theirs
+    assert _appeal(client, analyst, body).status_code == 403  # only the app files one
+    assert _appeal(client, service, body, relation="cousin").status_code == 422
+    filed = _appeal(client, service, body, reason="Rent for 01711000000, my brother")
+    assert filed.status_code == 201, filed.text
+    appeal = filed.json()
+    assert (appeal["status"], appeal["tier"], appeal["txn_status"]) == ("pending", "hold", "held")
+    assert "reason" not in appeal and "decided_by" not in appeal  # the app sees where, not who
+    waited = _at(appeal["sla_due_at"]) - _at(appeal["filed_at"])
+    assert waited.total_seconds() == 30 * 60  # the hold's own review deadline
+    again = _appeal(client, service, body)
+    assert again.status_code == 409 and again.json()["error"]["code"] == "appeal_exists"
+    status = f"/v1/customer/transactions/{txn_id}/appeal"
+    assert client.get(status, headers=service, params={"wallet_id": "W0"}).status_code == 404
+    assert (
+        client.get(status, headers=service, params={"wallet_id": sender}).json()["id"]
+        == (appeal["id"])
+    )
+
+    assert client.get("/v1/appeals", headers=service).status_code == 403
+    queue = client.get("/v1/appeals", headers=analyst).json()
+    [row] = [a for a in queue["appeals"] if a["id"] == appeal["id"]]
+    assert row["txn_status"] == "held" and row["relation"] == "family"
+    assert "01711000000" not in row["reason"]  # what a customer typed is masked
+    assert queue["counts"]["pending"] >= 1
+
+    path = f"/v1/appeals/{appeal['id']}/approve"
+    assert client.post(path, headers=analyst, json={"note": "ok"}).status_code == 422
+    done = client.post(path, headers=analyst, json={"note": REASON})
+    assert done.status_code == 200, done.text
+    assert done.json()["released"] is True and done.json()["txn_status"] == "completed"
+    assert done.json()["appeal"]["status"] == "approved"
+    assert done.json()["appeal"]["decided_by"] is not None
+    assert p.scorer.engine.wallets[sender].n_init == initiated + 1
+    twice = client.post(path, headers=analyst, json={"note": REASON})
+    assert twice.status_code == 409 and twice.json()["error"]["code"] == "already_decided"
+
+    with p.sessions() as s:
+        actions = set(
+            s.scalars(
+                select(AuditLog.action).where(
+                    AuditLog.object_type == "appeal", AuditLog.object_id == str(appeal["id"])
+                )
+            )
+        )
+        labels = feedback.labels(s).set_index("txn_id")
+    assert actions == {"appeal.file", "appeal.approve"}
+    # A person agreed the payment was genuine: it becomes a `legitimate` label.
+    assert (labels.loc[txn_id, "y"], labels.loc[txn_id, "source"]) == (0, "appeal")
+    if record["case_id"] is not None:
+        timeline = client.get(f"/v1/cases/{record['case_id']}", headers=analyst).json()
+        kinds = [e["kind"] for e in timeline["timeline"]]
+        assert "appeal_filed" in kinds and "appeal_approved" in kinds
+
+
+def test_an_appeal_never_releases_money_to_confirmed_fraud(client, tokens, p, replayed, spare):
+    service, analyst, supervisor = tokens("upay-core"), tokens("analyst1"), tokens("supervisor1")
+    body, result = held_payment(client, tokens, p, spare)
+    assert result["decision"]["cue"] == "reported_recipient"
+    appeal = _appeal(client, service, body, relation="friend").json()
+    case_id = result["decision"]["case_id"]
+    client.post(f"/v1/cases/{case_id}/escalate", headers=analyst, json={"reason": REASON})
+    path = f"/v1/appeals/{appeal['id']}"
+    refused = client.post(f"{path}/reject", headers=analyst, json={"note": REASON})
+    assert refused.status_code == 403 and refused.json()["error"]["code"] == "needs_supervisor"
+    blocked = client.post(f"{path}/approve", headers=supervisor, json={"note": REASON})
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "recipient_confirmed_fraud"
+    rejected = client.post(f"{path}/reject", headers=supervisor, json={"note": REASON})
+    assert rejected.status_code == 200, rejected.text
+    assert (rejected.json()["released"], rejected.json()["txn_status"]) == (False, "held")
+    with p.sessions() as s:
+        assert s.get(Transaction, body["txn_id"]).status == "held"  # the case still decides
+        assert body["txn_id"] not in set(feedback.labels(s)["txn_id"])  # no label from a rejection
+
+
+def test_an_appeal_against_a_warning_is_feedback_and_moves_no_money(client, tokens, p, replayed):
+    staff = tokens("analyst2")
+    body = _pending(client, tokens, p, "warn")
+    txn_id = body["txn_id"]
+    # The warning names the scam it looks like, for the app to explain in words.
+    assert _scored[txn_id]["decision"]["cue"] in {
+        "impersonation", "prize", "investment", "wrong_send", "not_you", "generic",
+        "reported_recipient",
+    }  # fmt: skip
+    # The demo phone files it as the app would.
+    filed = client.post(
+        "/v1/demo/appeal",
+        headers=staff,
+        json={"txn_id": txn_id, "relation": "seller", "reason": "I buy from this shop every week"},
+    )
+    assert filed.status_code == 201, filed.text
+    appeal = filed.json()
+    assert appeal["tier"] == "warn" and appeal["txn_status"] == "pending_customer"
+    waited = _at(appeal["sla_due_at"]) - _at(appeal["filed_at"])
+    assert waited.total_seconds() == 24 * 3600  # nothing waits on it
+    shown = client.get("/v1/demo/appeal", headers=staff, params={"txn_id": txn_id}).json()
+    assert shown["id"] == appeal["id"]
+    done = client.post(
+        f"/v1/appeals/{appeal['id']}/approve", headers=tokens("analyst1"), json={"note": REASON}
+    )
+    assert done.status_code == 200
+    # The customer still decides a warning; an appeal never answers for them.
+    assert (done.json()["released"], done.json()["txn_status"]) == (False, "pending_customer")
+
+    allowed = _pending(client, tokens, p, "allow")
+    nothing = client.post(
+        "/v1/demo/appeal",
+        headers=staff,
+        json={"txn_id": allowed["txn_id"], "relation": "none", "reason": "just checking"},
+    )
+    assert nothing.status_code == 409 and nothing.json()["error"]["code"] == "not_appealable"
 
 
 def test_a_customer_report_opens_a_case(client, tokens, p, replayed, spare):
@@ -1318,6 +1502,78 @@ def test_events_endpoint_queues_for_the_worker(client, tokens, p, settings, spar
         assert s.get(Transaction, event["txn_id"]) is not None
 
 
+def _event(body: dict):
+    return event_adapter.validate_python(body | {"kind": "txn"}).event()
+
+
+def test_two_workers_holding_one_entry_record_one_decision(p, replica, spare):
+    """Redelivery to a second worker after the first applied the event: the state
+    changes once, the second worker finishes the decision, the first one's late
+    commit finds it done."""
+    event = _event(send(p, spare(), spare(), amount=60.0, source="replay"))
+    results, scored = p.scorer.sequence([event])
+    assert results[0].status == "completed" and len(scored) == 1
+    seq = p.scorer.seq
+    again, resumed = replica.sequence([event])  # the entry, delivered to another worker
+    assert again[0].duplicate and [item.resumed for item in resumed] == [True]
+    assert replica.seq == seq  # caught up, applied nothing new
+    assert len(replica.finish(resumed)) == 1
+    assert p.scorer.finish(scored) == []  # the pending row was claimed already
+    with p.sessions() as s:
+        decisions = s.scalars(select(Decision).where(Decision.txn_id == event.txn.txn_id)).all()
+        assert len(decisions) == 1
+        assert s.get(PendingDecision, event.txn.txn_id) is None
+    # Same features, so the same decision as the worker that applied it would have made.
+    assert decisions[0].features == pytest.approx(
+        [float(v) for v in scored[0].features], nan_ok=True
+    )
+
+
+def test_a_stopped_workers_entries_are_taken_over_in_order(p, settings, spare):
+    """A consumer read an entry and died. The next entry waits for it; it is taken
+    over once idle and both are scored, first one first."""
+    stream = settings.events_stream
+    sender = spare()
+    first = send(p, sender, spare(), amount=70.0) | {"kind": "txn"}
+    second = send(p, sender, spare(), amount=80.0) | {"kind": "txn"}
+    p.redis.xadd(stream, {"data": json.dumps(first)})
+    p.redis.xreadgroup(GROUP, "test-dead-worker", {stream: ">"}, count=1)  # and never acks
+    p.redis.xadd(stream, {"data": json.dumps(second)})
+    worker = Worker(
+        p.scorer, p.redis, settings.model_copy(update={"claim_idle_ms": 200}), consumer="test-c"
+    )
+    assert worker.drain() == 2
+    assert worker.reclaimed == 1 and p.redis.xlen(stream) == 0
+    assert p.redis.xpending(stream, GROUP)["pending"] == 0
+    with p.sessions() as s:
+        a, b = s.get(Transaction, first["txn_id"]), s.get(Transaction, second["txn_id"])
+        assert a.created_at <= b.created_at
+        if a.applied_seq and b.applied_seq:
+            assert a.applied_seq < b.applied_seq
+    p.redis.xgroup_delconsumer(stream, GROUP, "test-dead-worker")
+
+
+def test_a_replica_follows_what_another_process_changed(client, tokens, p, replica, spare):
+    """Flags, freezes and payments made through the API reach a worker's copy of the
+    state before it scores again."""
+    wallet, sender = spare(), spare()
+    flag(client, tokens, p, wallet)
+    body = send(p, sender, spare(), amount=45.0)
+    assert client.post("/v1/score", headers=tokens("upay-core"), json=body).status_code == 200
+    catch_up(replica)
+    assert replica.seq == p.scorer.seq and wallet in replica.engine.flagged
+    probe = Txn(10**12, p.scorer.engine.last_ts + 60, "SEND_MONEY", sender, "wallet", wallet,
+                "wallet", 500.0, 10_000.0, "", "app", body["district"])  # fmt: skip
+    mine, theirs = p.scorer.engine.features(probe), replica.engine.features(probe)
+    assert np.allclose(mine, theirs, equal_nan=True)
+    for status, change in (("frozen", p.scorer.frozen.add), ("active", p.scorer.frozen.discard)):
+        with p.scorer.transaction() as s:  # what an approved freeze, then a release, does
+            s.execute(update(Wallet).where(Wallet.wallet_id == sender).values(status=status))
+            change(sender)
+        catch_up(replica)
+        assert (sender in replica.frozen) == (status == "frozen")
+
+
 def test_the_live_feed_needs_a_token(client):
     assert client.get("/v1/stream/alerts").status_code == 401
 
@@ -1400,6 +1656,10 @@ def test_a_message_check_advises_and_keeps_nothing(
     assert row.object_id == wallet and row.detail["level"] == "high"
     assert "upay-verify" not in json.dumps(row.detail)
 
+    # The flagged message's own words are pointed at, in the script they were written in.
+    assert found["highlights"]
+    assert all(SCAM_TEXT[w["start"] : w["end"]] == w["text"] for w in found["highlights"])
+
     for body in ({"wallet_id": wallet, "text": " "}, {"wallet_id": wallet, "text": "x" * 2001}):
         assert (
             client.post("/v1/customer/message-check", headers=service, json=body).status_code == 422
@@ -1416,6 +1676,45 @@ def test_a_message_check_advises_and_keeps_nothing(
         "/v1/customer/message-check", headers=service, json={"wallet_id": wallet, "text": "hi"}
     )
     assert limited.status_code == 429
+
+
+def test_a_payment_to_what_a_flagged_message_named_is_warned(
+    client, tokens, p, spare, text_model, monkeypatch
+):
+    monkeypatch.setattr(p, "intel", text_model)
+    service, analyst = tokens("upay-core"), tokens("analyst1")
+    victim, scammer = spare(), spare()
+    text = (
+        f"Sir ami upay head office theke bolchi. Bhul kore apnar account e 3,450 taka chole "
+        f"gese, ekhoni {scammer} number e ferot pathan, na hole account block hoye jabe."
+    )
+    checked = client.post(
+        "/v1/customer/message-check", headers=service, json={"wallet_id": victim, "text": text}
+    ).json()
+    assert checked["level"] != "none", checked
+
+    before = client.post(
+        "/v1/customer/recipient-check",
+        headers=service,
+        json={"sender_id": victim, "receiver_id": scammer},
+    ).json()
+    assert before["level"] != "none" and before["reasons"][0]["code"] == "follows_flagged_message"
+
+    body = send(p, victim, scammer, amount=3_450.0)
+    paid = client.post("/v1/score", headers=service, json=body).json()
+    assert paid["decision"]["tier"] != "allow", paid
+    record = client.get(f"/v1/decisions/{body['txn_id']}", headers=analyst).json()
+    assert "follows_flagged_message" in json.dumps(record)
+    assert text not in json.dumps(record)  # the reason, never the message
+
+    # Someone who checked nothing is not affected.
+    other = spare()
+    plain = client.post(
+        "/v1/customer/recipient-check",
+        headers=service,
+        json={"sender_id": other, "receiver_id": scammer},
+    ).json()
+    assert "reasons" not in plain
 
 
 def test_a_payment_is_verified_from_the_ledger_for_its_receiver_only(client, tokens, p, spare):
@@ -1575,3 +1874,15 @@ def test_the_schema_matches_the_models(settings):
     config = Config(str(BACKEND_DIR / "alembic.ini"))
     config.attributes["url"] = settings.database_url
     command.check(config)  # raises if a migration is missing
+
+
+def test_consortium_routes_are_reviewer_only_and_optional(client, tokens):
+    assert client.get("/v1/consortium").status_code == 401
+    response = client.get("/v1/consortium", headers=tokens("analyst1"))
+    # The demo state is built by `python -m fraudlens.consortium.simulate`; without it
+    # the routes say so and nothing else changes.
+    assert response.status_code in (200, 404), response.text
+    if response.status_code == 404:
+        assert response.json()["error"]["code"] == "consortium_not_built"
+    else:
+        assert {"feeds", "guarantees", "audit", "results"} <= response.json().keys()

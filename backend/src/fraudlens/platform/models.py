@@ -39,6 +39,18 @@ CASE_STATUS = ("open", "in_review", "escalated", "closed")
 VERDICTS = ("confirmed_fraud", "legitimate", "inconclusive")
 CASE_SOURCE = ("alert", "customer_report", "manual")
 FREEZE_STATUS = ("pending", "approved", "rejected")
+APPEAL_STATUS = ("pending", "approved", "rejected")
+# How the customer says they know the person they are paying.
+APPEAL_RELATIONS = (
+    "family",
+    "friend",
+    "business",
+    "seller",
+    "landlord",
+    "employer",
+    "other",
+    "none",
+)
 
 
 def _one_of(column: str, values: tuple[str, ...]) -> str:
@@ -231,6 +243,25 @@ class ShadowScore(Base):
     created_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
 
 
+class PendingDecision(Base):
+    """A transaction that is in the state and still waits for its decision.
+
+    A stream worker applies recorded events in order under the scorer's lock and
+    decides them after releasing it (PLATFORM §8). The feature vector is kept here,
+    committed with the transaction, so whichever worker finishes the work makes the
+    same decision; the row is deleted in the commit that writes the decision.
+    """
+
+    __tablename__ = "pending_decisions"
+
+    txn_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("transactions.txn_id", ondelete="CASCADE"), primary_key=True
+    )
+    features: Mapped[list[float]] = mapped_column(ARRAY(Float(53)))
+    context: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
+
+
 class CaseEvent(Base):
     """The case timeline: who did what, in order. Rows are never changed."""
 
@@ -302,6 +333,38 @@ class CustomerReport(Base):
     description: Mapped[str] = mapped_column(Text)
     case_id: Mapped[int | None] = mapped_column(ForeignKey("cases.id"))
     reported_at: Mapped[datetime] = mapped_column(Timestamp)
+    created_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
+
+
+class Appeal(Base):
+    """A customer says a warned or held payment is genuine. A person answers it."""
+
+    __tablename__ = "appeals"
+    __table_args__ = (
+        CheckConstraint(_one_of("status", APPEAL_STATUS), name="status"),
+        CheckConstraint(_one_of("relation", APPEAL_RELATIONS), name="relation"),
+        CheckConstraint("tier IN ('warn', 'step_up', 'hold')", name="tier"),
+        CheckConstraint("(status = 'pending') = (decided_by IS NULL)", name="decided_has_decider"),
+        Index("ix_appeals_status_sla", "status", "sla_due_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # One appeal per payment.
+    txn_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("transactions.txn_id", ondelete="CASCADE"), unique=True
+    )
+    wallet_id: Mapped[str] = mapped_column(String(32), index=True)  # the sender, who appeals
+    case_id: Mapped[int | None] = mapped_column(ForeignKey("cases.id"))
+    tier: Mapped[str] = mapped_column(String(8))  # the decision's tier when it was appealed
+    relation: Mapped[str] = mapped_column(String(16))
+    # Free text typed by a customer: shown masked, never used to decide anything.
+    reason: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(12), server_default="pending")
+    filed_at: Mapped[datetime] = mapped_column(Timestamp)  # domain time, like opened_at
+    sla_due_at: Mapped[datetime] = mapped_column(Timestamp)
+    decided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    decision_note: Mapped[str | None] = mapped_column(Text)
+    decided_at: Mapped[datetime | None] = mapped_column(Timestamp)
     created_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
 
 

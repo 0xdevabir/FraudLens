@@ -103,7 +103,9 @@ evidence, and the deterministic template is used instead. It is off by default.
 process for speed (about 3 ms for features, models, policy and reasons when
 measured in process; served figures are in PLATFORM §11). Every
 event that entered the state is stored with its position, so a restart rebuilds
-the same state exactly. The cost is one scorer process (PLATFORM §10).
+the same state exactly. The same log lets several processes hold the state: each
+catches up from it before it changes anything, so stream workers scale out
+behind one ordered step (SCALING.md).
 
 **Two ways in.** `POST /v1/score` answers now, for a payment waiting on a
 decision. `POST /v1/events` queues to a Redis stream for everything that needs no
@@ -150,5 +152,9 @@ in order (dataset, features, models, policy, database, replay, review, retrain,
 shadow scoring), and then serves. Each step is skipped when its output exists, so
 a restart goes straight to serving.
 
-Not built: TLS, a secrets manager, horizontal scaling of the scorer, periodic
+`docker-compose.scale.yml` runs the stream workers as their own containers
+(`--scale worker=4`), and `deploy/k8s` has the Kubernetes manifests, with the
+workers scaled on stream lag (SCALING.md).
+
+Not built: TLS, a secrets manager, periodic
 state snapshots. These are listed with the other limits in PLATFORM §10.

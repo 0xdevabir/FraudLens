@@ -1,0 +1,162 @@
+# FraudLens on Kubernetes: the API and the stream workers (docs/SCALING.md).
+#
+# Postgres and Redis are not here: point FRAUDLENS_DATABASE_URL and
+# FRAUDLENS_REDIS_URL (Secret `fraudlens-backing`) at managed ones. The dataset
+# and the model registry are read from the `fraudlens-artifacts` volume claim,
+# written once by `make pipeline` (or a Job running it).
+#
+#   kubectl apply -k deploy/k8s
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fraudlens
+  labels: {app.kubernetes.io/part-of: fraudlens}
+data:
+  FRAUDLENS_EVENTS_STREAM: fraudlens:events
+  # The API scores requests and follows the log; consuming the stream is the
+  # workers' job, so the API keeps its worker off.
+  FRAUDLENS_RUN_WORKER: "false"
+  FRAUDLENS_FOLLOW_INTERVAL_S: "0.5"
+  # An entry a worker read but has not acknowledged after this long is taken
+  # over by another worker (a crashed or evicted pod).
+  FRAUDLENS_CLAIM_IDLE_MS: "30000"
+  FRAUDLENS_WORKER_PORT: "8081"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraudlens-api
+  labels: {app.kubernetes.io/name: fraudlens-api, app.kubernetes.io/part-of: fraudlens}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app.kubernetes.io/name: fraudlens-api}
+  strategy:
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: fraudlens-api, app.kubernetes.io/part-of: fraudlens}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001}
+      containers:
+        - name: api
+          image: fraudlens-backend:latest
+          command: [uvicorn, fraudlens.api:create_app, --factory, --host, 0.0.0.0, --port, "8010"]
+          ports: [{name: http, containerPort: 8010}]
+          envFrom:
+            - configMapRef: {name: fraudlens}
+            - secretRef: {name: fraudlens-backing}
+          resources:
+            requests: {cpu: 500m, memory: 1Gi}
+            limits: {cpu: "2", memory: 2Gi}
+          # Rebuilding the feature state from the database takes a while at start.
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+            failureThreshold: 120
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            periodSeconds: 5
+            timeoutSeconds: 3
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true}
+          volumeMounts:
+            - {name: artifacts, mountPath: /app/artifacts, subPath: artifacts, readOnly: true}
+            - {name: artifacts, mountPath: /app/data, subPath: data, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim: {claimName: fraudlens-artifacts, readOnly: true}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraudlens-api
+  labels: {app.kubernetes.io/name: fraudlens-api, app.kubernetes.io/part-of: fraudlens}
+spec:
+  selector: {app.kubernetes.io/name: fraudlens-api}
+  ports: [{name: http, port: 80, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraudlens-worker
+  labels: {app.kubernetes.io/name: fraudlens-worker, app.kubernetes.io/part-of: fraudlens}
+spec:
+  replicas: 2 # the ScaledObject (keda.yaml) or the HPA (hpa-external.yaml) owns this
+  selector:
+    matchLabels: {app.kubernetes.io/name: fraudlens-worker}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: fraudlens-worker, app.kubernetes.io/part-of: fraudlens}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: /metrics
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001}
+      # SIGTERM finishes the batch in hand; what is left is reclaimed by the others.
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: worker
+          image: fraudlens-backend:latest
+          command: [python, -m, fraudlens.platform.worker]
+          env:
+            # The pod name is the consumer name, so a restarted pod is a new consumer
+            # and the old one's entries are claimed like any dead worker's.
+            - name: FRAUDLENS_WORKER_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+          envFrom:
+            - configMapRef: {name: fraudlens}
+            - secretRef: {name: fraudlens-backing}
+          ports: [{name: health, containerPort: 8081}]
+          resources:
+            requests: {cpu: "1", memory: 1Gi}
+            limits: {cpu: "2", memory: 2Gi}
+          startupProbe:
+            httpGet: {path: /ready, port: health}
+            periodSeconds: 5
+            failureThreshold: 120
+          livenessProbe:
+            httpGet: {path: /health, port: health}
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet: {path: /ready, port: health}
+            periodSeconds: 5
+            timeoutSeconds: 3
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true}
+          volumeMounts:
+            - {name: artifacts, mountPath: /app/artifacts, subPath: artifacts, readOnly: true}
+            - {name: artifacts, mountPath: /app/data, subPath: data, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim: {claimName: fraudlens-artifacts, readOnly: true}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fraudlens-api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: fraudlens-api}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fraudlens-worker
+spec:
+  # A drained node takes at most one worker at a time; the others claim its entries.
+  maxUnavailable: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: fraudlens-worker}

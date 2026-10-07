@@ -45,6 +45,7 @@ const NAV: { heading: string; items: { href: string; label: string; roles: Role[
       { href: "/alerts", label: "Alert queue", roles: ["analyst", "supervisor"] },
       { href: "/cases", label: "Cases", roles: ["analyst", "supervisor"] },
       { href: "/approvals", label: "Freeze approvals", roles: ["analyst", "supervisor"] },
+      { href: "/appeals", label: "Customer appeals", roles: ["analyst", "supervisor"] },
     ],
   },
   {
@@ -52,6 +53,7 @@ const NAV: { heading: string; items: { href: string; label: string; roles: Role[
     items: [
       { href: "/network", label: "Network explorer", roles: ["analyst", "supervisor"] },
       { href: "/rings", label: "Mule rings", roles: ["analyst", "supervisor"] },
+      { href: "/consortium", label: "Mule consortium", roles: ["analyst", "supervisor"] },
       { href: "/agents", label: "Agent risk", roles: ["analyst", "supervisor"] },
     ],
   },

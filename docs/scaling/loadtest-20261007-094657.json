@@ -1,0 +1,203 @@
+{
+  "generated_at": "2026-10-07T09:46:57+0600",
+  "machine": {
+    "platform": "macOS-27.0-arm64-arm-64bit",
+    "processor": "arm",
+    "cpu_count": 10,
+    "load_average_at_end": [
+      26.2,
+      22.5,
+      21.2
+    ]
+  },
+  "dataset": "full",
+  "events": 29000,
+  "settings": {
+    "workers": [
+      1,
+      2,
+      4
+    ],
+    "saturation": 20000,
+    "rate": 200.0,
+    "rate_events": 9000,
+    "out": "/Users/mdabirhossain/Documents/WebDevelopment/FraudLens/.claude/worktrees/agent-aa249e777a4cf60ae/docs/scaling"
+  },
+  "results": [
+    {
+      "workers": 1,
+      "startup_seconds": 2.6,
+      "saturation": {
+        "events": 20000,
+        "seconds": 59.79,
+        "events_per_second": 334.5
+      },
+      "open_loop": {
+        "events": 9000,
+        "rate_per_second": 200.0,
+        "latency_ms": {
+          "p50": 54.1,
+          "p95": 439.3,
+          "p99": 1014.4,
+          "max": 1456.0,
+          "samples": 9000
+        }
+      },
+      "per_worker": [
+        {
+          "consumer": "loadtest-1-0",
+          "processed": 29000,
+          "decided": 14419,
+          "dead_lettered": 0,
+          "failures": 0,
+          "reclaimed": 0,
+          "latency_ms": {
+            "p50": 16557.64,
+            "p95": 54781.77,
+            "p99": 58793.14
+          }
+        }
+      ],
+      "parity": {
+        "ok": true,
+        "compared": 14419,
+        "tier_mismatches": 0,
+        "feature_rows_differing": 0
+      }
+    },
+    {
+      "workers": 2,
+      "startup_seconds": 5.2,
+      "saturation": {
+        "events": 20000,
+        "seconds": 34.55,
+        "events_per_second": 578.8
+      },
+      "open_loop": {
+        "events": 9000,
+        "rate_per_second": 200.0,
+        "latency_ms": {
+          "p50": 40.5,
+          "p95": 194.1,
+          "p99": 291.7,
+          "max": 397.8,
+          "samples": 9000
+        }
+      },
+      "per_worker": [
+        {
+          "consumer": "loadtest-2-0",
+          "processed": 14540,
+          "decided": 7204,
+          "dead_lettered": 0,
+          "failures": 0,
+          "reclaimed": 0,
+          "latency_ms": {
+            "p50": 11220.9,
+            "p95": 31461.54,
+            "p99": 34079.87
+          }
+        },
+        {
+          "consumer": "loadtest-2-1",
+          "processed": 14460,
+          "decided": 7215,
+          "dead_lettered": 0,
+          "failures": 0,
+          "reclaimed": 0,
+          "latency_ms": {
+            "p50": 11066.97,
+            "p95": 30853.54,
+            "p99": 34043.07
+          }
+        }
+      ],
+      "parity": {
+        "ok": true,
+        "compared": 14419,
+        "tier_mismatches": 0,
+        "feature_rows_differing": 0
+      }
+    },
+    {
+      "workers": 4,
+      "startup_seconds": 3.7,
+      "saturation": {
+        "events": 20000,
+        "seconds": 21.48,
+        "events_per_second": 931.2
+      },
+      "open_loop": {
+        "events": 9000,
+        "rate_per_second": 200.0,
+        "latency_ms": {
+          "p50": 105.6,
+          "p95": 192.2,
+          "p99": 287.7,
+          "max": 482.4,
+          "samples": 9000
+        }
+      },
+      "per_worker": [
+        {
+          "consumer": "loadtest-4-0",
+          "processed": 7173,
+          "decided": 3544,
+          "dead_lettered": 0,
+          "failures": 0,
+          "reclaimed": 0,
+          "latency_ms": {
+            "p50": 6326.51,
+            "p95": 19934.48,
+            "p99": 20683.13
+          }
+        },
+        {
+          "consumer": "loadtest-4-1",
+          "processed": 7346,
+          "decided": 3626,
+          "dead_lettered": 0,
+          "failures": 0,
+          "reclaimed": 0,
+          "latency_ms": {
+            "p50": 5052.11,
+            "p95": 20271.02,
+            "p99": 21056.89
+          }
+        },
+        {
+          "consumer": "loadtest-4-2",
+          "processed": 6951,
+          "decided": 3465,
+          "dead_lettered": 0,
+          "failures": 0,
+          "reclaimed": 0,
+          "latency_ms": {
+            "p50": 5534.02,
+            "p95": 19751.9,
+            "p99": 20720.64
+          }
+        },
+        {
+          "consumer": "loadtest-4-3",
+          "processed": 7530,
+          "decided": 3784,
+          "dead_lettered": 0,
+          "failures": 0,
+          "reclaimed": 0,
+          "latency_ms": {
+            "p50": 5786.23,
+            "p95": 20541.42,
+            "p99": 21236.76
+          }
+        }
+      ],
+      "parity": {
+        "ok": true,
+        "compared": 14419,
+        "tier_mismatches": 0,
+        "feature_rows_differing": 0
+      }
+    }
+  ]
+}

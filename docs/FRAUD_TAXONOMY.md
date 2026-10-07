@@ -61,7 +61,7 @@ What each detector contributes per category:
 
 | Where | What |
 | --- | --- |
-| `POST /v1/customer/message-check` | `{wallet_id, text}` → `level` (`none`, `caution`, `high`), `risk`, the categories it looks like, the cues that matched, each link and what is wrong with it, and the fixed advice in English and Bangla. 20 a minute per wallet. |
+| `POST /v1/customer/message-check` | `{wallet_id, text}` → `level` (`none`, `caution`, `high`), `risk`, the categories it looks like, the cues that matched with the exact phrases, the words that weighed most (`highlights`), each link and what is wrong with it, and the fixed advice in English and Bangla. 20 a minute per wallet. A flagged check makes a later payment to the number or amount it named a warning (§4). |
 | `POST /v1/customer/payment-verify` | `{wallet_id, txn_id?, amount?, message?}` → `verified`, `mismatch` or `not_found`, the checks behind it, and a fixed message. The ID and amount are read from the pasted message when not given. 10 a minute per wallet. |
 | `GET /v1/decisions/{txn_id}` | `fraud_categories`: the categories an alert belongs to and what that rests on (`scenario`, `similar_cases`, `mule_score`). |
 | `GET /v1/cases/{id}` | each customer report carries `fraud_categories`, from the category the customer picked or, for "something else", from the description. |
@@ -85,93 +85,193 @@ Rules that hold for all of them:
 
 ## 4. The message classifier
 
-**Corpus.** No real customer message was used. `intel/corpus.yaml` holds 300
-templates in 51 scripts ("families"), 36 of them scams, in English, Bangla and
-Banglish (Bangla in Latin letters, how most SMS and chat is written). Slots are
-filled with generated names, amounts and numbers to make 7,572 messages. The
-harmless side is deliberately hard: real OTP notices that say "never share this
-code", cash-in receipts, delivery messages, friends asking for money.
+**Two sources of text.**
 
-**Splits.** Test messages come from *templates* the model never saw, so the test
-measures new wording, not memorised sentences. Eleven whole scripts (8 scam, 3
-harmless) are kept out of training entirely as the `unseen` split: customs parcel,
-bank card, eSIM porting, overpayment, P2P mule, rental and ticket, charity visa,
-utility-bill link.
+- *Our own scripts.* `intel/corpus.yaml` holds 413 templates in 60 scripts
+  ("families"), 42 of them scams, in Bangla script (`bn`), Banglish (`bl`, Bangla in
+  Latin letters, how most SMS and chat is written), English (`en`) and code-mixed
+  Bangla with English words (`mx`, "OTP টা বলুন"). Every line was written for this
+  project; none is a real message. Slots are filled with generated names, amounts
+  and numbers: 10,566 messages (bl 3,386, bn 2,182, en 3,612, mx 1,386). The
+  harmless side is deliberately hard: real OTP notices that say "never share this
+  code", cash-in receipts, delivery messages with tracking links, a parent asking
+  for money on a mobile wallet.
+- *A public corpus.* "Bengali SMS Smishing Dataset", Hugging Face
+  `shariul-islam/bengali-sms-smishing-dataset`, **MIT licence**, 7,005 SMS in the
+  same four varieties, labelled `smish`, `promo` or `normal` by its authors. It is
+  fetched at a pinned revision (`9d7c131c…`) and checked against fixed SHA-256 sums
+  (`intel/external.py`); nothing from it is committed. `smish` counts as a scam,
+  the other two as harmless. It has no category labels, so it trains the
+  scam-or-not output only. Its own split is kept: 4,903 train, 701 validation,
+  1,401 test, and the test part is never trained on. Copies of the same dataset
+  re-uploaded under other accounts were not used; the original is.
 
-**Model.** One-vs-rest logistic regression over character n-grams (2–5, TF-IDF)
+**Typologies.** Every scam script is tagged with the shape customers meet most
+often: fake agent or helpline, prize or lottery, wrong-number send-back, job or
+investment, fake government aid, OTP or PIN phishing, or `other`. Each of the six
+has trained scripts *and* at least one held-out script.
+
+**Three test sets.**
+
+| | What it measures | Messages |
+| --- | --- | --- |
+| `test` | new wording of scripts it was trained on (templates never seen) | 1,591 |
+| `unseen` | 17 whole scripts never trained on, at least one per typology (14 scam, 3 harmless) | 1,950 |
+| `external` | the public corpus's test split: text written by other people | 1,401 |
+
+**Model.** Logistic regression over character n-grams (2–5, TF-IDF, word-bounded)
 plus 27 hand-written cue patterns (asks for a secret, threat, urgency, pay first,
-windfall, …) and their pairwise products. Nine outputs: scam or not, and the eight
-categories. Text is normalised first (Bangla digits to ASCII, links to one token,
-digits to `0`), so the model learns shapes, not numbers. Thresholds are set on the
-validation split: `caution` at ≤ 3% of harmless messages flagged, `high` at ≤ 0.5%.
-Training takes about four seconds (`make intel`).
+windfall, …) and their pairwise products. Nine outputs, one regression each: scam
+or not, and the eight categories; rows without a category label (the public
+corpus) are left out of the category outputs. Text is normalised first (Bangla
+digits to ASCII, links to one token, digits to `0`). Thresholds are set on the
+harmless validation messages of each source separately and the stricter one is
+kept: `caution` flags ≤ 3% of them, `high` ≤ 0.5%. Training takes about nine seconds
+(`make intel`); without network access it trains on our scripts alone, which is
+the previous recipe.
 
-**Why it says so.** The reasons returned are the cues that matched, each with a
-fixed English and Bangla label.
+**Why this model.** `make intel-compare` trains five candidates on the same
+splits, each on our scripts alone and on our scripts plus the public corpus
+(`+ext`), with the same threshold rule. Macro-F1 is over scam and harmless at the
+`caution` threshold; latency is one message at a time on a laptop CPU (Apple
+silicon, 200 calls).
+
+| Candidate | `test` macro-F1 | `unseen` macro-F1 | `unseen` recall / false alarms | `external` AUC | `external` macro-F1 | p50 / p95 ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| Cue patterns only | 0.777 | 0.518 | 0.439 / 0.0% | 0.701 | 0.521 | 0.39 / 0.47 |
+| Cue patterns only +ext | 0.937 | 0.601 | 0.614 / 15.5% | 0.929 | 0.745 | 0.37 / 0.44 |
+| Word TF-IDF | 0.526 | 0.377 | 0.249 / 0.0% | 0.714 | 0.463 | 0.22 / 0.25 |
+| Word TF-IDF +ext | 0.762 | 0.571 | 0.517 / 0.6% | 0.996 | 0.917 | 0.27 / 0.36 |
+| Character n-grams | 0.563 | 0.320 | 0.180 / 0.0% | 0.755 | 0.432 | 0.35 / 0.44 |
+| Character n-grams +ext | 0.861 | 0.643 | 0.648 / 8.4% | 0.997 | 0.949 | 0.33 / 0.42 |
+| Character n-grams + cues (previous recipe) | 0.735 | 0.525 | 0.450 / 0.0% | 0.802 | 0.495 | 0.76 / 0.85 |
+| **Character n-grams + cues +ext (served)** | **0.977** | **0.811** | **0.855 / 7.2%** | 0.996 | **0.972** | 0.72 / 0.86 |
+| MiniLM embeddings + LR | 0.494 | 0.286 | 0.165 / 13.4% | 0.821 | 0.502 | 8.9 / 11.5 |
+| MiniLM embeddings + LR +ext | 0.626 | 0.459 | 0.398 / 14.3% | 0.969 | 0.746 | 9.7 / 11.9 |
+
+MiniLM is `paraphrase-multilingual-MiniLM-L12-v2` (sentence-transformers), frozen,
+with a logistic regression on its 384-number embedding; it is an optional extra
+(`uv sync --extra transformer`) and never a dependency of the service. It lost on
+every test set and is 12–14× slower. The likely reason: Banglish is written in
+Latin letters the embedding model reads as noise, and the scam signal sits in
+short phrases ("code ta bolun") a sentence embedding averages away.
+
+Choice: **character n-grams + cues, trained with the public corpus.** It is best
+on all three test sets in macro-F1 and stays under a millisecond. The fallbacks
+are the same model trained on our scripts alone (no network at training time) and,
+when no classifier is loaded or `cues.yaml` changed since training, the link check
+alone.
+
+**Why it says so.** Each matched cue now carries the exact phrase(s) that matched,
+as `{text, start, end}` spans of the customer's own text, in whichever script it
+was written: "ekhoni OTP code ta bolun", "ওটিপি কোডটি বলুন", "OTP টা বলুন". A flagged
+message also returns up to five `highlights`: the words that pushed the score up
+most, read from the character n-gram weights. Both are additive fields; every
+earlier field of `message-check` is unchanged. The cue patterns gained two
+code-mixed forms (an English secret word followed by a Bangla verb, an English fee
+word followed by a Bangla "send"); they were written by the same author as the
+rest.
+
+**The message and the payment.** When a check is flagged, the wallet that asked
+is remembered for 30 minutes with only the wallet IDs, phone numbers and amounts
+the message contained (at most five messages a wallet), never the text. A payment
+that wallet then makes **to one of those numbers, or for one of those amounts
+(±1 Tk)**, is raised from `allow` to `warn` with the reason "follows a message
+flagged as a likely scam" in English and Bangla; a payment the policy already
+stopped keeps its tier and gains the reason. The recipient check says the same
+before the amount is typed. The memory lives in the scoring process and is lost
+on restart; with several API processes, only the one that served the check knows.
 
 ## 5. Measured
 
-From `backend/artifacts/intel/report.json` (seed 7), which `make intel` writes
-and the console page reads.
+From `backend/artifacts/intel/report.json` (seed 7, model `v2`), which
+`make intel` writes and the console page reads, and
+`backend/artifacts/intel/compare.json` for the comparison above.
 
-| | New wording of trained scripts (`test`, 1,277 messages) | Scripts never seen (`unseen`, 1,089 messages) |
-| --- | --- | --- |
-| ROC-AUC | 0.989 | 0.922 |
-| Scam messages flagged, classifier alone | 86.8% | 68.2% |
-| Scam messages flagged, with the link check | **90.2%** | **81.0%** |
-| Harmless messages flagged | 0.23% (hard look-alikes: 0.34%) | 0.0% |
-
-By language, classifier alone (scam flagged / harmless flagged):
-
-| | Banglish | Bangla | English |
+| Served model | `test` (1,591) | `unseen` (1,950) | `external` (1,401) |
 | --- | --- | --- | --- |
-| `test` | 81.3% / 0.56% | 91.8% / 0.0% | 92.8% / 0.0% |
-| `unseen` | 71.1% / 0.0% | 82.4% / 0.0% | 60.0% / 0.0% |
+| ROC-AUC | 0.994 | 0.971 | 0.996 |
+| Macro-F1 at `caution` | 0.977 | 0.811 | 0.972 |
+| Scam messages flagged (`caution`) | 96.9% | 85.5% | 97.0% |
+| Harmless messages flagged (`caution`) | 0.36% | **7.2%** (hard look-alikes 9.3%) | 2.5% |
+| Scam messages at `high` | 84.3% | 48.4% | 80.6% |
+| Harmless messages at `high` | 0.0% | 0.0% | 0.48% |
 
-Naming the category (a message can have several):
+The model this replaces, on the same `external` test set: AUC 0.815, macro-F1
+0.659, 39.6% of scams flagged, 7.6% of harmless messages flagged.
 
-| Category | `test` support | precision | recall | `unseen` support | precision | recall |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 Social engineering | 420 | 0.997 | 0.798 | 183 | 0.394 | 0.579 |
-| 2 Impersonation | 394 | 0.912 | 0.893 | 81 | 0.421 | 0.951 |
-| 3 Fake payment | 50 | 1.000 | 0.820 | 106 | 1.000 | 0.566 |
-| 4 Account takeover | 233 | 0.683 | 0.768 | 159 | 1.000 | 0.843 |
-| 5 Merchant fraud | 113 | 0.934 | 0.504 | 97 | 0.151 | 0.134 |
-| 6 Phishing and malware | 158 | 1.000 | 0.804 | 119 | – | 0.000 |
-| 7 Financial network | 77 | 0.825 | 0.857 | 100 | – | 0.000 |
-| 8 Scam campaign | 289 | 0.817 | 0.882 | 239 | 0.252 | 0.167 |
+By language, macro-F1 at `caution`:
 
-Held-out scripts, share flagged by the classifier alone: customs parcel 99%, bank
-card 95%, overpayment 84%, charity visa 83%, eSIM porting 73%, P2P mule 70%,
-rental and ticket 53%, utility-bill link **0%**. The three harmless held-out
-scripts: 0%.
+| | Bangla | Banglish | English | Code-mixed |
+| --- | --- | --- | --- | --- |
+| `unseen` | 0.717 | 0.738 | 0.833 | 0.995 |
+| `external` | 0.977 | 0.980 | 0.964 | 0.966 |
+
+On `unseen`, scam flagged / harmless flagged: Bangla 78.0% / 0.0%, Banglish
+86.7% / **28.8%**, English 85.0% / 0.0%, code-mixed 100% / 1.6%.
+
+By typology on `unseen` (that typology's scams against all harmless messages of
+the split), macro-F1 and share of its scams flagged:
+
+| Typology | macro-F1 | flagged |
+| --- | --- | --- |
+| Fake agent or helpline | 0.937 | 98.6% |
+| Prize or lottery | 0.935 | 97.9% |
+| Wrong-number send-back | 0.830 | 71.9% |
+| Job or investment | 0.943 | 100% |
+| Fake government aid | 0.936 | 99.2% |
+| OTP or PIN phishing | 0.894 | 85.4% |
+| Other | 0.835 | 78.4% |
+
+Held-out scripts, share flagged: bank card 100%, job deposit 100%, utility-bill
+link 100%, government aid card 99%, helpline search 99%, prize quiz 98%, eSIM
+porting 92%, P2P mule 84%, overpayment 83%, customs parcel 79%, rental and ticket
+69%, OTP over social media 69%, wrong recharge 64%, charity visa 63%. Harmless:
+split bill 0%, school notice 0%, **official notice 21%**.
 
 How to read this:
 
-- **Spotting a scam generalises; naming it does not.** On scripts it never saw the
-  model still flags most scam messages with no false alarms, but puts them in the
-  wrong category more often than the right one for 5, 6, 7 and 8. When no category
-  is clear the customer is shown the general advice instead.
-- **The utility-bill link script is missed entirely by the classifier** and caught
-  by the link check. That is why the two run together, and why the combined row
-  is the one that matters for category 6.
-- **Banglish is the weakest language on trained scripts** (spelling varies most),
-  and English on unseen ones.
-- **Merchant fraud is the weakest category**: half named correctly on new wording,
-  13% on new scripts. An advance-payment request reads much like an honest seller's.
+- **The public corpus is what moved the numbers.** Every candidate gained from
+  it, on our held-out scripts as well as on the external test. Text written by
+  other people taught the model spellings ours did not have.
+- **The `external` numbers are probably flattering.** The corpus is fairly
+  uniform in style and about 4% of its test messages also appear in its training
+  split. Treat 0.97 as an upper bound for text of that kind, not a forecast.
+- **The cost is false alarms on scripts it has never seen**: 7.2% of harmless
+  `unseen` messages, almost all Banglish, mostly the official-notice script (a
+  real bank or office telling you about a deadline). The model trained on our
+  scripts alone flagged none of them but caught only 45% of unseen scams. A
+  `caution` shows advice, it blocks nothing; `high` raised no harmless message on
+  either of our test sets.
+- **Wrong-number send-back is the hardest typology** (72% flagged): the message
+  is short and polite and asks for nothing secret. The message-to-payment link is
+  aimed at exactly this case: the amount and number it names are what gets paid.
+- **Tuning disclosure.** After the first run on `test`, two kinds of harmless text
+  were too often flagged (a family member asking for money in Banglish, a
+  delivery notice with a tracking link), and eight harmless templates of those
+  kinds were added. `test` is therefore not fully untouched. `unseen` and
+  `external` were not used for any change.
 
 The ledger check has no accuracy figure: it is exact against the ledger by
-construction. Its behaviour is covered by tests (`test_intel.py`,
-`test_platform.py`): right receiver, wrong amount, not completed, someone else's
-payment, a non-numeric ID.
+construction. Its behaviour, the cue spans, the highlights and the
+message-to-payment link are covered by tests (`test_intel.py`,
+`test_platform.py`).
 
 ## 6. Limits, stated plainly
 
-- **The corpus is synthetic and its author wrote the cues.** Templates were
+- **Our corpus is synthetic and its author wrote the cues.** Templates were
   written for this project by the same person who wrote the cue patterns, with the
   trained scripts in view. The held-out scripts were not used to tune them, but
-  real messages will match less often than these numbers suggest. Before use it
-  needs real, consented, labelled messages.
+  real messages will match less often than these numbers suggest. The public
+  corpus is real text written by other people, but it is one dataset, of
+  uncertain label quality, with near-duplicates across its splits. Before use it
+  needs real, consented, labelled messages from this platform's customers.
+- **Banglish false alarms on new scripts.** 29% of harmless Banglish messages in
+  `unseen` reached `caution`. Watch this first in shadow use.
+- **The message-to-payment link is in memory.** It is lost on restart and not
+  shared between API processes; a shared store would be needed to run more than
+  one. It matches numbers and amounts only, so a scam message that names neither
+  does not raise the payment.
 - **A forged cash-in SMS cannot be told from a real one by its text.** Category 3
   rests on the ledger check, and that only helps a customer who asks.
 - **Text only.** No OCR of screenshots, no voice calls, no QR images. A fake QR

@@ -1,7 +1,7 @@
 # Model card — FraudLens risk models, version v4
 
 Every number below is read from `backend/artifacts/models/v4/report.json`, which
-`make train` writes, except where §13 says otherwise. Nothing here is
+`make train` writes, except where §13 to §17 say otherwise. Nothing here is
 hand-entered or rounded up. The data is synthetic
 ([DATA_ASSUMPTIONS.md](DATA_ASSUMPTIONS.md)); absolute values will not transfer
 to real traffic.
@@ -267,8 +267,10 @@ has not been done yet.
   real fraud. Precision in production would be lower at the same thresholds;
   thresholds must be re-fitted on real data.
 - **Labels.** Training uses ground-truth labels. In production only reported
-  cases are labelled (about half), which biases what the model learns.
-- **No adaptation.** Simulated scammers do not react to the controls.
+  cases are labelled (about half), which biases what the model learns. §15
+  measures what that costs and what wins it back.
+- **No adaptation.** The scammers behind every number above do not react to the
+  controls. §14 adds scammers that do, and measures the decay.
 - **Young wallets and fast cash-out are risk signals.** New customers and
   remittance receivers legitimately show both. The data contains such customers
   as hard negatives. This is the main fairness risk, and the fairness report
@@ -319,13 +321,62 @@ interrupted (warn or above). Overall it is 0.53%, and 0.04% are held. Groups und
   receiving wallet is also the strongest honest signal of a mule, so the gap
   cannot be removed by dropping the feature without losing most of the recall.
   What limits the harm is the form of the interruption: a warning the customer
-  can dismiss, and a hold with a 30-minute review deadline. A deployment should
-  watch this rate and consider a separate, higher threshold for new wallets.
+  can dismiss, and a hold with a 30-minute review deadline. Policy v3 gives new
+  wallets cut-offs of their own; what that buys and costs is measured below.
 - Location, channel and balance gaps are within about a factor of two. No
   protected attribute exists in the data, so nothing is known about gender, age
   or religion, and nothing can be claimed.
 - These are rates on synthetic customers. The report is a method and a place on
   the dashboard, not evidence about real people.
+
+### Narrowing the gap: policy v3
+
+Policy v3 is v2 plus two segments: a transfer to a wallet under 30 days old, and a
+payment from one. They are scored against the model's cut-offs times a scale
+fitted on the validation period (`make mitigation`; method in
+[DECISION_POLICY.md §11](DECISION_POLICY.md#11-young-wallets-segment-thresholds-policy-v3)).
+Every rule, hard ones included, still applies, and a held payment still waits
+for a person. Measured on the test period (134,545 payments, 25 days) against v2,
+on model v4; intervals are 95%, from 1,000 bootstrap resamples of sending
+customers.
+
+| | v2 | v3 | Change (95% interval) |
+| --- | --- | --- | --- |
+| Senders under 30 days: honest payments interrupted | 3.17% | 0.41% | −3.45 to −2.12 pp |
+| … times the overall rate | 5.90 | 1.14 | −5.97 to −3.68 |
+| Receiving wallet under 30 days: interrupted | 8.88% | 2.42% | −7.54 to −5.35 pp |
+| … times the overall rate (all transfers) | 16.17 | 7.03 | −10.65 to −7.54 |
+| Receiving wallet under 30 days: held | 1.50% | 0.70% | −1.17 to −0.47 pp |
+| All honest payments interrupted | 0.537% | 0.363% | −0.20 to −0.15 pp |
+| Victim transfers alerted | 81.73% | 81.58% | −0.51 to 0.00 pp |
+| Victim transfers held | 66.47% | 66.19% | −0.73 to 0.00 pp |
+| Victims' money alerted | 85.19% | 84.76% | −1.53 to 0.00 pp |
+| All payments held | 0.765% | 0.750% | −0.022 to −0.009 pp |
+
+- **The trade-off, honestly.** 232 honest payments are no longer interrupted and
+  18 honest holds become a step-up instead. In exchange, among fraudulent payments,
+  one that v2 stepped up is now allowed, one is warned instead of stepped up, and
+  two that v2 held are stepped up instead (the customer re-authenticates and
+  waits, but the money is not held for an analyst). Victims' money alerted falls
+  by ৳15,300 (৳3,024,010 to ৳3,008,710). Precision at warn rises from 64.7% to
+  73.1%, and alerts fall from 81.0 to 71.7 a day.
+- **It narrows the gap; it does not close it.** Raising the young-receiver warn
+  cut-off past the guard (×25 the model's, the hold cut-off) would bring the
+  ratio only from 7.4 to about 6.1 against payments with no young wallet, because
+  the rest is rules (the mule rule R04 lifts young receiving wallets) and honest
+  payments the model scores at hold level. Those are not touched: the guard keeps
+  a payment held for anyone warned in every segment.
+- **Intersectional view** (account age × channel × area, in `fairness_mitigation.json`
+  and on the console). Young receiving wallets on USSD carry the largest remaining
+  gap: rural ones fall from 29.1× to 16.1× the overall rate (288 honest payments),
+  urban ones from 30.7× to 22.9× (89 payments, too few to judge). Young senders on
+  the app in rural areas stay highest among senders (6.9× to 2.7×). Older groups'
+  ratios rise slightly (for example 0.99 to 1.21) only because the overall rate
+  they are divided by fell; their own rates all fell.
+- The segments were fitted on validation, where they cost no victim recall at all;
+  the one missed and two softened victim transfers appear only on test. The
+  default served policy stays v2 until someone chooses v3
+  (`FRAUDLENS_POLICY_VERSION=v3`).
 
 ### Verdicts as labels
 
@@ -391,14 +442,381 @@ more wallets sit within three hops of one as time passes. A deployment that
 keeps this feature should expire or age old flags. The live endpoint measures
 the same on the latest decisions actually served.
 
-## 14. Reproduce
+## 14. Adaptive adversaries
+
+The scammers in §2 to §13 follow fixed scripts. Real scammers learn which
+scripts get through. This section deploys scammers that do, against the served
+model (v4), and asks three questions: how fast recall decays, whether weekly
+retraining keeps up, and whether the drift monitor notices.
+
+**Set-up** (`make adversary`, about five minutes; writes
+`artifacts/reports/adversary.json`). The default world is re-simulated to day 120
+(it reproduces the stored dataset exactly, which the script checks). Then 8 new
+fraud cells open and run 6 one-week rounds after an 8-day warm-up. Every scam
+draws one of six tactics:
+
+| Tactic | What changes |
+| --- | --- |
+| none | the usual script for the typology |
+| split_amounts | each payment split into 2 to 6 parts below ৳1,000 to ৳2,500, 5 to 30 minutes apart |
+| seasoned_mule | the money goes to an existing customer's wallet over 180 days old, not a young one |
+| delayed_cashout | the mule waits 6 to 48 hours before forwarding or cashing out (past a 30-minute hold) |
+| fan_out | each payment goes to the least-used of up to 11 mules |
+| mimic_hours | the scam runs at the victim's own usual hour |
+
+Round 0 runs half the scams on the usual script and spreads the rest evenly.
+After each round the cells see which scams had no victim transfer alerted at the
+warn tier. They then shift their mix by multiplicative weights on that success
+rate (step 3.0, floor 3% per tactic, tactics run fewer than 5 times keep their
+weight). Each round is scored in full with no subsampling: 34,000 to 46,000
+transactions and 84 to 117 scams. There are four arms, all on the same world and
+seed:
+
+- **control**: the mix never changes. This is natural decay.
+- **frozen**: the scammers adapt and v4 stays deployed.
+- **retrain**: after every round the model is refitted with the `make train`
+  recipe. It uses the training fold plus what an operator would know by then:
+  the verdict on every alerted transaction, and the complaints of reported scams.
+  Thresholds are re-chosen on val_b.
+- **drift_gated**: retrain only when the live drift monitor
+  (`mlops/drift.py`: score PSI against training, or the alert rate) leaves "stable".
+
+**Scams caught (case recall) at the warn tier, by round:**
+
+| Arm | 0 | 1 | 2 | 3 | 4 | 5 | Pooled PR-AUC |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| control | 96.7% | 94.6% | 90.9% | 93.1% | 89.5% | 94.8% | 0.977 |
+| frozen | 96.7% | 94.0% | 90.0% | 87.2% | 87.0% | **79.6%** | 0.961 |
+| retrain | 96.7% | 97.0% | 90.5% | 92.6% | 97.8% | 98.0% | 0.960 |
+| drift_gated | identical to frozen: the monitor never fired | | | | | | 0.961 |
+
+What the numbers say:
+
+- **The scammers found the weak spot, and it is seasoned mules.** Against the
+  frozen model, seasoned_mule's share grew from 10% to 48% of scams. Pooled over
+  the six rounds, the model caught 74.4% of seasoned-mule scams (191 scams),
+  against 92% to 100% for every other tactic. The other tactics barely hurt:
+  splitting, delaying, fan-out and hour-mimicking were each caught at 92% or
+  more. The model's two largest signals are the receiver's fast-exit share and
+  its age. Delaying cash-out does not hide the first signal on a mule that has
+  other victims, and only an old wallet hides the second.
+- **Frozen decays, control does not.** By round 5 the frozen model caught 79.6%
+  of scams against 94.8% for the same model facing non-adaptive scammers. That is
+  15 points lost to adaptation alone. Money is more robust: with holds on the
+  mule's exit transactions, 98.3% of the taka is still covered in round 5. The
+  scams that get through are caught at cash-out.
+- **Weekly retraining keeps recall, at a price in alerts.** The retrained arm
+  catches 98.0% of scams in round 5 and 90.1% of seasoned-mule scams pooled. But
+  the first retrain raised alerts from 76 to 234 a day and cut precision from
+  72% to 22%. By round 5 it was still at 118 alerts a day and 46% precision,
+  against 66 and 79% for the frozen model. The feedback rows are mostly alerted
+  rows and complaints, so they are far richer in fraud than real traffic, and
+  thresholds re-chosen on val_b do not correct for it. Retraining on verdicts
+  needs its alert budget re-checked before promotion. That is exactly what
+  shadow mode (§13) is for.
+- **The drift monitor did not notice.** In the frozen arm the population score
+  PSI stayed between 0.0007 and 0.0044 and the alert rate between 1.29% and
+  1.39% (1.24% on validation). So `drift_gated` never retrained and matched the
+  frozen arm round for round. Fraud is about 1% of traffic, and a tactic shift inside that 1%
+  barely moves the whole score distribution. Pointed at confirmed fraud only
+  (val_b fraud as the score reference), the same measure rose from 0.40 in round
+  0 to 0.85 in round 5. But the control arm already reads 0.24 to 0.44, so the
+  standard 0.25 threshold does not separate the two. A fraud-segment monitor
+  needs its own baseline. The signals that did move are per-tactic catch rates
+  on confirmed cases, which only labels give. Drift on unlabelled traffic is no
+  substitute for them.
+- **What carries detection after adaptation** (mean |SHAP| share on victim
+  transfers, round 0, then round 5). The frozen model keeps leaning on the same
+  features: receiver fast-exit share 14.8% then 12.9%, receiver age 10.8% then
+  8.5%. The retrained model moves away from receiver age (to 7.8%) and fast exit
+  (to 9.5%). It moves toward the sender's handset age (7.7% to 13.2%, now the
+  largest), the receiver's 7-day fan-in (3.3% to 6.6%), its number of recipients
+  (3.4% to 6.4%) and prior payments between the pair (3.8%, new in the top 8).
+  These are the signals an old wallet does not fake: a victim on a new handset,
+  and many unrelated senders converging on one receiver.
+
+**Caveats.** One seed and one world. Each round has 84 to 117 scams and each
+tactic 4 to 53, so a single round's number moves by a few points on a few scams.
+Read the trend, not a single cell. The adversary sees ground truth on what was
+alerted, which is more feedback than real scammers get. The tactic set and its
+parameters are assumptions (DATA_ASSUMPTIONS.md). The retrained models are
+experiment-only and are not registered.
+
+## 15. Under-reporting: training on reported scams only
+
+Every number here is read from `backend/artifacts/reports/label_realism.json`,
+which `make label-realism` writes (about 5 to 15 minutes). It does not change
+the served model or any number above.
+
+The served model learnt from every scam the simulator ran. A wallet provider
+only learns about the ones victims report. To measure what that costs, the
+transaction model is retrained, with the same LightGBM settings, training fold
+and early stopping as `make train`, on the labels a provider would have had,
+and every version is scored on **every** scam in the test period. Each is
+compared at the false-positive rate the served model (v4, warn tier) runs at
+on test, 0.523% of honest payments, so the rows differ only in how they rank.
+Five seeds (7, 11, 13, 17, 19) vary both the reporting draw and the model;
+values are mean ± sd.
+
+**How reporting is simulated.** A case is reported with a probability that
+averages the simulator's `report_rate` of 50% but is higher for larger losses,
+urban victims, accounts held for a year or more (the data has no person age)
+and account takeovers, and lower for lottery-fee and investment scams. Reports
+arrive after the simulator's delay (median 1.5 days, 5 for investment scams);
+only those in by the start of the test period count. A reported case labels all
+its transactions, including the mule's forwards and cash-outs. Unreported fraud
+is labelled clean. These weights are assumptions, listed in the JSON, not
+measurements. In the training data this labels 82% of takeovers, 56% of
+impersonations, 40% of wrong-send and 35% of lottery-fee cases.
+
+| Training labels | Scams caught | Loss transfers caught | Taka stopped | PR-AUC |
+| --- | --- | --- | --- | --- |
+| Every scam (as served) | 87.3% ± 0.5 | 81.7% ± 0.7 | 85.0% ± 0.6 | 0.831 ± 0.003 |
+| Reported only, half at random | 72.9% ± 5.3 | 66.4% ± 6.0 | 72.3% ± 7.4 | 0.595 ± 0.038 |
+| **Reported only, biased** | **78.8% ± 2.7** | 71.4% ± 2.2 | 77.9% ± 1.9 | 0.724 ± 0.019 |
+| + positive-unlabelled learning | 79.4% ± 1.5 | 72.1% ± 1.9 | 79.5% ± 1.9 | 0.762 ± 0.020 |
+| + same, report rate given as 50% | 79.0% ± 1.8 | 71.9% ± 1.8 | 78.8% ± 2.0 | 0.754 ± 0.020 |
+| + labels through mule wallets | 82.8% ± 2.2 | 75.6% ± 1.7 | 80.9% ± 1.5 | 0.770 ± 0.043 |
+| + analyst verdicts on alerts | 83.0% ± 2.0 | 76.1% ± 2.1 | 81.9% ± 1.6 | 0.769 ± 0.033 |
+| + mule-wallet labels and verdicts | 82.4% ± 1.4 | 75.0% ± 1.4 | 79.7% ± 2.1 | 0.781 ± 0.023 |
+
+Scams caught, by typology (mean over seeds):
+
+| Training labels | account_takeover | impersonation | lottery_fee | wrong_send | **investment_scam** (unseen) |
+| --- | --- | --- | --- | --- | --- |
+| Every scam | 100% | 96.8% | 98.5% | 100% | 71.2% ± 1.3 |
+| Reported only, biased | 100% | 96.8% | 95.8% | 100% | **52.4% ± 5.8** |
+| + positive-unlabelled | 100% | 96.8% | 95.2% | 100% | 54.1% ± 3.5 |
+| + labels through mule wallets | 100% | 96.8% | 96.7% | 100% | 61.5% ± 4.9 |
+| + analyst verdicts | 100% | 96.8% | 96.7% | 100% | 61.8% ± 4.5 |
+
+What this shows:
+
+- **Under-reporting costs about 8.5 points of scams caught** (87.3% to 78.8%)
+  at the same false-alert rate, and PR-AUC falls from 0.831 to 0.724.
+- **It hides the scam the model has not seen, not the ones it has.** Known
+  typologies stay at 96 to 100% caught: scripted fraud is easy enough that half
+  the examples suffice. The held-out investment scam falls from 71.2% to 52.4%.
+  With fewer examples the model learns the narrow signature of each reported
+  pattern rather than the general shape of a mule chain, which is what caught
+  the new scam.
+- **Who reports matters less than how many.** Biased reporting did better than
+  reporting at random (78.8% against 72.9%), with far less spread between
+  seeds, because it keeps the large, cleanly labelled takeover and
+  impersonation cases; it also labels more fraud rows (1,293 against 1,066 on
+  average). The random-reporting result swings by ±5 points with the draw.
+- **Positive-unlabelled learning does little.** Elkan–Noto weighting lifts
+  PR-AUC to 0.762 but scams caught by under one point, within noise, and
+  telling it the true report rate does not help. Its assumption, that labels go
+  missing at random among frauds, is what biased reporting breaks.
+- **What helps is the network and the analysts.** Spreading soft labels (weight
+  0.7) from reported mule wallets to their other incoming and outgoing money
+  within three days labels about 755 extra rows, 91% of them really fraud, and
+  wins back 4 points of scams caught and 9 of the unseen typology. Analyst
+  verdicts on the top 1% of a model's alerts over the last 15 training days
+  (about 978 reviews, 230 of them fraud no victim had reported) win back the
+  same. Together they are no better than either alone: they recover largely the
+  same rows. Roughly half the cost of under-reporting is recovered; the unseen
+  typology stays about 10 points below the ground-truth model.
+
+Cautions: the reviewers are simulated and always right (as in §13); the
+operating threshold is set on test negatives so every row has the same false-
+alert rate, which isolates ranking but is not how a threshold would be chosen in
+production; the report propensities are assumptions; and five seeds give
+standard deviations of 1.5 to 5 points, so differences under about 3 points
+between recovery methods are not meaningful.
+
+## 16. External validation
+
+Everything above comes from our own simulator. This section asks two questions:
+how precise are the headline numbers, and does the modelling approach hold up on
+fraud data we did not generate? `make external` reproduces all of it (it downloads
+about 560 MB once and verifies SHA-256 checksums; code in
+`backend/src/fraudlens/external/` and `backend/src/fraudlens/models/bootstrap.py`).
+Numbers are read from `backend/artifacts/models/v4/bootstrap_ci.json`,
+`backend/artifacts/external/paysim.json` and `backend/artifacts/external/baf.json`.
+
+No real MFS transaction data was available to us. Both external datasets are
+themselves synthetic, but generated by other teams from real data: PaySim from a
+month of logs of a real African mobile-money service, BAF from a real bank's
+account-opening data. Neither contains authorised-push-payment scams, so this is
+a test of the method, not of the scam-detection claim itself.
+
+### Confidence intervals on the headline (synthetic test period)
+
+1,000 bootstrap replicates, percentile 95% intervals. The model, calibration and
+thresholds are fixed; only the test sample is resampled, two ways: whole days (25
+of them, which keeps a day's and a scam's transactions together) and scams (each
+of the 360 scams as one unit, each legitimate payment as one unit).
+
+| Warn tier on v4 | Point | 95% CI, by day | 95% CI, by scam |
+|---|---|---|---|
+| Scams caught (model warn threshold) | 86.9% | 82.7–91.0% | 83.3–90.6% |
+| False-alert rate on legitimate payments (model warn threshold) | 0.52% | 0.47–0.58% | 0.49–0.57% |
+| Scams caught (policy v1, warn or above) | 87.5% | 83.6–91.3% | 83.9–90.8% |
+| False-alert rate (policy v1, warn or above; §13's 0.53%) | 0.53% | 0.47–0.59% | 0.49–0.57% |
+| PR-AUC, any fraud-chain transaction | 0.834 | 0.806–0.858 | 0.807–0.858 |
+
+The headline "86.9% of scams at 0.53% false alerts" mixes two operating points:
+86.9% is the model's warn threshold (§5), 0.53% is the served policy's (§13). At
+the policy's own point the figures are 87.5% and 0.53%. Either way, with 360 scams
+the recall is known to about ±4 points.
+
+### PaySim (mobile money)
+
+6,362,620 transactions over 743 hours. Fraud is account takeover: the balance is
+TRANSFERred out and cashed out. Only TRANSFER and CASH_OUT rows are scored (the
+only types that are ever fraud). Split by hour: train 1–300 (1,780,544 rows,
+3,401 frauds), validation 301–400 (748,992; 1,076), test 401–743 (240,873;
+3,736). The test hours have far less legitimate traffic, so the base rate there is
+1.55% against 0.19% in training.
+
+Features mapped from FraudLens, each computed from earlier rows only:
+receiver-centric (earlier incoming payments, in the last 24 hours and in value;
+hours since the receiver last received and since it was first seen; earlier
+incoming TRANSFERs; amount against the receiver's usual incoming amount), velocity
+(the 24-hour counts; the sender's earlier payments), and cash-out timing (hours
+since the sender last received money, amount against what it received). The last
+one cannot see PaySim's fraud chain: the account that receives a fraudulent
+TRANSFER never appears as the one that cashes out (0 of 4,097). Devices, agents,
+districts, wallet age and confirmed-fraud flags have no equivalent.
+
+Thresholds are fixed on the validation hours at each target false-positive rate
+and applied unchanged to test, as in §5. Because the test hours look different,
+the rate reached on test drifts from the target; both are shown. The last column
+sets the threshold on the test set itself, which no deployment can do but which
+makes scores comparable at exactly 0.5%.
+
+| Score | PR-AUC | ROC-AUC | Recall at 0.5% target (FPR reached on test) | Recall at 1% (FPR reached) | Recall at exactly 0.5% FPR on test |
+|---|---|---|---|---|---|
+| PaySim's own rule (TRANSFER over 200,000) | 0.019 | 0.502 | 0.3% (0.00%) | 0.3% (0.00%) | 0.3% |
+| Amount only | 0.145 | 0.704 | 0.0% (0.01%) | 8.8% (0.13%) | 13.3% |
+| Isolation Forest (no labels) | 0.022 | 0.530 | 4.1% (0.90%) | 6.6% (2.02%) | 3.1% |
+| Logistic regression, same features | 0.323 | 0.790 | 25.1% (0.26%) | 32.4% (0.54%) | 31.5% |
+| **LightGBM, same recipe as v4** | **0.468** | **0.940** | 57.3% (1.25%) | 68.0% (2.03%) | 32.1% |
+| LightGBM without hour of day | 0.469 | 0.903 | 32.9% (0.32%) | 46.8% (0.91%) | 36.7% |
+| LightGBM plus pre-transaction balances | 0.991 | 1.000 | 99.97% (0.54%) | 99.97% (1.15%) | 99.95% |
+
+Bootstrap by test hour (343 hours, 500 replicates): LightGBM PR-AUC 0.394–0.555,
+recall at the 0.5% validation threshold 53.4–60.7%; without hour of day, PR-AUC
+0.420–0.519 and recall 30.9–35.1%.
+
+What this shows:
+
+- **The approach beats every simple baseline on external MFS data**: PR-AUC 0.47
+  against 0.32 for logistic regression on the same features and 0.15 for amount
+  alone. The receiver-centric features carry the model: without hour of day the
+  top features are amount (37% of gain), amount against the receiver's usual
+  incoming amount (20%), hours since the receiver last received (15%) and the
+  receiver's earlier incoming payments (12%).
+- **At a 0.5% false-positive rate it catches about a third of PaySim fraud**
+  (32–37%), not 87%. PaySim's fraud is single-step account takeover with no mule
+  chain, no shared devices and no history to learn a victim's pattern from, which
+  is where most of the FraudLens signal lives (§10). The number to compare with
+  our 86.9% is not this one: the tasks differ.
+- **Hour of day helps ranking but hurts stability.** PaySim spreads fraud evenly
+  over the day while legitimate traffic follows a daily cycle, so the model leans
+  on hour (32% of gain); in the quieter test hours its validation threshold lets
+  through 1.25% false positives instead of 0.5%. Without it the threshold holds
+  (0.32%). The same lesson as §11: a signal that is an artefact of the generator
+  looks strong and does not travel.
+- **PaySim's balance fields are a known artefact.** 97.8% of frauds move exactly
+  the sender's whole balance and no legitimate TRANSFER or CASH_OUT does, so adding
+  the pre-transaction balances gives near-perfect scores. We report it to show
+  why published PaySim results near 0.99 say little, and we do not count it.
+- Isolation Forest alone is near chance here (ROC-AUC 0.53), consistent with §4,
+  where the anomaly model is a weak detector on its own.
+
+### Bank Account Fraud (BAF, NeurIPS 2022), Base variant
+
+1,000,000 account applications over 8 months, 1.1% fraudulent, from OpenML
+(dataset 46793). This is account opening, not payments; the nearest FraudLens task
+is the mule-wallet model (wallets opened to receive scam money). Mapped ideas:
+application velocity (6 h, 24 h, 4 weeks), postcode and branch velocity, shared
+devices and identities (distinct e-mails per device and per date of birth).
+Split by month as in the benchmark: train 0–4 (675,666; 6,740 frauds), validation
+5 (119,323; 1,411), test 6–7 (205,011; 2,878). All columns are used as given.
+
+| Score | PR-AUC | ROC-AUC | Recall at 5% target (FPR reached) | Recall at exactly 5% FPR on test | Recall at exactly 1% |
+|---|---|---|---|---|---|
+| Velocity counts only | 0.014 | 0.486 | 2.8% (3.04%) | 4.9% | 0.9% |
+| Credit-risk score only | 0.037 | 0.672 | 19.8% (4.93%) | 19.8% | 6.6% |
+| Isolation Forest (no labels) | 0.018 | 0.576 | 8.1% (5.49%) | 7.3% | 1.5% |
+| Logistic regression | 0.143 | 0.863 | 46.9% (5.22%) | 45.9% | 20.3% |
+| **LightGBM, same recipe as v4** | **0.193** | **0.893** | 58.8% (6.03%) | 54.8% | 25.3% |
+
+Bootstrap by application (500 replicates): LightGBM PR-AUC 0.179–0.207, recall at
+the 5% validation threshold 57.2–60.7%.
+
+The same recipe, unchanged, beats logistic regression and every single-signal
+baseline on a public benchmark built from real bank data. BAF's velocity columns
+count applications across the whole population, not per customer, and carry no
+signal on their own (ROC-AUC 0.49); the model's top features are housing status,
+device OS, name–e-mail similarity and address history, not the FraudLens ideas.
+So BAF supports the modelling recipe, not our particular features.
+
+### What this does and does not establish
+
+- It establishes that the modelling recipe (gradient-boosted trees on
+  receiver-centric and velocity features, thresholds fixed in advance on later
+  validation data) is not an artefact of our simulator: on two independent public
+  datasets it has the highest PR-AUC of the scores tried (leaving aside PaySim's
+  balance artefact). At a fixed low false-positive rate its lead over logistic
+  regression is small on PaySim (32–37% against 31.5% at exactly 0.5%) and clear
+  on BAF (54.8% against 45.9% at exactly 5%). Intervals were computed for the
+  LightGBM scores only.
+- It does not validate the 86.9% figure. No public dataset contains MFS
+  authorised-push-payment scams with mule chains, so the scam-specific numbers in
+  §3–§7 still rest on synthetic data. The test that would settle it is a
+  back-test on a provider's own labelled transactions.
+- Both external datasets are synthetic derivatives of real data, with artefacts of
+  their own (shown above for PaySim).
+
+## 17. The scam-message classifier (intel `v2`)
+
+A separate model, for text a customer pastes in before paying. Numbers in this
+section come from `backend/artifacts/intel/report.json` (`make intel`) and
+`compare.json` (`make intel-compare`); the full tables, data provenance and limits
+are in [FRAUD_TAXONOMY.md](FRAUD_TAXONOMY.md) §4–§6.
+
+| | |
+| --- | --- |
+| Model | logistic regression, one per output, over character n-grams (2–5, TF-IDF) and 27 cue patterns with their pairwise products |
+| Outputs | scam or not, and the eight fraud categories |
+| Training data | 413 synthetic templates in Bangla, Banglish, English and code-mixed text (5,114 training messages), plus the training split of a public MIT-licensed Bangla SMS smishing corpus (4,903 messages, scam-or-not only) |
+| Thresholds | per source on harmless validation messages, stricter kept: `caution` ≤ 3% flagged, `high` ≤ 0.5% |
+| Cost | about nine seconds to train; 0.72 ms median, 0.86 ms p95 per message on a laptop CPU |
+| Chosen over | cue patterns alone, word TF-IDF, character n-grams alone, multilingual MiniLM embeddings + LR (each with and without the public corpus); best macro-F1 on all three test sets |
+
+| At `caution` | new wording (`test`) | held-out scripts (`unseen`) | public corpus test (`external`) |
+| --- | --- | --- | --- |
+| ROC-AUC | 0.994 | 0.971 | 0.996 |
+| Macro-F1 | 0.977 | 0.811 | 0.972 |
+| Scams flagged | 96.9% | 85.5% | 97.0% |
+| Harmless flagged | 0.36% | 7.2% | 2.5% |
+
+Macro-F1 on `unseen` by language: Bangla 0.717, Banglish 0.738, English 0.833,
+code-mixed 0.995. The previous classifier scored macro-F1 0.659 on `external`.
+The weak point is harmless Banglish on scripts never seen (29% flagged at
+`caution`, none at `high`).
+
+How it reaches the payment: a payment made within 30 minutes of a flagged check, by
+the same wallet, to a number or for an amount the message named, is raised from
+`allow` to `warn` with the reason shown (`decided_by: message_link`). Only the
+numbers and amounts are held, in memory, never the text.
+## 18. Reproduce
 
 ```
 make data features train     # about one minute; writes backend/artifacts/models/<version>/
 make policy insights         # policy_report.json and insights.json (fairness, drift, threshold sweep)
+make mitigation              # §13: young-wallet thresholds (policy v3) against v2
+make adversary               # §14: adaptive scammers vs frozen, retrained and drift-gated models
+make label-realism           # §15: reported-only labels and recovery methods
+make external                # §16: PaySim, BAF and bootstrap intervals (downloads ~560 MB once)
 make test                    # 203 tests, including leakage and round-trip checks
 ```
 
 `report.json` holds every number above; `manifest.json` holds thresholds,
 calibration, feature list and data seed; `test_scores.parquet` holds the score of
 every test transaction.
+

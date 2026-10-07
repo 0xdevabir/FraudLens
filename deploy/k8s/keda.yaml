@@ -1,0 +1,45 @@
+# Workers scale on stream lag (needs KEDA, https://keda.sh).
+#
+# A worker deletes each entry once its decision is committed, so the stream's
+# length IS the lag: entries written but not yet decided. KEDA's redis-streams
+# trigger reads XLEN (lagCount would need Redis 7 and counts the same thing here).
+#
+# The measured ceiling is in docs/SCALING.md: phase 1 (feature state) is ordered,
+# so more than about four workers buys little. Raise maxReplicaCount only with
+# a load test that shows it helps.
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: fraudlens-redis
+spec:
+  secretTargetRef:
+    - {parameter: password, name: fraudlens-backing, key: REDIS_PASSWORD}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: fraudlens-worker
+spec:
+  scaleTargetRef:
+    name: fraudlens-worker
+  minReplicaCount: 1
+  maxReplicaCount: 4
+  pollingInterval: 10
+  cooldownPeriod: 120
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies: [{type: Pods, value: 1, periodSeconds: 60}]
+  triggers:
+    - type: redis-streams
+      metadata:
+        address: redis.fraudlens.svc:6379
+        stream: fraudlens:events
+        consumerGroup: scorer
+        # One more worker per 2,000 undecided entries (a few seconds of work each).
+        streamLength: "2000"
+      authenticationRef:
+        name: fraudlens-redis

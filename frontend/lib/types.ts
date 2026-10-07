@@ -432,6 +432,84 @@ export interface ImpactPoint {
   legit_customers_alerted: number;
 }
 
+/** What the business case assumes (backend: decision/business.py `Assumptions`). */
+export interface BusinessAssumptions {
+  monthly_payments: number;
+  avg_payment_taka: number;
+  scam_loss_bps: number;
+  stop_warn: number;
+  stop_step_up: number;
+  stop_hold: number;
+  abandon_rate: number;
+  abandon_cost_taka: number;
+  contacts_warn: number;
+  contacts_step_up: number;
+  contacts_hold: number;
+  contact_cost_taka: number;
+  review_minutes: number;
+  analyst_monthly_cost_taka: number;
+  analyst_hours_per_month: number;
+  min_analysts: number;
+  platform_monthly_cost_taka: number;
+  reimbursement_share: number;
+  reputation_per_taka: number;
+}
+
+/** One threshold of the sweep, priced for a month at the assumed volume. */
+export interface BusinessPoint {
+  threshold: number;
+  alert_rate: number;
+  interrupted: Record<"warn" | "step_up" | "hold", number>;
+  interrupted_total: number;
+  honest_interrupted: number;
+  honest_per_10k: number;
+  held_for_review: number;
+  prevented: Record<"warn" | "step_up" | "hold" | "mule_cash_out_held", number>;
+  prevented_total: number;
+  prevented_share: number;
+  missed: number;
+  friction: { abandoned_payments: number; support_contacts: number };
+  friction_total: number;
+  abandoned_payments: number;
+  support_contacts: number;
+  review_hours: number;
+  workload_fte: number;
+  analysts: number;
+  analyst_cost: number;
+  platform_cost: number;
+  operating_cost: number;
+  net_benefit: number;
+  provider_net_benefit: number;
+  prevented_per_taka_cost: number | null;
+  missed_cost_provider: number;
+}
+
+export interface BusinessCase {
+  model_version: string;
+  policy_version: string;
+  rows: number;
+  days: number;
+  assumptions: BusinessAssumptions;
+  defaults: BusinessAssumptions;
+  sources: { key: keyof BusinessAssumptions; label: string; unit: string; low: number; high: number; source: string }[];
+  synthetic: { scam_loss_per_payment: number; scale: number };
+  scam_loss_at_risk: number;
+  today_index: number;
+  best_index: number;
+  policy: BusinessPoint;
+  points: BusinessPoint[];
+  sensitivity: {
+    threshold: number;
+    net_benefit: number;
+    provider_net_benefit: number;
+    rows: {
+      key: keyof BusinessAssumptions; label: string; unit: string; low: number; high: number;
+      net_low: number; net_high: number; provider_low: number; provider_high: number; swing: number; provider_swing: number;
+    }[];
+  };
+  break_even_bps: { net_benefit: number | null; provider_net_benefit: number | null };
+}
+
 export interface FairRow {
   group: string;
   transactions: number;
@@ -515,6 +593,88 @@ export interface Report {
     single_decisions: { decisions: number; alerts: number; decide_ms: { p50: number; p95: number; max: number } } & Record<string, unknown>;
   } & Record<string, unknown>;
   insights: Insights | null;
+  label_realism?: LabelRealism | null;
+  /** Young-wallet segment thresholds (policy v3) against the base policy; absent until `make mitigation` has run. */
+  mitigation?: Mitigation | null;
+}
+
+/** Mean and standard deviation across seeds. */
+export interface Spread { mean: number; sd: number }
+
+export interface LabelRealism {
+  created_at: string;
+  seeds: number[];
+  operating_point: { version: string; tier: string; threshold: number; fpr: number };
+  regimes: string[];
+  summary: {
+    regimes: Record<string, {
+      pr_auc: Spread; loss_txn_recall: Spread; case_recall: Spread; taka_recall: Spread;
+      by_typology: Record<string, { case_recall: Spread; loss_txn_recall: Spread }>;
+    }>;
+  } & Record<string, unknown>;
+}
+
+type MitigationScales = Record<string, { warn: number; hold: number }>;
+
+export interface MitigationPoint {
+  scales: MitigationScales;
+  admissible: boolean;
+  meets_constraints: boolean;
+  chosen: boolean;
+  fit: Record<string, number | null>;
+  test: Record<string, number | null>;
+}
+
+export interface MitigationMetric {
+  key: string;
+  label: string;
+  before: number | null;
+  after: number | null;
+  difference: number | null;
+  before_ci: [number | null, number | null];
+  after_ci: [number | null, number | null];
+  difference_ci: [number | null, number | null];
+}
+
+export type IntersectionRow = FairRow & {
+  false_alert_rate_after: number | null;
+  false_hold_rate_after: number | null;
+  ratio_to_overall_after: number | null;
+  victim_transfers_alerted_after: number | null;
+};
+
+export interface Mitigation {
+  model_version: string;
+  base_policy: string;
+  policy_version: string;
+  fitted_on: string[];
+  evaluated_on: string;
+  rows: { fit: number; test: number };
+  days: number;
+  objective: {
+    minimise: string;
+    subject_to: Record<string, number | string>;
+    ties: string;
+    warn_scales: number[];
+    hold_scales: number[];
+  };
+  segments: {
+    id: string; description: string; applies_to: string[];
+    scale: Record<"warn" | "step_up" | "hold", number>;
+    thresholds: Record<"warn" | "step_up" | "hold", number>;
+    rows_test: number;
+  }[];
+  fit: {
+    candidates: number; admissible: number; meeting_constraints: number;
+    base: MitigationPoint; chosen: MitigationPoint;
+    frontier: MitigationPoint[]; path_warn: MitigationPoint[]; path_hold: MitigationPoint[];
+  };
+  policy_matches_fit: boolean;
+  engine_matches_grid: boolean;
+  tier_counts: { before: Record<string, number>; after: Record<string, number> };
+  tier_changes: { from: string; to: string; label: string; count: number }[];
+  before_after: { reps: number; resampled: string; metrics: MitigationMetric[] };
+  intersectional: { sender: IntersectionRow[]; receiver: IntersectionRow[] };
 }
 
 export interface ModelInfo {
@@ -611,6 +771,7 @@ export interface PayResult {
     tier: Tier; action: string; requires_review: boolean; risk_score: number; risk_band: string; mode: string;
     model_version: string; policy_version: string; customer_message: Text2 | null; cooling_off_minutes: number;
     review_sla_minutes: number | null; case_id: number | null; latency_ms: number;
+    scenario?: string | null; cue?: Cue | null;
   } | null;
 }
 
@@ -618,4 +779,119 @@ export interface Scenario {
   id: string;
   expected_tier: Tier;
   payment: { sender_id: string; receiver_id: string; amount: number; type: string; district: string; sender_balance_before: number };
+}
+
+/** Which scam a warning looks like, for the customer's app to explain in words. */
+export type Cue = "reported_recipient" | "impersonation" | "prize" | "investment" | "wrong_send" | "not_you" | "generic";
+export type AppealRelation = "family" | "friend" | "business" | "seller" | "landlord" | "employer" | "other" | "none";
+export type AppealStatus = "pending" | "approved" | "rejected";
+
+/** What the customer's app sees of its own appeal. */
+export interface CustomerAppeal {
+  id: number; txn_id: number; tier: Tier; status: AppealStatus;
+  filed_at: string; sla_due_at: string; decided_at: string | null; txn_status: string | null; now: string;
+}
+
+/** One row of the reviewers' appeals queue. */
+export interface Appeal {
+  id: number; txn_id: number; wallet_id: string; case_id: number | null; tier: Tier;
+  relation: AppealRelation; reason: string; status: AppealStatus;
+  filed_at: string; sla_due_at: string; overdue: boolean;
+  decided_by: number | null; decider: string | null; decision_note: string | null; decided_at: string | null;
+  amount?: number; receiver_id?: string; txn_status?: string; ts?: string;
+}
+
+export interface AppealQueue {
+  now: string;
+  counts: Record<AppealStatus, number>;
+  appeals: Appeal[];
+}
+
+// ---- Consortium: simulated cross-provider mule intelligence (docs/CONSORTIUM.md)
+
+export interface ConsortiumFeed {
+  provider: string;
+  display: string;
+  seq: number;
+  issued_at: string;
+  valid_until: string;
+  confirmed_listings: number;
+  by_kind: Record<string, number>;
+  by_typology: Record<string, number>;
+  suspected_in_filter: number;
+  filter_bits: number;
+  filter_hashes: number;
+  withdrawn: number;
+  bytes: number;
+  signature_ok: boolean;
+  key_fingerprint: string;
+}
+
+export interface ConsortiumDispute {
+  dispute_id: string;
+  listing_id: string;
+  owner: string;
+  raised_by: string;
+  reason: string;
+  opened_at: string;
+  status: "open" | "upheld" | "withdrawn";
+  resolved_at: string | null;
+  resolved_by: string | null;
+}
+
+export type SeedStat = { mean: number; min: number; max: number } | null;
+
+export interface ConsortiumOverview {
+  clock: string;
+  key_epoch: string;
+  oprf_key_fingerprint: string;
+  members: { name: string; display: string; key_fingerprint: string; quota_per_day: number; disputes_against: number; withdrawn_after_dispute: number }[];
+  feeds: ConsortiumFeed[];
+  guarantees: string[];
+  audit: { entries: number; chain_ok: boolean; head: string };
+  disputes: ConsortiumDispute[];
+  results: {
+    model_version: string;
+    seeds: number[];
+    headline_share: number;
+    sim_shares: number[];
+    listing_confidence: { confirmed: number; suspected: number; confirmed_basis: string; suspected_basis: string };
+    results_by_shared_sim_rate: Record<string, { summary: Record<string, Record<string, SeedStat>> }>;
+    poisoning: { listings: number; by: string; clean: Record<string, Record<string, number | null>>; attacked: Record<string, Record<string, number | null>> };
+    cost: { oprf: { client_ms_per_token: number; hub_ms_per_token: number }; tokens_made: number };
+  };
+}
+
+export interface ConsortiumMatch {
+  wallet_id: string;
+  at: string;
+  home: string;
+  partners: string[];
+  kinds: string[];
+  status: "confirmed" | "suspected";
+  confidence: number;
+  typology: string;
+  listing_ids: string[];
+  mule_score: number;
+  mule_model_alone_would_alert: boolean;
+  transfers_matched: number;
+  simulation_truth: string;
+}
+
+export interface ConsortiumAuditEntry {
+  n: number;
+  at: string;
+  by: string;
+  event: string;
+  detail: Record<string, unknown>;
+  prev: string;
+  hash: string;
+}
+
+export interface ConsortiumLookup {
+  wallet_id: string;
+  home: string;
+  identifiers_checked: { msisdn: number; device: number };
+  signal: number;
+  matches: { provider: string; kind: string; status: string; confidence: number; typology: string; listing_id: string | null }[];
 }

@@ -23,9 +23,9 @@ from pathlib import Path
 
 import joblib
 import numpy as np
+from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from sklearn.multiclass import OneVsRestClassifier
 from sklearn.pipeline import FeatureUnion, Pipeline
 
 from ..config import Settings
@@ -67,10 +67,32 @@ def build_pipeline(seed: int = 7) -> Pipeline:
         # cues would outweigh them and the wording would stop counting.
         transformer_weights={"chars": 1.0, "cues": 0.5},
     )  # fmt: skip
-    model = OneVsRestClassifier(
-        LogisticRegression(C=2.0, max_iter=3000, class_weight="balanced", random_state=seed)
-    )
-    return Pipeline([("features", features), ("model", model)])
+    return Pipeline([("features", features), ("model", MultiHead(C=2.0, seed=seed))])
+
+
+class MultiHead(BaseEstimator, ClassifierMixin):
+    """One logistic regression per output, like one-vs-rest, except that a label of
+    -1 means "not known" and leaves that row out of that output. A message from the
+    public corpus (`external.py`) is known to be a scam or not, but not of which
+    category, so it trains the scam output only."""
+
+    def __init__(self, C: float = 2.0, seed: int = 7) -> None:
+        self.C = C
+        self.seed = seed
+
+    def fit(self, X, Y) -> MultiHead:
+        Y = np.asarray(Y)
+        self.estimators_ = []
+        for j in range(Y.shape[1]):
+            known = Y[:, j] >= 0
+            est = LogisticRegression(
+                C=self.C, max_iter=3000, class_weight="balanced", random_state=self.seed
+            )
+            self.estimators_.append(est.fit(X[known], Y[known, j]))
+        return self
+
+    def predict_proba(self, X) -> np.ndarray:
+        return np.column_stack([est.predict_proba(X)[:, 1] for est in self.estimators_])
 
 
 @dataclass

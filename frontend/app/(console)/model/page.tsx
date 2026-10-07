@@ -6,7 +6,7 @@ import { HBars } from "@/components/charts";
 import { Async, Badge, Card, Empty, Facts, PageHeader, Stat, StatusBadge, Table, Tabs, Td } from "@/components/ui";
 import { useApi } from "@/lib/api";
 import { day, num, pct, shortDay, TIER_LABEL, TIERS, when, words } from "@/lib/format";
-import type { Drift, Feedback, Insights, Registry, Report, Shadow, Summary } from "@/lib/types";
+import type { Drift, Feedback, Insights, LabelRealism, Registry, Report, Shadow, Spread, Summary } from "@/lib/types";
 
 type Tab = "performance" | "drift" | "versions" | "feedback";
 
@@ -197,11 +197,54 @@ function Performance({ report, summary }: { report: Report; summary?: Summary })
           />
         </Card>
       </div>
+      {report.label_realism && <UnderReporting data={report.label_realism} />}
       <p className="mt-4 text-xs text-fg-3">
         Model {report.model_version}, trained on {num(report.model.data.rows.train)} payments and measured on {num(report.model.data.rows.test)} later
         ones it never saw. The data is simulated: these numbers say the pipeline works end to end, not how it would do on real traffic.
       </p>
     </>
+  );
+}
+
+const LABEL_REGIME: Record<string, string> = {
+  ground_truth: "Every scam labelled (what the model was trained on)",
+  reported_uniform: "Only reported scams, half at random",
+  reported: "Only reported scams, as victims really report",
+  reported_pu: "+ positive-unlabelled learning",
+  reported_pu_known_rate: "+ positive-unlabelled, report rate known",
+  reported_propagated: "+ labels spread through mule wallets",
+  reported_feedback: "+ analyst verdicts on alerts",
+  reported_propagated_feedback: "+ mule-wallet labels and verdicts",
+};
+
+function spread(value: Spread | undefined): string {
+  return value ? `${pct(value.mean)} ± ${num(value.sd * 100, 1)}` : "–";
+}
+
+function UnderReporting({ data }: { data: LabelRealism }) {
+  const rows = data.regimes.filter((name) => data.summary.regimes[name]);
+  return (
+    <div className="mt-4">
+      <Card
+        title="If only reported scams were labelled"
+        hint={`The same model retrained on the labels a wallet provider really has, then measured on every scam in the test period at the served model’s false-positive rate (${pct(data.operating_point.fpr, 2)}). Mean ± sd over ${data.seeds.length} seeds, sd in points. Run \`make label-realism\`.`}
+        flush
+      >
+        <Table head={["Training labels", "Scams caught", "New scam type caught", "PR-AUC"]}>
+          {rows.map((name) => {
+            const row = data.summary.regimes[name];
+            return (
+              <tr key={name}>
+                <Td className="font-medium">{LABEL_REGIME[name] ?? words(name)}</Td>
+                <Td right>{spread(row.case_recall)}</Td>
+                <Td right>{spread(row.by_typology.investment_scam?.case_recall)}</Td>
+                <Td right>{row.pr_auc ? `${num(row.pr_auc.mean, 3)} ± ${num(row.pr_auc.sd, 3)}` : "–"}</Td>
+              </tr>
+            );
+          })}
+        </Table>
+      </Card>
+    </div>
   );
 }
 

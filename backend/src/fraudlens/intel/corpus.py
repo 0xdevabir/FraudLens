@@ -29,7 +29,18 @@ import yaml
 from .taxonomy import load_taxonomy
 
 CORPUS_PATH = Path(__file__).parent / "corpus.yaml"
-LANGUAGES = {"bn": "Bangla", "bl": "Bangla in Latin letters", "en": "English"}
+LANGUAGES = {
+    "bn": "Bangla",
+    "bl": "Bangla in Latin letters",
+    "en": "English",
+    "mx": "Bangla and English mixed",
+}
+# The scam typologies the corpus is organised around (the scripts customers meet
+# most often), so results can be read per typology. `other` covers the rest.
+TYPOLOGIES = (
+    "fake_agent_helpline", "prize_lottery", "wrong_number", "job_investment",
+    "govt_aid", "otp_pin_phishing", "other",
+)  # fmt: skip
 
 _BN_DIGITS = str.maketrans("0123456789", "০১২৩৪৫৬৭৮৯")
 
@@ -57,11 +68,13 @@ _OPENERS = {
     "bn": ["আসসালামু আলাইকুম। ", "ভাই, ", "প্রিয় গ্রাহক, ", "স্যার, ", "আপা, "],
     "bl": ["Assalamu alaikum. ", "vai ", "Sir ", "apu ", "hello ", "bhai, "],
     "en": ["Hello. ", "Dear customer, ", "Hi, ", "Sir, ", "Good day. "],
+    "mx": ["Hello ভাই, ", "Dear customer, ", "Sir, ", "আপু, ", "Hi, "],
 }
 _CLOSERS = {
     "bn": [" ধন্যবাদ।", " ভালো থাকবেন।", ""],
     "bl": [" dhonnobad", " thanks", " pls", ""],
     "en": [" Thanks.", " Thank you.", " Regards.", ""],
+    "mx": [" Thanks.", " ধন্যবাদ।", " please", ""],
 }
 
 # How the same Bangla word is spelled by different people writing in Latin letters.
@@ -75,7 +88,6 @@ _SPELLINGS = {
     "theke": ["thk", "thake", "theike"],
     "hoye": ["hoe", "hoia"],
     "jabe": ["jbe", "jaabe"],
-    "pathan": ["pathiye din", "send korun", "pathay den"],
     "vul": ["bhul", "bul"],
     "kore": ["kre", "koira"],
     "number": ["nambar", "no", "nmbr"],
@@ -91,6 +103,13 @@ _SPELLINGS = {
     "code": ["kod", "cod"],
     "ferot": ["ferat", "back"],
     "geche": ["gese", "gechhe"],
+    "ekhon": ["akhon", "ekhn"],
+    "ekhoni": ["akhoni", "ekhuni"],
+    "taratari": ["tartari", "taratari"],
+    "pathan": ["pathaan", "pathiye den", "send koren"],
+    "bolen": ["bolun", "bolen na"],
+    "korsi": ["korchi", "korechi"],
+    "gese": ["geche", "gechhe"],
 }
 
 _SLOT = re.compile(r"\{(\w+)\}")
@@ -103,6 +122,7 @@ class Family:
     templates: tuple[tuple[str, str], ...]  # (language, text)
     hard: bool = False
     held_out: bool = False
+    typology: str | None = None  # scams only: one of TYPOLOGIES
 
 
 @dataclass(frozen=True)
@@ -113,6 +133,7 @@ class Sample:
     lang: str
     split: str  # train | val | test | unseen
     hard: bool
+    typology: str | None = None
 
 
 @cache
@@ -127,9 +148,12 @@ def load_families(path: Path = CORPUS_PATH) -> tuple[Family, ...]:
             templates=tuple((lang, text) for lang, text in item["templates"]),
             hard=bool(item.get("hard", False)),
             held_out=bool(item.get("held_out", False)),
+            typology=item.get("typology", "other") if item["labels"] else None,
         )
         if set(family.labels) - known:
             raise ValueError(f"family {family.id} names an unknown category")
+        if family.typology is not None and family.typology not in TYPOLOGIES:
+            raise ValueError(f"family {family.id} names an unknown typology")
         if any(lang not in LANGUAGES for lang, _ in family.templates):
             raise ValueError(f"family {family.id} has a template in an unknown language")
         families.append(family)
@@ -254,5 +278,9 @@ def generate(seed: int = 7, per_template: int = 30) -> list[Sample]:
                 if text in seen:  # a template with no slots renders few distinct texts
                     continue
                 seen.add(text)
-                samples.append(Sample(text, family.labels, family.id, lang, split, family.hard))
+                samples.append(
+                    Sample(
+                        text, family.labels, family.id, lang, split, family.hard, family.typology
+                    )
+                )
     return samples

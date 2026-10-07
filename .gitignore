@@ -18,6 +18,7 @@ out/
 .env
 .env.*
 !.env.example
+backend/secrets/
 
 # OS / tooling
 .DS_Store

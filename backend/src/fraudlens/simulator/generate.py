@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import settings
-from .config import DAY, SimConfig
+from .config import DAY, PROFILES, SimConfig
 from .engine import ADD_MONEY, CASH_IN, K_WALLET, KIND_NAMES, TYPE_NAMES, Simulation
 from .world import DISTRICTS, MERCHANT_CATEGORIES, SEGMENTS
 
@@ -39,21 +39,23 @@ def _when(cfg: SimConfig, seconds) -> pd.Series:
     return pd.Timestamp(cfg.start) + pd.to_timedelta(s.round(), unit="s")
 
 
-def build_tables(sim: Simulation) -> dict[str, pd.DataFrame]:
-    cfg, w, c = sim.cfg, sim.w, sim.cols
+def transaction_table(sim: Simulation, start: int = 0) -> pd.DataFrame:
+    """The transactions emitted so far, from the `start`-th one on (txn_id = position)."""
+    cfg = sim.cfg
+    c = {k: v[start:] for k, v in sim.cols.items()}
     ts = np.asarray(c["ts"], dtype=np.int64)
     day = ts // DAY
-    typ = np.asarray(c["type"])
+    typ = np.asarray(c["type"], dtype=np.int64)
     app = np.asarray(c["app"])
-    device = np.asarray(c["device"])
+    device = np.asarray(c["device"], dtype=np.int64)
 
     channel = np.where(app == 1, "app", "ussd").astype(object)
     channel[typ == CASH_IN] = "agent"
     channel[typ == ADD_MONEY] = "bank"
 
-    txns = pd.DataFrame(
+    return pd.DataFrame(
         {
-            "txn_id": np.arange(len(ts), dtype=np.int64),
+            "txn_id": np.arange(start, start + len(ts), dtype=np.int64),
             "ts": _when(cfg, ts),
             "day": day,
             "split": np.select(
@@ -76,6 +78,11 @@ def build_tables(sim: Simulation) -> dict[str, pd.DataFrame]:
             "cell_id": c["cell"],
         }
     )
+
+
+def build_tables(sim: Simulation) -> dict[str, pd.DataFrame]:
+    cfg, w = sim.cfg, sim.w
+    txns = transaction_table(sim)
 
     nw = w.n_wallets
     mules = sim.fraud.mules
@@ -210,9 +217,19 @@ def main() -> None:
     parser.add_argument("--small", action="store_true", help="test-sized world")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument(
+        "--profile",
+        choices=PROFILES,
+        default=settings.sim_profile,
+        help="calibrated: Bangladesh-sourced parameters (env FRAUDLENS_SIM_PROFILE)",
+    )
     args = parser.parse_args()
     cfg = SimConfig.small(args.seed) if args.small else SimConfig(seed=args.seed)
-    out = args.out or settings.data_dir / ("small" if args.small else "full")
+    cfg = cfg.with_profile(args.profile)
+    name = "small" if args.small else "full"
+    if cfg.profile != "default":
+        name = f"{name}_{cfg.profile}"  # never overwrite the published dataset
+    out = args.out or settings.data_dir / name
     meta = generate(cfg, out)
     print(json.dumps(meta["profile"], indent=2, default=str))
     print(f"wrote {out} in {meta['seconds']}s")

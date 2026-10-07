@@ -70,6 +70,7 @@ served at `/docs` outside production.
 | Auth | `POST /auth/login`, `GET /auth/me`, `POST /auth/logout` | anyone / signed in / signed in |
 | Demo sign-in (§7, off by default) | `GET /auth/demo`, `POST /auth/demo-login` | anyone, when enabled |
 | Scoring | `POST /score`, `POST /events` (up to 500 per call, queued), `POST /wallet-flags` | service |
+| Ingest ([INGEST.md](INGEST.md)), off without a partner keyring | `POST /ingest/transactions[?wait=decision]`, `POST /ingest/transactions/batch` (pacs.008, HMAC-signed, no token) | partner key |
 | | `POST /score/what-if` | service, analyst, supervisor |
 | Alerts | `GET /alerts`, `GET /decisions/{txn_id}`, `GET /decisions/{txn_id}/narrative?lang=en\|bn`, `GET /stream/alerts` (server-sent events) | analyst, supervisor |
 | Cases | `GET /cases`, `POST /cases`, `GET /cases/{id}`, `POST /cases/{id}/assign\|notes\|escalate\|verdict`, `GET /users/reviewers` | analyst, supervisor |
@@ -79,12 +80,14 @@ served at `/docs` outside production.
 | Network | `GET /wallets/{id}`, `GET /wallets/{id}/network`, `GET /rings`, `GET /rings/{ring_id}`, `GET /agents/risk`, `GET /agents/{id}`, `GET /past-cases/{id}` | analyst, supervisor |
 | Customer | `POST /customer/recipient-check`, `POST /customer/transactions/{txn_id}/respond`, `POST /customer/reports` | service |
 | | `POST /customer/message-check`, `POST /customer/payment-verify` ([FRAUD_TAXONOMY.md](FRAUD_TAXONOMY.md)) | service |
+| | `POST\|GET /customer/transactions/{txn_id}/appeal` (§6) | service |
+| Appeals | `GET /appeals`, `POST /appeals/{id}/approve\|reject` (§6) | analyst, supervisor |
 | Fraud types | `GET /intel/taxonomy` | analyst, supervisor, admin |
 | Operations | `GET /metrics/summary`, `GET /metrics/daily`, `GET /model`, `GET /model/report`, `GET /policy` | analyst, supervisor, admin |
 | After deployment (§12) | `GET /models`, `GET /model/shadow`, `GET /metrics/drift`, `GET /feedback` | analyst, supervisor, admin |
 | Audit | `GET /audit` | supervisor, admin |
 | | `POST /audit/reveals` (§7) | analyst, supervisor |
-| Demo (§14), absent in production | `GET /demo/scenarios`, `GET /demo/payment-draft`, `GET /demo/payment-claims`, `POST /demo/pay\|respond\|report\|recipient-check\|message-check\|payment-verify\|advance-clock` | analyst, supervisor, admin |
+| Demo (§14), absent in production | `GET /demo/scenarios`, `GET /demo/payment-draft`, `GET /demo/payment-claims`, `GET /demo/appeal`, `POST /demo/pay\|respond\|report\|appeal\|recipient-check\|message-check\|payment-verify\|advance-clock` | analyst, supervisor, admin |
 | | `GET /health`, `GET /ready` | none |
 
 Errors always have the same shape, with the request id that is also in the
@@ -108,6 +111,11 @@ repeat the value that was sent.
 4. Everything that needs no answer (cash-ins, bill payments, back-office flags):
    `POST /v1/events`. They keep the feature state current.
 5. When your own investigation confirms a wallet as fraud: `POST /v1/wallet-flags`.
+
+A core-banking system that would rather push than call with a token uses the
+signed webhook instead of steps 2 and 4: ISO 20022 pacs.008 credit transfers,
+HMAC-signed per request, with replay protection, idempotency keys and an optional
+signed decision callback ([INGEST.md](INGEST.md)).
 
 A transaction may carry `ip`, the address the customer's request came from
 (optional, IPv4 or IPv6). The platform reduces it to its network at the edge (the
@@ -172,6 +180,25 @@ and each request still needs its own approval by a second person.
   from the SMS or screenshot shown, and only for payments made to the asking
   wallet. 10 a minute per wallet. Both are described in
   [FRAUD_TAXONOMY.md](FRAUD_TAXONOMY.md).
+- **Which scam it looks like.** `/v1/score` and the demo payment return
+  `decision.scenario` and `decision.cue` (`reported_recipient`, `impersonation`,
+  `prize`, `investment`, `wrong_send`, `not_you` or `generic`), so the app can
+  word its warning for that scam (`decision/customer.py`). The phone demo does,
+  in Bangla and English, with a live cooling-off or review countdown and a "what
+  happens next" timeline.
+- **Appealing.** `POST /customer/transactions/{txn_id}/appeal` (the sender only,
+  on a warned, step-up or held payment; one per payment; 5 an hour) with a
+  relation to the recipient and a reason (digits redacted). A person answers
+  every appeal: `GET /appeals`, `POST /appeals/{id}/approve|reject` (analyst,
+  supervisor; same escalation rules as the case). Deadlines: the hold's review
+  SLA (30 minutes) for a held payment, 24 hours for a warning. Approving a held
+  payment releases it, except into a confirmed-fraud or frozen wallet (`409`).
+  Approving a warning moves no money and grants no cooling-off waiver, so an
+  appeal cannot be used to coach a victim past the check. An approved appeal is a
+  `legitimate` label in `/feedback` (`source: appeal`) unless a case verdict says
+  otherwise; a rejected one adds nothing. The customer's view
+  (`GET /customer/transactions/{txn_id}/appeal`) shows status and deadline only.
+  Everything is audited. Migration `0004_appeals`.
 
 ## 7. Security
 
@@ -214,7 +241,9 @@ and each request still needs its own approval by a second person.
 - **Production guard.** With `FRAUDLENS_ENVIRONMENT=production` the API refuses to
   start with the development signing secret, the development database password,
   a Redis URL without a password, `*` as a CORS origin, or demo sign-in enabled,
-  and the interactive docs are off.
+  and the interactive docs are off. It also refuses keyring keys shorter than 32
+  characters, partner callbacks that are not `https`, and a trusted-proxy list
+  that trusts everyone (`0.0.0.0/0`).
 - **Demo sign-in.** Off by default. `FRAUDLENS_DEMO_LOGIN=true` makes
   `POST /auth/demo-login` sign in as one of the five seeded console accounts
   without a password, and the login page shows a button for each. Anyone who can
@@ -222,6 +251,22 @@ and each request still needs its own approval by a second person.
   you can reach. Service accounts are never offered, each use is audited as
   `auth.login` with `demo: true`, and the endpoint answers 404 when the setting
   is off or the environment is production.
+- **Key rotation.** Each token names its signing key (`kid`). With
+  `FRAUDLENS_JWT_KEYRING` set, `make rotate-jwt` adds a key that signs from then
+  on, and the earlier ones keep verifying until the tokens they signed have
+  expired, so nobody is signed out. Partner HMAC keys rotate the same way
+  (`make partner-key`, with a grace period), and `keys retire` cuts off a leaked
+  key at once. The keyring files are re-read when they change; no restart.
+- **Secrets from files.** Every setting can come from a file:
+  `FRAUDLENS_JWT_SECRET_FILE=/run/secrets/jwt` (Docker or Kubernetes secrets),
+  never both the value and the file. `FRAUDLENS_SECRETS_PROVIDER=module:function`
+  plugs in a secrets manager; only a directory reader ships
+  (`fraudlens.secret_sources.directory_provider`).
+- **TLS and the client address.** `make tls` puts Caddy in front of the API and
+  the console (HTTPS, HSTS, a 2 MB body cap; `deploy/Caddyfile`). The API believes
+  `X-Forwarded-For` only from the addresses in `FRAUDLENS_TRUSTED_PROXIES`, and
+  only as far back as those proxies wrote it; a client's own header is ignored.
+  The threat model is [SECURITY.md](SECURITY.md).
 - **Redis password.** Optional in development: `REDIS_PASSWORD` in a `.env` next
   to `docker-compose.yml` turns it on, and `FRAUDLENS_REDIS_URL` carries the same
   password. Without it Redis relies on its port being bound to 127.0.0.1.
@@ -230,9 +275,12 @@ and each request still needs its own approval by a second person.
 
 ## 8. Stream and live feed
 
-`POST /v1/events` appends to a Redis stream; a worker thread in the API process
-reads it through a consumer group, in order, in batches, and acknowledges after
-the batch is committed. An entry that cannot be parsed or fails validation goes
+`POST /v1/events` appends to a Redis stream. Workers read it through one consumer
+group: a thread in the API process, and as many `fraudlens.platform.worker`
+processes as the load needs (`make worker`). They put entries into the feature
+state in stream order and decide them in parallel; an entry is acknowledged and
+deleted once its decision is committed, and one held by a worker that died is
+taken over by another. SCALING.md has the design and the measurements. An entry that cannot be parsed or fails validation goes
 to a dead-letter stream with the reason and does not block the ones behind it.
 Entries delivered before a crash are handled first after a restart, and since
 scoring is idempotent a redelivery is harmless. If the backlog passes 200,000 the
@@ -256,15 +304,18 @@ written before they existed is refused at load (`make features` rebuilds it).
 
 ## 10. Limits, stated plainly
 
-- **One scorer process.** The feature state is in one process's memory, so the
-  API cannot be scaled by adding copies. Scaling out means partitioning by wallet
-  or moving the state to a shared store; neither is built.
+- **One ordered step.** Every process holds the whole feature state and catches
+  up from the log, so workers and API copies can be added, but putting events
+  into the state stays serialised behind one lock. Measured in SCALING.md:
+  throughput stops growing at a few workers. Going further means partitioning
+  the state by wallet, which is not built.
 - **Recovery time grows** with the number of transactions since the snapshot. A
   production system would write snapshots periodically; this one has only the
   end-of-history snapshot.
-- **Rate limits and the login lockout use the address the API sees.** Behind a
-  proxy, run uvicorn with `--proxy-headers` and a trusted proxy list, or every
-  client shares one address.
+- **Rate limits and the login lockout use the client address** worked out from
+  `FRAUDLENS_TRUSTED_PROXIES`. Left empty behind a proxy, every client shares the
+  proxy's address; listing a proxy that passes on its clients' own headers lets
+  them choose their address.
 - **The live feed authenticates with the Bearer header**, which the browser's
   `EventSource` cannot send; the console reads it with `fetch`.
 - **Step-up is asserted by the caller** (`step_up_passed`). The platform trusts
@@ -277,8 +328,16 @@ written before they existed is refused at load (`make features` rebuilds it).
   sent to the language model is masked in the backend, before it leaves.
 - **The free-text mask is a pattern match.** It catches long numbers and e-mail
   addresses, not a name or an address written in words.
-- **No TLS, secrets manager or key rotation**: deployment concerns outside this
-  prototype.
+- **Security is partly built** ([SECURITY.md](SECURITY.md) lists each threat as
+  done, partial or not done). TLS ends at the proxy: the hops behind it (API,
+  Postgres, Redis) are plain on a private network. Secrets come from files or a
+  provider hook, but no secrets-manager client ships. Keys rotate when someone
+  runs the command; nothing rotates them on a schedule, and moving from the single
+  `FRAUDLENS_JWT_SECRET` to a keyring signs everyone out once.
+- **Decision callbacks** cover transactions queued through the ingest webhook,
+  not `/v1/events`. Delivery is at least once, and the outbound request does not
+  check where the partner's address resolves to: callback URLs are set by an
+  operator, not by the partner.
 
 ## 11. Measured
 
@@ -331,7 +390,7 @@ same two rows: the figures depend heavily on what else the machine is doing.
 292,567 events in just under six minutes, about 855 events a second. In the
 earlier run eight concurrent what-if callers got 194 answers a second with a p95
 of 51 ms: scoring is serialised in one process, so concurrency adds waiting, not
-capacity (§10). For scale: the simulated system averages 0.14 transactions a
+capacity (§10). Several stream workers are measured in SCALING.md. For scale: the simulated system averages 0.14 transactions a
 second.
 
 **Restart.** With all 304,867 events since the snapshot to re-apply, the service
