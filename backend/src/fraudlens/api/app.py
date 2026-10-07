@@ -19,6 +19,7 @@ from starlette.exceptions import HTTPException
 from ..config import Settings
 from ..intel.text import load_text_model
 from ..platform.audit import WorkflowError
+from ..platform.callbacks import Dispatcher
 from ..platform.db import make_engine, make_sessions
 from ..platform.graph import Graph
 from ..platform.scoring import Scorer
@@ -26,7 +27,7 @@ from ..platform.security import RateLimiter, check_production
 from ..platform.stream import Worker
 from .deps import Platform
 from .middleware import RequestContext, error_body
-from .routes import alerts, auth, cases, customer, demo, intel, mlops, network, ops, scoring
+from .routes import alerts, auth, cases, customer, demo, ingest, intel, mlops, network, ops, scoring
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ def build_platform(settings: Settings) -> Platform:
         message_limit=RateLimiter(redis, "message-check", 20, 60),
         # Tighter: each call is a question about the ledger.
         proof_limit=RateLimiter(redis, "payment-verify", 10, 60),
+        callbacks=Dispatcher(settings, sessions, redis) if settings.ingest_keyring else None,
     )
 
 
@@ -96,10 +98,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.aredis = aioredis.from_url(settings.redis_url, decode_responses=True)
         if settings.run_worker:
             platform.worker.start()
+            if platform.callbacks is not None:
+                platform.callbacks.start()
         log.info("fraudlens api ready: scoring in %s mode", platform.scorer.mode)
         try:
             yield
         finally:
+            if platform.callbacks is not None:
+                platform.callbacks.stop()
             platform.worker.stop()
             if platform.worker.is_alive():
                 platform.worker.join(timeout=5.0)
@@ -165,7 +171,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     for kind in (OperationalError, InterfaceError, RedisError):
         app.add_exception_handler(kind, unavailable)
 
-    for module in (auth, scoring, alerts, cases, network, customer, intel, ops, mlops):
+    for module in (auth, scoring, ingest, alerts, cases, network, customer, intel, ops, mlops):
         app.include_router(module.router, prefix="/v1")
     if not settings.production:  # stand-ins for the customer app; see routes/demo.py
         app.include_router(demo.router, prefix="/v1")

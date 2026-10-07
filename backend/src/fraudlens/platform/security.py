@@ -1,7 +1,9 @@
-"""Passwords, access tokens, rate limits and the checks that guard production."""
+"""Passwords, access tokens and their keys, client addresses, rate limits, production checks."""
 
 from __future__ import annotations
 
+import functools
+import ipaddress
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -13,8 +15,11 @@ from argon2.exceptions import Argon2Error, InvalidHashError
 from redis import Redis
 
 from ..config import DEV_JWT_SECRET, Settings
+from .keys import Key, Keyring, load_keyring
 
 ALGORITHM = "HS256"
+DEFAULT_KID = "default"  # the key id of FRAUDLENS_JWT_SECRET when there is no keyring
+MIN_KEY_LENGTH = 32
 ISSUER = "fraudlens"
 MIN_PASSWORD_LENGTH = 12
 
@@ -41,7 +46,18 @@ def verify_password(password_hash: str | None, password: str) -> bool:
         return False
 
 
+def _jwt_keyring(settings: Settings) -> Keyring:
+    """The keyring file when there is one; otherwise the single secret, as key `default`."""
+    if settings.jwt_keyring is not None:
+        return load_keyring(settings.jwt_keyring)
+    secret = settings.jwt_secret.get_secret_value()
+    return Keyring({DEFAULT_KID: Key(DEFAULT_KID, secret, datetime(1970, 1, 1, tzinfo=UTC))})
+
+
 def issue_token(user_id: int, role: str, settings: Settings, now: datetime | None = None) -> str:
+    key = _jwt_keyring(settings).signing()
+    if key is None:
+        raise RuntimeError("the JWT keyring has no active key: run `keys rotate-jwt`")
     now = now or datetime.now(UTC)
     claims = {
         "sub": str(user_id),
@@ -51,14 +67,19 @@ def issue_token(user_id: int, role: str, settings: Settings, now: datetime | Non
         "exp": now + timedelta(minutes=settings.jwt_ttl_minutes),
         "jti": uuid.uuid4().hex,  # names this one token, so signing out can revoke it
     }
-    return jwt.encode(claims, settings.jwt_secret.get_secret_value(), algorithm=ALGORITHM)
+    # `kid` names the key, so a token outlives a rotation until it expires.
+    return jwt.encode(claims, key.secret, algorithm=ALGORITHM, headers={"kid": key.kid})
 
 
 def read_token(token: str, settings: Settings) -> dict:
     try:
+        kid = jwt.get_unverified_header(token).get("kid", DEFAULT_KID)
+        key = _jwt_keyring(settings).verifying(kid) if isinstance(kid, str) else None
+        if key is None:
+            raise TokenError("signed with an unknown or retired key")
         return jwt.decode(
             token,
-            settings.jwt_secret.get_secret_value(),
+            key.secret,
             algorithms=[ALGORITHM],  # never trust the algorithm named in the token
             issuer=ISSUER,
             options={"require": ["exp", "iat", "sub", "iss", "jti"]},
@@ -106,13 +127,77 @@ class RateLimiter:
         self.redis.delete(self._key(key))
 
 
+Network = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+
+@functools.cache
+def _proxies(entries: tuple[str, ...]) -> tuple[Network, ...]:
+    nets = tuple(ipaddress.ip_network(e.strip(), strict=False) for e in entries)
+    if any(net.prefixlen == 0 for net in nets):
+        raise ValueError("FRAUDLENS_TRUSTED_PROXIES must not trust every address")
+    return nets
+
+
+def proxies(entries: list[str]) -> tuple[Network, ...]:
+    return _proxies(tuple(entries))
+
+
+def _parse_ip(text: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        ip = ipaddress.ip_address(text.strip())
+    except ValueError:
+        return None
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip
+
+
+def client_address(peer: str | None, forwarded_for: list[str], trusted: list[str]) -> str | None:
+    """The address a request came from. `X-Forwarded-For` is believed only as far
+    back as it was written by trusted proxies: walking from the nearest hop, the
+    first address that is not one of ours is the client. Anything to the left of it
+    was written by the client and could say anything."""
+    nets = proxies(trusted)
+    if peer is None or not nets:
+        return peer
+    hop = _parse_ip(peer)
+    if hop is None or not any(hop in net for net in nets):
+        return peer  # not from our proxy: its header means nothing
+    chain = [part for header in forwarded_for for part in header.split(",") if part.strip()]
+    for part in reversed(chain):
+        ip = _parse_ip(part)
+        if ip is None:
+            break  # a malformed hop: stop at the last address we could vouch for
+        hop = ip
+        if not any(ip in net for net in nets):
+            break
+    return str(hop)
+
+
 def check_production(settings: Settings) -> None:
     """Refuse to run a production service on development defaults."""
+    proxies(settings.trusted_proxies)  # malformed or catch-all entries fail everywhere
     if not settings.production:
         return
-    secret = settings.jwt_secret.get_secret_value()
-    if secret == DEV_JWT_SECRET or len(secret) < 32:
-        raise RuntimeError("FRAUDLENS_JWT_SECRET must be a private key of 32+ characters")
+    if settings.jwt_keyring is None:
+        secret = settings.jwt_secret.get_secret_value()
+        if secret == DEV_JWT_SECRET or len(secret) < MIN_KEY_LENGTH:
+            raise RuntimeError("FRAUDLENS_JWT_SECRET must be a private key of 32+ characters")
+    else:
+        ring = load_keyring(settings.jwt_keyring)
+        if ring.signing() is None:
+            raise RuntimeError("FRAUDLENS_JWT_KEYRING has no active key")
+        if any(k.secret == DEV_JWT_SECRET or len(k.secret) < MIN_KEY_LENGTH
+               for k in ring.keys.values()):  # fmt: skip
+            raise RuntimeError("every key in FRAUDLENS_JWT_KEYRING must be 32+ characters")
+    if settings.ingest_keyring is not None:
+        ring = load_keyring(settings.ingest_keyring)
+        if any(len(k.secret) < MIN_KEY_LENGTH for k in ring.keys.values()):
+            raise RuntimeError("every key in FRAUDLENS_INGEST_KEYRING must be 32+ characters")
+        for partner in ring.partners:
+            url = ring.callback_url(partner)
+            if url and urlsplit(url).scheme != "https":
+                raise RuntimeError(f"the callback for {partner} must use https")
     if "fraudlens_dev" in settings.database_url:
         raise RuntimeError("FRAUDLENS_DATABASE_URL still uses the development password")
     if not urlsplit(settings.redis_url).password:

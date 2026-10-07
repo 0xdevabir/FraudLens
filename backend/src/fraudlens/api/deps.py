@@ -15,10 +15,17 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..config import Settings
 from ..intel.text import TextModel
 from ..platform.audit import Ctx, WorkflowError
+from ..platform.callbacks import Dispatcher
 from ..platform.graph import Graph
 from ..platform.models import User
 from ..platform.scoring import Scorer
-from ..platform.security import RateLimiter, TokenError, is_revoked, read_token
+from ..platform.security import (
+    RateLimiter,
+    TokenError,
+    client_address,
+    is_revoked,
+    read_token,
+)
 from ..platform.stream import Worker
 
 REVIEWERS = ("analyst", "supervisor")
@@ -47,6 +54,7 @@ class Platform:
     intel: TextModel | None  # the scam-message classifier, when it has been trained
     message_limit: RateLimiter
     proof_limit: RateLimiter
+    callbacks: Dispatcher | None = None  # decision callbacks to ingest partners, when configured
 
 
 def platform(request: Request) -> Platform:
@@ -67,7 +75,10 @@ _bearer = HTTPBearer(auto_error=False, description="Access token from POST /v1/a
 
 
 def client_ip(request: Request) -> str | None:
-    return request.client.host if request.client else None
+    """The caller's address, through the reverse proxies in FRAUDLENS_TRUSTED_PROXIES."""
+    peer = request.client.host if request.client else None
+    trusted = request.app.state.platform.settings.trusted_proxies
+    return client_address(peer, request.headers.getlist("x-forwarded-for"), trusted)
 
 
 def current_user(

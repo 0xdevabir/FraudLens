@@ -3,7 +3,9 @@
 from pathlib import Path
 
 from pydantic import SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+
+from .secret_sources import SecretFilesSource
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
@@ -54,6 +56,28 @@ class Settings(BaseSettings):
 
     # Where the console is served from in development (`make console`).
     cors_origins: list[str] = ["http://localhost:3100", "http://127.0.0.1:3100"]
+
+    # Signing keys with ids, re-read when the file changes (`fraudlens.platform.keys`).
+    # When set they replace jwt_secret: the current key signs, unretired ones verify.
+    jwt_keyring: Path | None = None
+    # Partner HMAC keys for /v1/ingest (docs/INGEST.md); without them it answers 404.
+    ingest_keyring: Path | None = None
+    ingest_window_seconds: int = 300  # how far a request's timestamp may be from ours
+    # Reverse proxies (CIDRs) whose X-Forwarded-For is believed; nobody else's is.
+    trusted_proxies: list[str] = []
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # FRAUDLENS_<NAME>_FILE and FRAUDLENS_SECRETS_PROVIDER: see secret_sources.py.
+        files = SecretFilesSource(settings_cls)
+        return init_settings, env_settings, files, dotenv_settings, file_secret_settings
 
     @property
     def dataset_dir(self) -> Path:
