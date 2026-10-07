@@ -25,7 +25,7 @@ import { useRouter } from "next/navigation";
 import { cx } from "@/components/ui";
 import type { Role } from "@/lib/types";
 
-import { TOUR_SEEN_KEY, type TourApi, type TourStep } from "./types";
+import { TOUR_LANG_KEY, TOUR_SEEN_KEY, type TourApi, type TourLang, type TourStep } from "./types";
 
 /* ------------------------------------------------------------------------------------------ */
 /* Context                                                                                     */
@@ -54,46 +54,187 @@ function hasSeen(): boolean {
   }
 }
 
-const SECONDS_PER_STEP = 15;
+const SECONDS_PER_STEP = 9;
+
+const BN_DIGITS = "০১২৩৪৫৬৭৮৯";
+const bnNum = (n: number) => String(n).replace(/\d/g, (d) => BN_DIGITS[Number(d)]);
+
+/** Everything the tour itself says, in plain English and everyday Bangla. */
+const UI = {
+  en: {
+    num: (n: number) => String(n),
+    next: "Next",
+    back: "Back",
+    skip: "Skip",
+    finish: "Finish",
+    play: "Play the tour by itself",
+    pause: "Pause the tour",
+    live: "Live",
+    paused: "Paused",
+    welcomeTitle: "Welcome to FraudLens",
+    welcomeBody:
+      "FraudLens stops scam payments on mobile money before the money is gone. Sit back and watch: a guide cursor walks through every screen and explains it in plain words.",
+    watch: "Watch the live tour",
+    manual: "Go step by step",
+    later: "Maybe later",
+    steps: (n: number) => `${n} stops`,
+    minutes: (m: number) => `about ${m} min`,
+    readyTitle: "You\u2019re ready",
+    readyBody: (n: number) => `That\u2019s all ${n} stops. Replay it anytime with the compass button, Take the tour.`,
+    restart: "Watch again",
+    done: "Done",
+    complete: "Complete",
+  },
+  bn: {
+    num: bnNum,
+    next: "পরের ধাপ",
+    back: "আগের",
+    skip: "বাদ দিন",
+    finish: "শেষ",
+    play: "ট্যুর নিজে থেকে চলুক",
+    pause: "ট্যুর থামান",
+    live: "লাইভ",
+    paused: "থামানো",
+    welcomeTitle: "FraudLens-এ স্বাগতম",
+    welcomeBody:
+      "মোবাইল মানিতে প্রতারণার পেমেন্ট টাকা চলে যাওয়ার আগেই FraudLens থামিয়ে দেয়। আরাম করে বসুন আর দেখুন: একটা কার্সর নিজে নিজে প্রতিটা স্ক্রিন ঘুরে সহজ ভাষায় বুঝিয়ে দেবে।",
+    watch: "লাইভ ট্যুর দেখুন",
+    manual: "ধাপে ধাপে দেখুন",
+    later: "পরে দেখব",
+    steps: (n: number) => `${bnNum(n)}টি ধাপ`,
+    minutes: (m: number) => `প্রায় ${bnNum(m)} মিনিট`,
+    readyTitle: "আপনি এখন প্রস্তুত",
+    readyBody: (n: number) => `${bnNum(n)}টি ধাপই দেখা হলো। কম্পাস বোতাম “Take the tour” চেপে যেকোনো সময় আবার দেখতে পারবেন।`,
+    restart: "আবার দেখুন",
+    done: "ঠিক আছে",
+    complete: "সম্পন্ন",
+  },
+} as const;
+
+const CHAPTER_BN: Record<string, string> = {
+  Welcome: "স্বাগতম",
+  Navigation: "মেনু",
+  Overview: "সারসংক্ষেপ",
+  Operations: "দৈনন্দিন কাজ",
+  Investigation: "তদন্ত",
+  Governance: "নিয়ম ও তদারকি",
+  "Customer demo": "গ্রাহকের দিক",
+  Finish: "শেষ",
+};
+
+const chapterName = (chapter: string, lang: TourLang) => (lang === "bn" ? (CHAPTER_BN[chapter] ?? chapter) : chapter);
+const titleOf = (s: TourStep, lang: TourLang) => (lang === "bn" && s.titleBn ? s.titleBn : s.title);
+const bodyOf = (s: TourStep, lang: TourLang) => (lang === "bn" && s.bodyBn ? s.bodyBn : s.body);
+
+function readLang(): TourLang {
+  try {
+    return window.localStorage.getItem(TOUR_LANG_KEY) === "bn" ? "bn" : "en";
+  } catch {
+    return "en";
+  }
+}
+
+/** Reading time for a step in auto mode: typing plus a calm read, never rushed. */
+function dwellFor(text: string, lang: TourLang): number {
+  return Math.min(Math.max(2400 + text.length * (lang === "bn" ? 46 : 38), 5200), 11000);
+}
+
+/** A pausable one-shot timer: restarts when `key` changes, keeps its remaining time across pauses. */
+function useCountdown(running: boolean, ms: number, key: number, onDone: () => void) {
+  const done = useRef(onDone);
+  const state = useRef({ key: -1, left: ms });
+  useEffect(() => {
+    done.current = onDone;
+  });
+  useEffect(() => {
+    const s = state.current;
+    if (s.key !== key) {
+      s.key = key;
+      s.left = ms;
+    }
+    if (!running) return;
+    const t0 = performance.now();
+    const id = window.setTimeout(() => done.current(), s.left);
+    return () => {
+      window.clearTimeout(id);
+      s.left = Math.max(0, s.left - (performance.now() - t0));
+    };
+  }, [running, ms, key]);
+}
+
+function LangSwitch({ lang, onLang, className }: { lang: TourLang; onLang: (l: TourLang) => void; className?: string }) {
+  return (
+    <div role="group" aria-label="Language / ভাষা" className={cx("flex rounded-full bg-white/8 p-0.5 text-xs font-medium", className)}>
+      {(["en", "bn"] as const).map((l) => (
+        <button
+          key={l}
+          type="button"
+          lang={l}
+          aria-pressed={lang === l}
+          onClick={() => onLang(l)}
+          className={cx(
+            "rounded-full px-2.5 py-0.5 transition-colors duration-300",
+            lang === l ? "bg-accent text-accent-ink" : "text-fg-3 hover:text-fg",
+          )}
+        >
+          {l === "en" ? "EN" : "বাংলা"}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 interface RunState {
   /** Index into the role-filtered steps, or null when on the finish card / inactive. */
   index: number | null;
   finished: boolean;
+  /** Plays by itself: the cursor tours each stop and moves on after a read. */
+  auto: boolean;
   /** Bumps on every jump so the overlay can tell a fresh run from a stale one. */
   nonce: number;
 }
 
 export function TourProvider({ steps, role, children }: { steps: TourStep[]; role: Role; children: ReactNode }) {
   const visible = useMemo(() => steps.filter((s) => !s.roles || s.roles.includes(role)), [steps, role]);
-  const [run, setRun] = useState<RunState>({ index: null, finished: false, nonce: 0 });
+  const [run, setRun] = useState<RunState>({ index: null, finished: false, auto: true, nonce: 0 });
   const [welcome, setWelcome] = useState(false);
+  const [lang, setLangState] = useState<TourLang>(readLang);
+  const setLang = useCallback((l: TourLang) => {
+    setLangState(l);
+    try {
+      window.localStorage.setItem(TOUR_LANG_KEY, l);
+    } catch {
+      /* the choice just won't outlive this page */
+    }
+  }, []);
 
   const active = run.index !== null || run.finished;
 
   const goto = useCallback((index: number) => {
-    setRun((r) => ({ index, finished: false, nonce: r.nonce + 1 }));
+    setRun((r) => ({ ...r, index, finished: false, nonce: r.nonce + 1 }));
   }, []);
 
   const start = useCallback(
-    (fromStepId?: string) => {
+    (fromStepId?: string, mode: "auto" | "manual" = "auto") => {
       if (visible.length === 0) return;
       const at = fromStepId ? visible.findIndex((s) => s.id === fromStepId) : 0;
       setWelcome(false);
       markSeen();
-      goto(Math.max(0, at));
+      setRun((r) => ({ index: Math.max(0, at), finished: false, auto: mode === "auto", nonce: r.nonce + 1 }));
     },
-    [visible, goto],
+    [visible],
   );
+
+  const toggleAuto = useCallback(() => setRun((r) => ({ ...r, auto: !r.auto })), []);
 
   const stop = useCallback(() => {
     markSeen();
-    setRun((r) => ({ index: null, finished: false, nonce: r.nonce + 1 }));
+    setRun((r) => ({ ...r, index: null, finished: false, nonce: r.nonce + 1 }));
   }, []);
 
   const finish = useCallback(() => {
     markSeen();
-    setRun((r) => ({ index: null, finished: true, nonce: r.nonce + 1 }));
+    setRun((r) => ({ ...r, index: null, finished: true, nonce: r.nonce + 1 }));
   }, []);
 
   // First visit: offer the tour once the console has painted.
@@ -113,7 +254,9 @@ export function TourProvider({ steps, role, children }: { steps: TourStep[]; rol
       {welcome && !active && (
         <WelcomeSheet
           count={visible.length}
-          onStart={() => start()}
+          lang={lang}
+          onLang={setLang}
+          onStart={(mode) => start(undefined, mode)}
           onLater={() => {
             markSeen();
             setWelcome(false);
@@ -128,7 +271,10 @@ export function TourProvider({ steps, role, children }: { steps: TourStep[]; rol
             onGoto={goto}
             onFinish={finish}
             onStop={stop}
-            onRestart={() => goto(0)}
+            onRestart={() => start(undefined, "auto")}
+            onToggleAuto={toggleAuto}
+            lang={lang}
+            onLang={setLang}
           />,
           document.body,
         )}
@@ -170,6 +316,23 @@ function CompassIcon({ className }: { className?: string }) {
   );
 }
 
+function PlayIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M4.5 2.9v10.2c0 .6.7 1 1.2.7l8-5.1c.5-.3.5-1.1 0-1.4l-8-5.1c-.5-.3-1.2.1-1.2.7Z" />
+    </svg>
+  );
+}
+
+function PauseIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" className={className} aria-hidden="true">
+      <rect x="3.5" y="2.5" width="3.2" height="11" rx="1" />
+      <rect x="9.3" y="2.5" width="3.2" height="11" rx="1" />
+    </svg>
+  );
+}
+
 function SparkleIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -183,10 +346,23 @@ function SparkleIcon({ className }: { className?: string }) {
 /* Welcome sheet                                                                               */
 /* ------------------------------------------------------------------------------------------ */
 
-function WelcomeSheet({ count, onStart, onLater }: { count: number; onStart: () => void; onLater: () => void }) {
+function WelcomeSheet({
+  count,
+  lang,
+  onLang,
+  onStart,
+  onLater,
+}: {
+  count: number;
+  lang: TourLang;
+  onLang: (l: TourLang) => void;
+  onStart: (mode: "auto" | "manual") => void;
+  onLater: () => void;
+}) {
   const startRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
   const minutes = Math.max(1, Math.round((count * SECONDS_PER_STEP) / 60));
+  const t = UI[lang];
 
   useEffect(() => {
     startRef.current?.focus({ preventScroll: true });
@@ -208,33 +384,41 @@ function WelcomeSheet({ count, onStart, onLater }: { count: number; onStart: () 
         className="tour-pop relative w-full max-w-md overflow-hidden rounded-3xl border border-white/10 bg-card/75 p-6 shadow-[0_30px_80px_rgb(0_0_0/0.55)] backdrop-blur-2xl backdrop-saturate-150 sm:p-7"
       >
         <div aria-hidden="true" className="pointer-events-none absolute -top-24 left-1/2 size-56 -translate-x-1/2 rounded-full bg-accent/25 blur-3xl" />
-        <div className="relative">
+        <LangSwitch lang={lang} onLang={onLang} className="absolute top-4 right-4 z-10" />
+        <div className="relative" lang={lang}>
           <div className="mx-auto mb-4 grid size-12 place-items-center rounded-2xl bg-accent/15 text-accent ring-1 ring-accent/25">
             <SparkleIcon className="tour-twinkle size-6" />
           </div>
           <h2 id={titleId} className="text-center text-[1.375rem] font-bold tracking-tight text-fg">
-            Welcome to FraudLens
+            {t.welcomeTitle}
           </h2>
-          <p className="mx-auto mt-2 max-w-sm text-center text-[0.9375rem] leading-relaxed text-fg-3">
-            Real-time fraud decisions for mobile money. Take a quick guided walk through the console and see how a
-            risky payment becomes a case, a decision and a refund.
-          </p>
+          <p className="mx-auto mt-2 max-w-sm text-center text-[0.9375rem] leading-relaxed text-fg-3">{t.welcomeBody}</p>
           <div className="mt-4 flex items-center justify-center gap-2 text-xs text-fg-4">
-            <span className="rounded-full bg-white/6 px-2.5 py-1 tabular-nums">{count} steps</span>
-            <span className="rounded-full bg-white/6 px-2.5 py-1">about {minutes} min</span>
+            <span className="rounded-full bg-white/6 px-2.5 py-1 tabular-nums">{t.steps(count)}</span>
+            <span className="rounded-full bg-white/6 px-2.5 py-1">{t.minutes(minutes)}</span>
           </div>
-          <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-center">
-            <button type="button" onClick={onLater} className="rounded-xl px-4 py-2.5 text-[0.9375rem] text-fg-3 hover:bg-white/6 hover:text-fg">
-              Maybe later
-            </button>
+          <div className="mt-6 flex flex-col gap-2">
             <button
               ref={startRef}
               type="button"
-              onClick={onStart}
-              className="rounded-xl bg-accent px-5 py-2.5 text-[0.9375rem] font-semibold text-accent-ink shadow-[0_8px_24px_rgb(168_188_161/0.25)] hover:brightness-110"
+              onClick={() => onStart("auto")}
+              className="flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-2.5 text-[0.9375rem] font-semibold text-accent-ink shadow-[0_8px_24px_rgb(168_188_161/0.25)] hover:brightness-110"
             >
-              Start tour
+              <PlayIcon className="size-4" />
+              {t.watch}
             </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => onStart("manual")}
+                className="flex-1 rounded-xl bg-white/6 px-4 py-2.5 text-[0.9375rem] font-medium text-fg-2 hover:bg-white/10 hover:text-fg"
+              >
+                {t.manual}
+              </button>
+              <button type="button" onClick={onLater} className="flex-1 rounded-xl px-4 py-2.5 text-[0.9375rem] text-fg-3 hover:bg-white/6 hover:text-fg">
+                {t.later}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -373,6 +557,9 @@ function TourOverlay({
   onFinish,
   onStop,
   onRestart,
+  onToggleAuto,
+  lang,
+  onLang,
 }: {
   steps: TourStep[];
   run: RunState;
@@ -380,12 +567,16 @@ function TourOverlay({
   onFinish: () => void;
   onStop: () => void;
   onRestart: () => void;
+  onToggleAuto: () => void;
+  lang: TourLang;
+  onLang: (l: TourLang) => void;
 }) {
   const router = useRouter();
   const reduced = useReducedMotion();
   const titleId = useId();
 
-  const { index, finished, nonce } = run;
+  const { index, finished, nonce, auto } = run;
+  const t = UI[lang];
   const step = index !== null ? steps[index] : null;
   const total = steps.length;
 
@@ -409,16 +600,18 @@ function TourOverlay({
     /** data-tour name of the target, so a remounted element can be found again. */
     name: null as string | null,
     placement: "auto" as TourStep["placement"],
+    action: undefined as TourStep["action"],
     reduced: false,
     nonce: -1,
     movingUntil: 0,
-    cursor: { x: -1, y: -1, fromX: 0, fromY: 0, ctrlX: 0, ctrlY: 0, t0: 0, dur: 0, animating: false, bend: 1 },
+    cursor: { x: -1, y: -1, fromX: 0, fromY: 0, ctrlX: 0, ctrlY: 0, t0: 0, dur: 0, animating: false, bend: 1, arrivedAt: 0 },
   });
 
   useEffect(() => {
     const l = live.current;
     l.reduced = reduced;
     l.placement = step?.placement ?? "auto";
+    l.action = step?.action;
     if (l.target !== target || l.nonce !== nonce) {
       l.movingUntil = performance.now() + (reduced ? 0 : MOVE_MS);
       l.nonce = nonce;
@@ -581,15 +774,22 @@ function TourOverlay({
             c.ctrlX = mx + nx * bend;
             c.ctrlY = my + ny * bend;
           }
-          const t = Math.min((now - c.t0) / c.dur, 1);
-          const e = easeInOut(t);
+          const p = Math.min((now - c.t0) / c.dur, 1);
+          const e = easeInOut(p);
           const u = 1 - e;
           c.x = u * u * c.fromX + 2 * u * e * c.ctrlX + e * e * tx;
           c.y = u * u * c.fromY + 2 * u * e * c.ctrlY + e * e * ty;
-          if (t >= 1) {
+          if (p >= 1) {
             c.animating = false;
+            c.arrivedAt = now;
             setArrived(l.nonce);
           }
+        } else if (l.action === "hover" && !l.reduced && (box.width > 220 || box.height > 140)) {
+          // A big panel: the cursor reads it, sweeping a slow figure-eight across it like a person would.
+          const k = (now - c.arrivedAt) / 1000;
+          const amp = Math.min(k / 0.9, 1);
+          c.x = tx + Math.max(box.width / 2 - 40, 0) * 0.78 * amp * Math.sin(k * 0.85);
+          c.y = ty + Math.max(box.height / 2 - 28, 0) * 0.6 * amp * Math.sin(k * 1.7);
         } else {
           c.x = tx;
           c.y = ty;
@@ -619,6 +819,12 @@ function TourOverlay({
     if (index !== null && index > 0) onGoto(index - 1);
   }, [index, onGoto]);
 
+  const body = step ? bodyOf(step, lang) : "";
+  const dwell = dwellFor(body, lang);
+  const landedNow = arrived === nonce;
+  const counting = auto && isReady && !finished && !!step && (landedNow || !showCursor);
+  useCountdown(counting, dwell, nonce, next);
+
   // Keyboard: arrows/Enter step, Esc leaves, Tab stays inside the tour.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -635,6 +841,9 @@ function TourOverlay({
       } else if (e.key === "Enter" && !inButton && !finished) {
         e.preventDefault();
         next();
+      } else if (e.key === " " && !finished) {
+        e.preventDefault();
+        onToggleAuto();
       } else if (e.key === "Tab") {
         const focusables = Array.from(rootRef.current?.querySelectorAll<HTMLElement>("button:not(:disabled)") ?? []);
         if (focusables.length === 0) return;
@@ -646,7 +855,7 @@ function TourOverlay({
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [next, back, onStop, finished]);
+  }, [next, back, onStop, onToggleAuto, finished]);
 
   const chapters = useMemo(() => {
     const groups: { chapter: string; items: { step: TourStep; i: number }[] }[] = [];
@@ -714,12 +923,12 @@ function TourOverlay({
         className="tour-fade fixed top-3 left-1/2 flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-2 overflow-x-auto rounded-full border border-white/10 bg-card/95 px-3 py-1.5 shadow-[0_10px_30px_rgb(0_0_0/0.4)] backdrop-blur-2xl"
       >
         <span className="mr-0.5 hidden max-w-36 truncate text-xs font-medium text-accent sm:block">
-          {finished ? "Complete" : step?.chapter}
+          {finished ? t.complete : step ? chapterName(step.chapter, lang) : null}
         </span>
         {chapters.map((g) => {
           const current = !finished && g.items.some((it) => it.i === index);
           return (
-            <div key={`${g.chapter}-${g.items[0].i}`} title={g.chapter} className={cx("flex items-center rounded-full px-0.5", current && "bg-white/6")}>
+            <div key={`${g.chapter}-${g.items[0].i}`} title={chapterName(g.chapter, lang)} className={cx("flex items-center rounded-full px-0.5", current && "bg-white/6")}>
               {g.items.map(({ step: s, i }) => {
                 const done = finished || (index !== null && i < index);
                 const here = !finished && i === index;
@@ -730,6 +939,7 @@ function TourOverlay({
                     tabIndex={-1}
                     onClick={() => onGoto(i)}
                     aria-label={`Step ${i + 1}: ${s.title}`}
+                    title={titleOf(s, lang)}
                     aria-current={here ? "step" : undefined}
                     className="grid h-5 place-items-center px-[3px] active:scale-90"
                   >
@@ -762,25 +972,59 @@ function TourOverlay({
       >
         <span ref={arrowRef} aria-hidden="true" className="absolute hidden size-3 rotate-45 rounded-[2px] bg-card" />
         {finished ? (
-          <FinishCard titleId={titleId} total={total} onRestart={onRestart} onDone={onStop} doneRef={nextRef} reduced={reduced} />
+          <FinishCard titleId={titleId} total={total} onRestart={onRestart} onDone={onStop} doneRef={nextRef} reduced={reduced} lang={lang} />
         ) : step ? (
-          <div className="relative p-4 sm:p-5">
-            <div className="flex items-center justify-between gap-3 text-xs">
-              <span className="truncate font-semibold tracking-wide text-accent uppercase">{step.chapter}</span>
+          <div className="relative overflow-hidden rounded-2xl p-4 sm:p-5">
+            {auto && (
+              <div aria-hidden="true" className="absolute inset-x-0 top-0 h-[3px] bg-white/6">
+                <div
+                  key={nonce}
+                  className="tour-count h-full bg-accent"
+                  style={{ animationDuration: `${dwell}ms`, animationPlayState: counting ? "running" : "paused" }}
+                />
+              </div>
+            )}
+            <div className="flex items-center gap-2 text-xs">
+              <span lang={lang} className="min-w-0 flex-1 truncate font-semibold tracking-wide text-accent uppercase">
+                {chapterName(step.chapter, lang)}
+              </span>
+              <LangSwitch lang={lang} onLang={onLang} />
               <span className="shrink-0 text-fg-4 tabular-nums">
-                {index! + 1} / {total}
+                {t.num(index! + 1)} / {t.num(total)}
               </span>
             </div>
-            <h2 id={titleId} className="mt-2 text-[1.0625rem] leading-snug font-semibold tracking-tight text-fg">
-              {step.title}
-            </h2>
-            <TypedText key={nonce} text={step.body} run={isReady} instant={reduced} />
+            <div lang={lang}>
+              <h2 id={titleId} className="mt-2.5 text-[1.0625rem] leading-snug font-semibold tracking-tight text-fg">
+                {titleOf(step, lang)}
+              </h2>
+              <TypedText key={`${nonce}-${lang}`} text={body} run={isReady} instant={reduced} />
+            </div>
             <div className="mt-4 h-1 overflow-hidden rounded-full bg-white/8">
               <div className="h-full rounded-full bg-accent transition-[width] duration-500 ease-ios" style={{ width: `${progress}%` }} />
             </div>
-            <div className="mt-4 flex items-center gap-2">
+            <div className="mt-4 flex items-center gap-1.5" lang={lang}>
+              <button
+                type="button"
+                onClick={onToggleAuto}
+                aria-label={auto ? t.pause : t.play}
+                title={`${auto ? t.pause : t.play} (Space)`}
+                className={cx(
+                  "flex items-center gap-1.5 rounded-full py-1 pr-2.5 pl-2 text-xs font-semibold",
+                  auto ? "bg-accent/15 text-accent" : "bg-white/8 text-fg-3 hover:text-fg",
+                )}
+              >
+                {auto ? <PauseIcon className="size-3" /> : <PlayIcon className="size-3" />}
+                {auto ? (
+                  <span className="flex items-center gap-1">
+                    <span className="tour-live size-1.5 rounded-full bg-accent" />
+                    {t.live}
+                  </span>
+                ) : (
+                  t.paused
+                )}
+              </button>
               <button type="button" onClick={onStop} className="mr-auto rounded-lg px-2 py-1.5 text-sm text-fg-4 hover:bg-white/6 hover:text-fg-2">
-                Skip
+                {t.skip}
               </button>
               <button
                 type="button"
@@ -788,7 +1032,7 @@ function TourOverlay({
                 disabled={index === 0}
                 className="rounded-xl px-3 py-1.5 text-sm font-medium text-fg-2 hover:bg-white/8 disabled:opacity-35"
               >
-                Back
+                {t.back}
               </button>
               <button
                 ref={nextRef}
@@ -796,7 +1040,7 @@ function TourOverlay({
                 onClick={next}
                 className="rounded-xl bg-accent px-4 py-1.5 text-sm font-semibold text-accent-ink hover:brightness-110"
               >
-                {index === total - 1 ? "Finish" : "Next"}
+                {index === total - 1 ? t.finish : t.next}
               </button>
             </div>
           </div>
@@ -809,7 +1053,7 @@ function TourOverlay({
         {finished
           ? "Tour complete. You're ready."
           : step && isReady
-            ? `Step ${index! + 1} of ${total}: ${step.title}. ${step.body}`
+            ? `${t.num(index! + 1)} / ${t.num(total)}: ${titleOf(step, lang)}. ${body}`
             : ""}
       </div>
     </div>
@@ -820,29 +1064,38 @@ function TourOverlay({
 /* Card pieces                                                                                 */
 /* ------------------------------------------------------------------------------------------ */
 
+/** Splits into user-perceived characters, so Bangla vowel signs never dangle mid-typing. */
+function graphemes(text: string): string[] {
+  if (typeof Intl !== "undefined" && "Segmenter" in Intl) {
+    return Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text), (s) => s.segment);
+  }
+  return Array.from(text);
+}
+
 function TypedText({ text, run, instant }: { text: string; run: boolean; instant: boolean }) {
+  const parts = useMemo(() => graphemes(text), [text]);
   const [n, setN] = useState(0);
   useEffect(() => {
     if (!run || instant) return;
     const id = window.setInterval(() => {
       setN((v) => {
-        if (v >= text.length) {
+        if (v >= parts.length) {
           window.clearInterval(id);
           return v;
         }
         return v + 2;
       });
-    }, 14);
+    }, 16);
     return () => window.clearInterval(id);
-  }, [run, instant, text]);
-  const shown = instant ? text.length : n;
+  }, [run, instant, parts]);
+  const shown = instant ? parts.length : Math.min(n, parts.length);
   return (
     <p className="mt-1.5 text-[0.9375rem] leading-relaxed text-fg-3">
       <span className="sr-only">{text}</span>
       <span aria-hidden="true">
-        {text.slice(0, shown)}
-        {shown < text.length && <span className="tour-caret" />}
-        <span className="invisible">{text.slice(shown)}</span>
+        {parts.slice(0, shown).join("")}
+        {shown < parts.length && <span className="tour-caret" />}
+        <span className="invisible">{parts.slice(shown).join("")}</span>
       </span>
     </p>
   );
@@ -855,6 +1108,7 @@ function FinishCard({
   onDone,
   doneRef,
   reduced,
+  lang,
 }: {
   titleId: string;
   total: number;
@@ -862,7 +1116,9 @@ function FinishCard({
   onDone: () => void;
   doneRef: React.RefObject<HTMLButtonElement | null>;
   reduced: boolean;
+  lang: TourLang;
 }) {
+  const t = UI[lang];
   return (
     <div className="relative overflow-hidden rounded-2xl p-6 text-center">
       <div aria-hidden="true" className="pointer-events-none absolute -top-20 left-1/2 size-48 -translate-x-1/2 rounded-full bg-accent/25 blur-3xl" />
@@ -872,15 +1128,14 @@ function FinishCard({
         </svg>
       </div>
       <h2 id={titleId} className="relative mt-4 text-[1.375rem] font-bold tracking-tight text-fg">
-        You&rsquo;re ready
+        {t.readyTitle}
       </h2>
-      <p className="relative mx-auto mt-2 max-w-xs text-[0.9375rem] leading-relaxed text-fg-3">
-        That&rsquo;s all {total} stops. Replay it anytime from <span className="text-accent">Take the tour</span>, the compass
-        button.
+      <p lang={lang} className="relative mx-auto mt-2 max-w-xs text-[0.9375rem] leading-relaxed text-fg-3">
+        {t.readyBody(total)}
       </p>
       <div className="relative mt-5 flex justify-center gap-2">
         <button type="button" onClick={onRestart} className="rounded-xl px-4 py-2 text-sm font-medium text-fg-2 hover:bg-white/8">
-          Restart
+          {t.restart}
         </button>
         <button
           ref={doneRef}
@@ -888,7 +1143,7 @@ function FinishCard({
           onClick={onDone}
           className="rounded-xl bg-accent px-5 py-2 text-sm font-semibold text-accent-ink hover:brightness-110"
         >
-          Done
+          {t.done}
         </button>
       </div>
     </div>
@@ -977,6 +1232,10 @@ const CSS_TEXT = `
 .tour-ripple{border:2px solid var(--tour-accent);animation:tour-ripple 2.4s ease-out infinite}
 .tour-glow{background:radial-gradient(circle,color-mix(in oklab,var(--tour-accent) 55%,transparent),transparent 65%);animation:tour-glow 1.6s ease-in-out infinite}
 .tour-caret{display:inline-block;width:2px;height:1em;margin-left:1px;vertical-align:-.15em;background:var(--tour-accent);animation:tour-blink .9s steps(1) infinite}
+.tour-count{width:0;animation:tour-count linear forwards}
+.tour-live{animation:tour-live 1.4s ease-in-out infinite}
+@keyframes tour-count{to{width:100%}}
+@keyframes tour-live{50%{opacity:.25}}
 .tour-twinkle{animation:tour-twinkle 2.6s ease-in-out infinite}
 .tour-check{stroke-dasharray:24;stroke-dashoffset:24;animation:tour-draw .5s .25s var(--ease-ios) forwards}
 @keyframes tour-fade{from{opacity:0}}
