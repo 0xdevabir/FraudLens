@@ -439,6 +439,7 @@ Keep two browser windows open: one as `analyst1`, one private window as `supervi
 | [DATA_ASSUMPTIONS.md](docs/DATA_ASSUMPTIONS.md) | What the synthetic world contains and what it leaves out |
 | [MODEL_CARD.md](docs/MODEL_CARD.md) | Models, results, ablations, fairness, limits |
 | [DECISION_POLICY.md](docs/DECISION_POLICY.md) | Tiers, rules, thresholds, explanations, the language model's role |
+| [BUSINESS_CASE.md](docs/BUSINESS_CASE.md) | The threshold sweep as a monthly P&L in taka, assumptions and sensitivity |
 | [PLATFORM.md](docs/PLATFORM.md) | API, workflow, security, stream, measured latency |
 | [FRAUD_TAXONOMY.md](docs/FRAUD_TAXONOMY.md) | Eight kinds of fraud in the Bangladesh context, what detects each, the scam-message classifier and its limits |
 | [DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | The walk-through |
