@@ -2,7 +2,7 @@ import type { Role } from "@/lib/types";
 
 import type { TourStep } from "./types";
 
-// Role sets mirror NAV in components/session.tsx, so nobody is walked to a page they cannot open.
+// Role sets mirror NAV in lib/nav.ts, so nobody is walked to a page they cannot open.
 const REVIEW: Role[] = ["analyst", "supervisor"];
 const AUDIT: Role[] = ["supervisor", "admin"];
 
@@ -20,6 +20,7 @@ export const TOUR_STEPS: TourStep[] = [
     id: "brand",
     chapter: "Navigation",
     target: "brand",
+    mobileTarget: "bottom-nav",
     placement: "right",
     title: "Your console",
     body: "The sidebar is grouped by job: business impact, investigation, the mule network, model governance and the customer view.",
@@ -28,6 +29,7 @@ export const TOUR_STEPS: TourStep[] = [
     id: "nav-investigate",
     chapter: "Navigation",
     target: "nav-group-investigate",
+    mobileTarget: "tab-alerts",
     placement: "right",
     action: "hover",
     roles: REVIEW,
@@ -38,6 +40,7 @@ export const TOUR_STEPS: TourStep[] = [
     id: "nav-governance",
     chapter: "Navigation",
     target: "nav-group-model-and-policy",
+    mobileTarget: "tab-model",
     placement: "right",
     action: "hover",
     roles: ["admin"],
@@ -48,6 +51,7 @@ export const TOUR_STEPS: TourStep[] = [
     id: "serving",
     chapter: "Navigation",
     target: "serving",
+    mobileTarget: "bottom-nav",
     placement: "right",
     title: "What is deciding right now",
     body: "The live model and policy versions. If the model goes down this turns amber and decisions fall back to rules alone.",
@@ -235,6 +239,7 @@ export const TOUR_STEPS: TourStep[] = [
     id: "nav-phone",
     chapter: "Customer demo",
     target: "nav-phone",
+    mobileTarget: "tab-more",
     placement: "right",
     action: "click",
     title: "See the customer side",

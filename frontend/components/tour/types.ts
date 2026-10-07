@@ -9,6 +9,8 @@ export interface TourStep {
   route?: string;
   /** `data-tour` attribute value of the element to spotlight. Omit for a centred card. */
   target?: string;
+  /** Target used below the lg breakpoint, where the sidebar is hidden (e.g. a bottom-nav tab). */
+  mobileTarget?: string;
   title: string;
   body: string;
   placement?: "top" | "bottom" | "left" | "right" | "auto";

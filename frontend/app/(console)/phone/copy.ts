@@ -171,7 +171,7 @@ export const T = {
   newPayment: { bn: "নতুন লেনদেন", en: "New payment" },
   reportForRefund: { bn: "প্রতারিত হয়েছেন? অভিযোগ করে টাকা ফেরত চান", en: "Scammed? Report it to claim your money back" },
   refundTitle: { bn: "টাকা ফেরতের অবস্থা", en: "Your refund" },
-  refundBy: { bn: "যত দেরিতেই হোক, জানাব", en: "We'll tell you by" },
+  refundBy: { bn: "উত্তর পাবেন সর্বশেষ", en: "We'll tell you by" },
   refundNoFee: {
     bn: "টাকা ফেরত পেতে কাউকে পিন, ওটিপি বা কোনো ফি দিতে হয় না। কেউ চাইলে সে প্রতারক।",
     en: "You never give a PIN, OTP or fee to get a refund. Anyone who asks is a scammer.",
