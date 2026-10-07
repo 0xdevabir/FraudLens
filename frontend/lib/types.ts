@@ -619,3 +619,92 @@ export interface Scenario {
   expected_tier: Tier;
   payment: { sender_id: string; receiver_id: string; amount: number; type: string; district: string; sender_balance_before: number };
 }
+
+// ---- Consortium: simulated cross-provider mule intelligence (docs/CONSORTIUM.md)
+
+export interface ConsortiumFeed {
+  provider: string;
+  display: string;
+  seq: number;
+  issued_at: string;
+  valid_until: string;
+  confirmed_listings: number;
+  by_kind: Record<string, number>;
+  by_typology: Record<string, number>;
+  suspected_in_filter: number;
+  filter_bits: number;
+  filter_hashes: number;
+  withdrawn: number;
+  bytes: number;
+  signature_ok: boolean;
+  key_fingerprint: string;
+}
+
+export interface ConsortiumDispute {
+  dispute_id: string;
+  listing_id: string;
+  owner: string;
+  raised_by: string;
+  reason: string;
+  opened_at: string;
+  status: "open" | "upheld" | "withdrawn";
+  resolved_at: string | null;
+  resolved_by: string | null;
+}
+
+export type SeedStat = { mean: number; min: number; max: number } | null;
+
+export interface ConsortiumOverview {
+  clock: string;
+  key_epoch: string;
+  oprf_key_fingerprint: string;
+  members: { name: string; display: string; key_fingerprint: string; quota_per_day: number; disputes_against: number; withdrawn_after_dispute: number }[];
+  feeds: ConsortiumFeed[];
+  guarantees: string[];
+  audit: { entries: number; chain_ok: boolean; head: string };
+  disputes: ConsortiumDispute[];
+  results: {
+    model_version: string;
+    seeds: number[];
+    headline_share: number;
+    sim_shares: number[];
+    listing_confidence: { confirmed: number; suspected: number; confirmed_basis: string; suspected_basis: string };
+    results_by_shared_sim_rate: Record<string, { summary: Record<string, Record<string, SeedStat>> }>;
+    poisoning: { listings: number; by: string; clean: Record<string, Record<string, number | null>>; attacked: Record<string, Record<string, number | null>> };
+    cost: { oprf: { client_ms_per_token: number; hub_ms_per_token: number }; tokens_made: number };
+  };
+}
+
+export interface ConsortiumMatch {
+  wallet_id: string;
+  at: string;
+  home: string;
+  partners: string[];
+  kinds: string[];
+  status: "confirmed" | "suspected";
+  confidence: number;
+  typology: string;
+  listing_ids: string[];
+  mule_score: number;
+  mule_model_alone_would_alert: boolean;
+  transfers_matched: number;
+  simulation_truth: string;
+}
+
+export interface ConsortiumAuditEntry {
+  n: number;
+  at: string;
+  by: string;
+  event: string;
+  detail: Record<string, unknown>;
+  prev: string;
+  hash: string;
+}
+
+export interface ConsortiumLookup {
+  wallet_id: string;
+  home: string;
+  identifiers_checked: { msisdn: number; device: number };
+  signal: number;
+  matches: { provider: string; kind: string; status: string; confidence: number; typology: string; listing_id: string | null }[];
+}

@@ -26,7 +26,19 @@ from ..platform.security import RateLimiter, check_production
 from ..platform.stream import Worker
 from .deps import Platform
 from .middleware import RequestContext, error_body
-from .routes import alerts, auth, cases, customer, demo, intel, mlops, network, ops, scoring
+from .routes import (
+    alerts,
+    auth,
+    cases,
+    consortium,
+    customer,
+    demo,
+    intel,
+    mlops,
+    network,
+    ops,
+    scoring,
+)
 
 log = logging.getLogger(__name__)
 
@@ -165,7 +177,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     for kind in (OperationalError, InterfaceError, RedisError):
         app.add_exception_handler(kind, unavailable)
 
-    for module in (auth, scoring, alerts, cases, network, customer, intel, ops, mlops):
+    for module in (auth, scoring, alerts, cases, network, customer, intel, ops, mlops,
+                   consortium):  # fmt: skip
         app.include_router(module.router, prefix="/v1")
     if not settings.production:  # stand-ins for the customer app; see routes/demo.py
         app.include_router(demo.router, prefix="/v1")

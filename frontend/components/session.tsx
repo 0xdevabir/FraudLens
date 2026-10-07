@@ -52,6 +52,7 @@ const NAV: { heading: string; items: { href: string; label: string; roles: Role[
     items: [
       { href: "/network", label: "Network explorer", roles: ["analyst", "supervisor"] },
       { href: "/rings", label: "Mule rings", roles: ["analyst", "supervisor"] },
+      { href: "/consortium", label: "Mule consortium", roles: ["analyst", "supervisor"] },
       { href: "/agents", label: "Agent risk", roles: ["analyst", "supervisor"] },
     ],
   },
