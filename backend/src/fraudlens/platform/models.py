@@ -231,6 +231,25 @@ class ShadowScore(Base):
     created_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
 
 
+class PendingDecision(Base):
+    """A transaction that is in the state and still waits for its decision.
+
+    A stream worker applies recorded events in order under the scorer's lock and
+    decides them after releasing it (PLATFORM §8). The feature vector is kept here,
+    committed with the transaction, so whichever worker finishes the work makes the
+    same decision; the row is deleted in the commit that writes the decision.
+    """
+
+    __tablename__ = "pending_decisions"
+
+    txn_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("transactions.txn_id", ondelete="CASCADE"), primary_key=True
+    )
+    features: Mapped[list[float]] = mapped_column(ARRAY(Float(53)))
+    context: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
+
+
 class CaseEvent(Base):
     """The case timeline: who did what, in order. Rows are never changed."""
 

@@ -230,9 +230,12 @@ and each request still needs its own approval by a second person.
 
 ## 8. Stream and live feed
 
-`POST /v1/events` appends to a Redis stream; a worker thread in the API process
-reads it through a consumer group, in order, in batches, and acknowledges after
-the batch is committed. An entry that cannot be parsed or fails validation goes
+`POST /v1/events` appends to a Redis stream. Workers read it through one consumer
+group: a thread in the API process, and as many `fraudlens.platform.worker`
+processes as the load needs (`make worker`). They put entries into the feature
+state in stream order and decide them in parallel; an entry is acknowledged and
+deleted once its decision is committed, and one held by a worker that died is
+taken over by another. SCALING.md has the design and the measurements. An entry that cannot be parsed or fails validation goes
 to a dead-letter stream with the reason and does not block the ones behind it.
 Entries delivered before a crash are handled first after a restart, and since
 scoring is idempotent a redelivery is harmless. If the backlog passes 200,000 the
@@ -256,9 +259,11 @@ written before they existed is refused at load (`make features` rebuilds it).
 
 ## 10. Limits, stated plainly
 
-- **One scorer process.** The feature state is in one process's memory, so the
-  API cannot be scaled by adding copies. Scaling out means partitioning by wallet
-  or moving the state to a shared store; neither is built.
+- **One ordered step.** Every process holds the whole feature state and catches
+  up from the log, so workers and API copies can be added, but putting events
+  into the state stays serialised behind one lock. Measured in SCALING.md:
+  throughput stops growing at a few workers. Going further means partitioning
+  the state by wallet, which is not built.
 - **Recovery time grows** with the number of transactions since the snapshot. A
   production system would write snapshots periodically; this one has only the
   end-of-history snapshot.
@@ -331,7 +336,7 @@ same two rows: the figures depend heavily on what else the machine is doing.
 292,567 events in just under six minutes, about 855 events a second. In the
 earlier run eight concurrent what-if callers got 194 answers a second with a p95
 of 51 ms: scoring is serialised in one process, so concurrency adds waiting, not
-capacity (§10). For scale: the simulated system averages 0.14 transactions a
+capacity (§10). Several stream workers are measured in SCALING.md. For scale: the simulated system averages 0.14 transactions a
 second.
 
 **Restart.** With all 304,867 events since the snapshot to re-apply, the service

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 
 import redis.asyncio as aioredis
@@ -96,10 +97,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.aredis = aioredis.from_url(settings.redis_url, decode_responses=True)
         if settings.run_worker:
             platform.worker.start()
+        # Stream workers in other processes change the state too: follow the log.
+        following = threading.Event()
+        if settings.follow_interval_s > 0:
+            threading.Thread(
+                target=platform.scorer.follow,
+                args=(following, settings.follow_interval_s),
+                name="fraudlens-follower",
+                daemon=True,
+            ).start()
         log.info("fraudlens api ready: scoring in %s mode", platform.scorer.mode)
         try:
             yield
         finally:
+            following.set()
             platform.worker.stop()
             if platform.worker.is_alive():
                 platform.worker.join(timeout=5.0)
