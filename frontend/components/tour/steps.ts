@@ -160,6 +160,20 @@ export const TOUR_STEPS: TourStep[] = [
     bodyBn: "প্রতারণা নিশ্চিত হলে প্রতারকের অ্যাকাউন্ট ফ্রিজ করে বাকি টাকা ক্ষতিগ্রস্তদের ফেরত দেওয়া হয়। টাকা পৌঁছানো পর্যন্ত প্রতিটা রিফান্ড ট্র্যাক করা যায়।",
   },
 
+  {
+    id: "blocklist",
+    chapter: "Operations",
+    route: "/blocklist",
+    target: "blocklist-list",
+    placement: "top",
+    action: "hover",
+    roles: REVIEW,
+    title: "Known scam numbers",
+    body: "Wallets, phone numbers and links already used by scammers. If someone tries to pay one, they are asked to check and wait first.",
+    titleBn: "চেনা প্রতারকদের তালিকা",
+    bodyBn: "প্রতারকেরা আগে যেসব ওয়ালেট, ফোন নম্বর আর লিংক ব্যবহার করেছে, সেগুলো এখানে। কেউ এগুলোতে টাকা পাঠাতে গেলে আগে যাচাই করে একটু অপেক্ষা করতে বলা হয়।",
+  },
+
   // Investigation
   {
     id: "network",
@@ -274,6 +288,33 @@ export const TOUR_STEPS: TourStep[] = [
     body: "Every decision, freeze and refund is recorded here, with who did it and from where. Nothing happens without a record.",
     titleBn: "কে কী করেছে",
     bodyBn: "প্রতিটা সিদ্ধান্ত, ফ্রিজ আর রিফান্ড এখানে লেখা থাকে, কে করেছে আর কোথা থেকে করেছে সহ। রেকর্ড ছাড়া কিছুই হয় না।",
+  },
+
+  {
+    id: "webhooks",
+    chapter: "Governance",
+    route: "/webhooks",
+    target: "webhooks-endpoints",
+    placement: "bottom",
+    action: "hover",
+    roles: AUDIT,
+    title: "Instant alerts to other systems",
+    body: "When a payment is held or a wallet is frozen, FraudLens can tell your other systems right away, and text the customer if SMS is on.",
+    titleBn: "অন্য সিস্টেমে সাথে সাথে খবর",
+    bodyBn: "কোনো পেমেন্ট আটকালে বা ওয়ালেট ফ্রিজ হলে FraudLens সাথে সাথে আপনার অন্য সিস্টেমকে জানাতে পারে, আর SMS চালু থাকলে গ্রাহককেও মেসেজ পাঠায়।",
+  },
+  {
+    id: "api-keys",
+    chapter: "Governance",
+    route: "/api-keys",
+    target: "api-keys-list",
+    placement: "bottom",
+    action: "hover",
+    roles: AUDIT,
+    title: "Keys for partner apps",
+    body: "Give a wallet app its own key to check payments with FraudLens. Each key has a daily limit, shows its usage, and can be switched off anytime.",
+    titleBn: "পার্টনার অ্যাপের চাবি",
+    bodyBn: "কোনো ওয়ালেট অ্যাপকে আলাদা একটা চাবি (API key) দিন, যাতে তারা FraudLens দিয়ে পেমেন্ট চেক করতে পারে। প্রতিটার দৈনিক সীমা আছে, ব্যবহার দেখা যায়, আর যেকোনো সময় বন্ধ করা যায়।",
   },
 
   // Customer demo

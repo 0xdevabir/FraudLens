@@ -146,12 +146,12 @@ export default function ApiKeysPage() {
 
   return (
     <>
-      <PageHeader
+      <PageHeader tour="api-keys-header"
         title="Partner API keys"
         sub="Let a wallet app call the scoring endpoints with its own key: limited per minute and per day, counted, and revocable. Sandbox keys give canned answers and touch nothing."
         actions={<Button small variant="primary" onClick={() => setCreating(true)}>Make a key</Button>}
       />
-      <Card flush>
+      <Card flush tour="api-keys-list">
         <Async state={keys}>
           {(rows) =>
             rows.length ? (

@@ -585,7 +585,8 @@ function TourOverlay({
   const isReady = finished || ready?.nonce === nonce;
   const target = isReady && !finished ? (ready?.el ?? null) : null;
   const action = step?.action;
-  const showCursor = !!target && action !== "none" && !reduced;
+  // The guide's cursor never leaves while the tour runs, so the tour always reads as live.
+  const showCursor = !reduced && !finished;
 
   const rootRef = useRef<HTMLDivElement>(null);
   const holeRef = useRef<HTMLDivElement>(null);
@@ -604,7 +605,9 @@ function TourOverlay({
     reduced: false,
     nonce: -1,
     movingUntil: 0,
-    cursor: { x: -1, y: -1, fromX: 0, fromY: 0, ctrlX: 0, ctrlY: 0, t0: 0, dur: 0, animating: false, bend: 1, arrivedAt: 0 },
+    cursor: { x: -1, y: -1, fromX: 0, fromY: 0, ctrlX: 0, ctrlY: 0, t0: 0, dur: 0, animating: false, bend: 1, arrivedAt: 0, baseX: 0, baseY: 0 },
+    /** The card is showing, so the cursor can rest on its Next button when there is no target. */
+    ready: false,
   });
 
   useEffect(() => {
@@ -615,22 +618,14 @@ function TourOverlay({
     if (l.target !== target || l.nonce !== nonce) {
       l.movingUntil = performance.now() + (reduced ? 0 : MOVE_MS);
       l.nonce = nonce;
-      // Start a fresh cursor glide toward the new target.
+      // Start a fresh cursor glide; the frame loop picks its destination once there is one.
       const c = l.cursor;
-      if (target) {
-        if (c.x < 0) {
-          c.x = window.innerWidth * 0.62;
-          c.y = window.innerHeight * 0.82;
-        }
-        c.fromX = c.x;
-        c.fromY = c.y;
-        c.t0 = performance.now();
-        c.bend = -c.bend;
-        c.animating = true;
-        c.dur = 0;
-      }
+      c.bend = -c.bend;
+      c.animating = true;
+      c.dur = 0;
     }
     l.target = target;
+    l.ready = isReady;
   });
 
   // Resolve the step: navigate, wait for the target, scroll it into view.
@@ -759,11 +754,25 @@ function TourOverlay({
       // Cursor: glide on a bezier toward the (possibly moving) target centre, then stick to it.
       const cur = cursorRef.current;
       const c = l.cursor;
-      if (cur && box) {
-        const tx = box.left + box.width / 2;
-        const ty = box.top + box.height / 2;
+      // No target: rest on the card's Next button, as if about to press it.
+      let aim: Box | null = box;
+      const nextBtn = nextRef.current;
+      if (!aim && l.ready && nextBtn) {
+        const r = nextBtn.getBoundingClientRect();
+        if (r.width > 0) aim = { left: r.left, top: r.top, width: r.width, height: r.height };
+      }
+      if (cur && c.x < 0) {
+        c.x = c.baseX = vw * 0.62;
+        c.y = c.baseY = vh * 0.82;
+      }
+      if (cur && aim) {
+        const tx = aim.left + aim.width * (box ? 0.5 : 0.62);
+        const ty = aim.top + aim.height * (box ? 0.5 : 0.7);
         if (c.animating) {
           if (c.dur === 0) {
+            c.fromX = c.x;
+            c.fromY = c.y;
+            c.t0 = now;
             const dist = Math.hypot(tx - c.fromX, ty - c.fromY);
             c.dur = l.reduced ? 1 : Math.min(Math.max(dist * 1.1, 520), 1150);
             const mx = (c.fromX + tx) / 2;
@@ -784,16 +793,33 @@ function TourOverlay({
             c.arrivedAt = now;
             setArrived(l.nonce);
           }
-        } else if (l.action === "hover" && !l.reduced && (box.width > 220 || box.height > 140)) {
-          // A big panel: the cursor reads it, sweeping a slow figure-eight across it like a person would.
-          const k = (now - c.arrivedAt) / 1000;
-          const amp = Math.min(k / 0.9, 1);
-          c.x = tx + Math.max(box.width / 2 - 40, 0) * 0.78 * amp * Math.sin(k * 0.85);
-          c.y = ty + Math.max(box.height / 2 - 28, 0) * 0.6 * amp * Math.sin(k * 1.7);
-        } else {
+        } else if (l.reduced) {
           c.x = tx;
           c.y = ty;
+        } else {
+          const k = (now - c.arrivedAt) / 1000;
+          const amp = Math.min(k / 0.9, 1); // ease into the motion from the landing point
+          if (box && l.action === "hover" && (box.width > 220 || box.height > 140)) {
+            // A big panel: the cursor reads it, sweeping a slow figure-eight across it like a person would.
+            c.x = tx + Math.max(box.width / 2 - 40, 0) * 0.78 * amp * Math.sin(k * 0.85);
+            c.y = ty + Math.max(box.height / 2 - 28, 0) * 0.6 * amp * Math.sin(k * 1.7);
+          } else {
+            // Anything smaller: a restless hand, drifting inside the target on two out-of-step waves.
+            const ax = Math.min(Math.max(aim.width / 2 - 8, 6), 24) * amp;
+            const ay = Math.min(Math.max(aim.height / 2 - 6, 5), 12) * amp;
+            c.x = tx + ax * (0.7 * Math.sin(k * 1.3) + 0.3 * Math.sin(k * 3.1 + 1));
+            c.y = ty + ay * (0.7 * Math.sin(k * 1.8 + 0.6) + 0.3 * Math.sin(k * 2.7));
+          }
         }
+        c.baseX = c.x;
+        c.baseY = c.y;
+      } else if (cur && !l.reduced) {
+        // Waiting for the next page to render: hover in place instead of freezing.
+        const k = now / 1000;
+        c.x = c.baseX + 7 * Math.sin(k * 1.9);
+        c.y = c.baseY + 5 * Math.sin(k * 2.6 + 0.8);
+      }
+      if (cur && c.x >= 0) {
         cur.style.transform = `translate(${c.x}px, ${c.y}px)`;
       }
     };
