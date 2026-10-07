@@ -41,6 +41,7 @@ from .routes import (
     mlops,
     network,
     ops,
+    refunds,
     scoring,
 )
 
@@ -203,6 +204,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         alerts,
         cases,
         appeals,
+        refunds,
         network,
         customer,
         intel,

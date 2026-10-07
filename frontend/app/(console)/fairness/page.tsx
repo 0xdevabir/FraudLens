@@ -189,7 +189,7 @@ function Fairness({ fairness, version, mitigation }: { fairness: Insights["fairn
   const order = [...Object.keys(DIMENSION).filter((name) => name in groups), ...Object.keys(groups).filter((name) => !(name in DIMENSION))];
   return (
     <>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div data-tour="fairness-kpis" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Honest payments interrupted" value={pct(fairness.overall.false_alert_rate, 2)} sub="overall false-positive rate, any alert" />
         <Stat label="Honest payments held" value={pct(fairness.overall.false_hold_rate, 3)} sub="held for a reviewer, the costliest mistake" />
         <Stat
@@ -255,7 +255,7 @@ export default function FairnessPage() {
   const report = useApi<Report>("/v1/model/report");
   return (
     <>
-      <PageHeader
+      <PageHeader tour="fairness-header"
         title="Fairness report"
         sub="Who pays for false alarms: the false-positive rate by region, account age, balance and other customer groups."
       />

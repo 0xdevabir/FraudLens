@@ -46,13 +46,13 @@ export default function AppealsPage() {
 
   return (
     <>
-      <PageHeader
+      <PageHeader tour="appeals-header"
         title="Customer appeals"
         sub="Customers who say a warned or held payment is genuine. A person answers every one. Approving a held payment releases it, but never to a confirmed-fraud or frozen wallet. An approved appeal becomes a 'legitimate' training label."
       />
       {outcome && <div role="status" className="mb-3 rounded-xl border border-good/30 bg-good/10 px-3 py-2 text-sm text-good">{outcome}</div>}
 
-      <Card flush>
+      <Card flush tour="appeals-queue">
         <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-4 py-3">
           {STATUSES.map((value) => (
             <Chip key={value} on={status === value} onClick={() => setStatus(value)}>

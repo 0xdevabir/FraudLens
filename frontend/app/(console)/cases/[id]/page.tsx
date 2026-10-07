@@ -9,7 +9,7 @@ import { Async, Badge, Button, Card, CategoryBadges, Empty, ErrorNote, Facts, in
 import { FreezeButton, NetworkCard, RiskProfile } from "@/components/wallet";
 import { api, useApi } from "@/lib/api";
 import { taka, when, words } from "@/lib/format";
-import type { CaseDetail, CaseEvent, Me } from "@/lib/types";
+import type { CaseDetail, CaseEvent, CaseRefunds, Me, Refund } from "@/lib/types";
 
 type Verdict = "confirmed_fraud" | "legitimate" | "inconclusive";
 
@@ -44,10 +44,15 @@ function eventText(event: CaseEvent): string {
       const blocked = (data.blocked as number[] | undefined)?.length ?? 0;
       return `Verdict: ${words(String(data.verdict))}${blocked ? ` · ${blocked} payment${blocked > 1 ? "s" : ""} blocked` : ""}${released ? ` · ${released} released` : ""}`;
     }
-    case "freeze_requested": return "Freeze requested";
+    case "freeze_requested": return data.for_refunds ? "Freeze requested, so the victims can be refunded" : "Freeze requested";
     case "freeze_approved": return "Freeze approved: the wallet is frozen";
     case "freeze_rejected": return "Freeze rejected";
     case "customer_report": return "A customer reported this wallet";
+    case "refund_claimed": return `Refund claimed for payment #${data.txn_id} (${taka(Number(data.amount))})`;
+    case "refund_paid": return `Refunded ${taka(Number(data.amount))} for payment #${data.txn_id}`;
+    case "refund_unrecoverable": return `Nothing left to refund for payment #${data.txn_id}`;
+    case "refund_declined":
+      return `Refund declined for payment #${data.txn_id}: ${data.outcome === "not_a_victim" ? "not a victim" : "fraud not confirmed"}`;
     case "customer_response":
       return data.action === "cancel" ? `The customer cancelled payment #${data.txn_id}` : `The customer went ahead with payment #${data.txn_id}`;
     default: return words(event.kind);
@@ -132,6 +137,95 @@ function Assign({ data, onDone }: { data: CaseDetail; onDone: () => void }) {
   );
 }
 
+function Step({ done, children }: { done: boolean; children: React.ReactNode }) {
+  return (
+    <li className="flex gap-2">
+      <span aria-hidden="true" className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-bold ${done ? "bg-good text-accent-ink" : "border border-line text-fg-3"}`}>
+        {done ? "✓" : ""}
+      </span>
+      <span className={done ? "text-fg" : "text-fg-2"}>{children}</span>
+    </li>
+  );
+}
+
+/** The victims who reported a payment into this wallet, and what a verdict will give back. */
+function Refunds({ data, reload }: { data: CaseDetail; reload: () => void }) {
+  const { canReview } = useSession();
+  const [declining, setDeclining] = useState<Refund | null>(null);
+  const { claims, recoverable, wallet_frozen: frozen }: CaseRefunds = data.refunds;
+  const open = claims.filter((claim) => claim.status === "open");
+  const owed = open.reduce((sum, claim) => sum + claim.amount_claimed, 0);
+  const confirmed = data.verdict === "confirmed_fraud";
+  const pendingFreeze = data.freeze_requests.some((request) => request.status === "pending");
+  const cover = owed > 0 ? Math.min(1, recoverable / owed) : 1;
+  return (
+    <Card title="Victim refunds" hint="Paid from what is still in the wallet, once a person confirms the fraud and two people have frozen it.">
+      {claims.length ? (
+        <>
+          <ol className="space-y-1.5 text-sm" aria-label="Refund steps">
+            <Step done>{claims.length} reported payment{claims.length > 1 ? "s" : ""}{open.length ? `, ${taka(owed)} still owed` : ""}</Step>
+            <Step done={frozen}>{frozen ? "Wallet frozen: nothing more can be cashed out" : pendingFreeze ? "Freeze waiting for a second person" : "Freeze the wallet to protect the money"}</Step>
+            <Step done={confirmed}>{confirmed ? "Fraud confirmed" : data.verdict ? `Closed as ${words(data.verdict).toLowerCase()}: no refund` : "Confirm the fraud with a verdict"}</Step>
+          </ol>
+          {open.length > 0 && (
+            <p className="mt-3 rounded-xl border border-line bg-wash px-3 py-2 text-sm">
+              <span className="font-semibold">{taka(recoverable)}</span> is still in the wallet:{" "}
+              {cover >= 1 ? "enough to refund every open claim in full." : `each victim would get ${Math.floor(cover * 100)}% of what they lost.`}
+            </p>
+          )}
+          {canReview && open.length > 0 && !frozen && !pendingFreeze && data.status !== "closed" && (
+            <div className="mt-3"><FreezeButton small walletId={data.subject_id} caseId={data.id} onDone={reload} /></div>
+          )}
+          <ul className="mt-3 divide-y divide-line text-sm">
+            {claims.map((claim) => (
+              <li key={claim.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <span>
+                  <Id value={claim.victim_id} caseId={data.id} /> lost {taka(claim.amount_claimed)}
+                  <span className="block text-xs text-fg-3">
+                    payment #{claim.txn_id}
+                    {claim.status === "paid" && ` · ${taka(claim.amount_refunded ?? 0)} refunded ${when(claim.settled_at)}`}
+                    {claim.status === "open" && ` · promised by ${when(claim.sla_due_at)}`}
+                    {claim.note && ` · ${claim.note}`}
+                  </span>
+                </span>
+                <span className="flex items-center gap-2">
+                  <StatusBadge status={claim.status} />
+                  {canReview && claim.status === "open" && <Button small onClick={() => setDeclining(claim)}>Not a victim</Button>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        <Empty>No victim has claimed a refund. A customer who reports a payment into this wallet claims one.</Empty>
+      )}
+      {declining && (
+        <ReasonDialog
+          title={`Decline the refund for payment #${declining.txn_id}`}
+          intro="Take this claimant out: they look like part of the scheme, not a victim of it. No money moves, and the others' shares grow."
+          confirm="Decline refund"
+          variant="danger"
+          onClose={() => setDeclining(null)}
+          onSubmit={async (note) => {
+            await api(`/v1/refunds/${declining.id}/decline`, { note });
+            reload();
+          }}
+        />
+      )}
+    </Card>
+  );
+}
+
+function verdictIntro(verdict: Verdict, data: CaseDetail): string {
+  const open = data.refunds.claims.filter((claim) => claim.status === "open").length;
+  if (!open) return VERDICTS[verdict].intro;
+  const victims = open > 1 ? `${open} victims are` : "1 victim is";
+  if (verdict !== "confirmed_fraud") return `${VERDICTS[verdict].intro} No refund is paid: ${open > 1 ? `${open} refund claims are` : "the refund claim is"} declined.`;
+  return data.refunds.wallet_frozen
+    ? `${VERDICTS[verdict].intro} ${victims} refunded now from the ${taka(data.refunds.recoverable)} left in the frozen wallet.`
+    : `${VERDICTS[verdict].intro} A freeze is requested for you; ${victims} refunded as soon as a second person approves it.`;
+}
+
 function Detail({ data, reload }: { data: CaseDetail; reload: () => void }) {
   const { me, canReview, canApprove } = useSession();
   const [dialog, setDialog] = useState<Verdict | "escalate" | null>(null);
@@ -141,7 +235,7 @@ function Detail({ data, reload }: { data: CaseDetail; reload: () => void }) {
 
   return (
     <>
-      <PageHeader
+      <PageHeader tour="case-header"
         title={<span className="flex flex-wrap items-center gap-2">Case #{data.id} <StatusBadge status={data.status} /> <TierBadge tier={data.priority} /> {data.overdue && <Badge tone="red">review overdue</Badge>}</span>}
         sub={<>About wallet <Id value={data.subject_id} caseId={data.id} /> · opened {when(data.opened_at)} · {data.source === "manual" ? "opened by a reviewer" : data.source === "customer_report" ? "opened by a customer report" : "opened by an alert"}</>}
       />
@@ -162,7 +256,7 @@ function Detail({ data, reload }: { data: CaseDetail; reload: () => void }) {
         </div>
 
         <div className="space-y-4">
-          <Card title="Decision" hint="A person closes every case. The model only ranks and explains.">
+          <Card tour="case-decision" title="Decision" hint="A person closes every case. The model only ranks and explains.">
             <Facts
               rows={[
                 ["Assigned to", data.assignee ?? "nobody"],
@@ -193,6 +287,8 @@ function Detail({ data, reload }: { data: CaseDetail; reload: () => void }) {
               </div>
             )}
           </Card>
+
+          <Refunds data={data} reload={reload} />
 
           <Card title="Case activity" hint="Recorded on the server clock, in the order it happened.">
             {data.timeline.length ? <Activity events={data.timeline} /> : <Empty>Nothing has happened yet.</Empty>}
@@ -241,7 +337,7 @@ function Detail({ data, reload }: { data: CaseDetail; reload: () => void }) {
         <ReasonDialog
           title={`${VERDICTS[dialog].button}: case #${data.id}`}
           label="What you found"
-          intro={VERDICTS[dialog].intro}
+          intro={verdictIntro(dialog, data)}
           confirm={VERDICTS[dialog].button}
           variant={VERDICTS[dialog].variant}
           onClose={() => setDialog(null)}

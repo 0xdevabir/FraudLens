@@ -2,7 +2,8 @@
 
 The scorer pauses a payment at most. What happens next is decided here, by
 people: an analyst releases or blocks held money with a verdict, and freezing a
-wallet needs a second person to approve the first one's request.
+wallet needs a second person to approve the first one's request. A confirmed
+verdict on a frozen wallet also refunds the victims who reported it (refunds.py).
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from . import refunds
 from .audit import Ctx, WorkflowError, audit
 from .models import (
     Case,
@@ -21,6 +23,7 @@ from .models import (
     CustomerReport,
     Decision,
     FreezeRequest,
+    Refund,
     Transaction,
     User,
     Wallet,
@@ -166,7 +169,8 @@ def give_verdict(scorer: Scorer, ctx: Ctx, case_id: int, verdict: str, note: str
         s.flush()
         if fraud:
             scorer.flag(s, case.subject_id, now.timestamp(), "case_verdict", "case", case.id)
-    return {"case": case, "released": released, "blocked": blocked}
+        settled = refunds.on_verdict(s, scorer, ctx, case)
+    return {"case": case, "released": released, "blocked": blocked, **settled}
 
 
 # ----------------------------------------------------------------- freezes
@@ -227,6 +231,8 @@ def decide_freeze(scorer: Scorer, ctx: Ctx, request_id: int, approve: bool, note
         s.flush()
         if approve:
             scorer.frozen.add(wallet.wallet_id)
+            # The verdict may already be in: then this approval is what pays the victims.
+            refunds.settle(s, scorer, ctx, wallet.wallet_id)
     return request
 
 
@@ -290,12 +296,16 @@ def report_scam(
     txn_id: int | None,
     category: str,
     description: str,
-) -> CustomerReport:
-    """A customer says they were scammed. It opens a case; a person decides what it means."""
+) -> tuple[CustomerReport, Refund | None]:
+    """A customer says they were scammed. It opens a case; a person decides what it means.
+
+    A report on a payment that went through also claims a refund for it (refunds.py).
+    """
     with scorer.transaction() as s:
         _wallet(s, reporter_id)
         if s.get(Wallet, reported_wallet_id) is None:
             raise WorkflowError(422, "unknown_wallet", "the reported wallet does not exist")
+        txn = None
         if txn_id is not None:
             txn = s.get(Transaction, txn_id)
             if txn is None or (txn.sender_id, txn.receiver_id) != (reporter_id, reported_wallet_id):
@@ -331,4 +341,5 @@ def report_scam(
             report_id=report.id, reporter_id=reporter_id, category=category, txn_id=txn_id,
         )  # fmt: skip
         audit(s, ctx, "customer.report", "wallet", reported_wallet_id, report_id=report.id)
-    return report
+        refund = refunds.open_claim(s, scorer, ctx, report, txn)
+    return report, refund

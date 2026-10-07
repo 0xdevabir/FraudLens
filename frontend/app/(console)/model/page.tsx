@@ -35,7 +35,7 @@ function Performance({ report, summary }: { report: Report; summary?: Summary })
 
   return (
     <>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div data-tour="model-kpis" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat
           label="Precision of the top 1% riskiest"
           value={pct(test.at_alert_budgets["1.00%"]?.precision)}
@@ -514,7 +514,7 @@ export default function ModelPage() {
   const feedback = useApi<Feedback>(tab === "feedback" ? "/v1/feedback" : null);
   return (
     <>
-      <PageHeader title="Model dashboard" sub="How well the served model finds fraud, whether live traffic still looks like its training data, and what is waiting to replace it." />
+      <PageHeader tour="model-header" title="Model dashboard" sub="How well the served model finds fraud, whether live traffic still looks like its training data, and what is waiting to replace it." />
       <Tabs
         value={tab}
         onChange={setTab}

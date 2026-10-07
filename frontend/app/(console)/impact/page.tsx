@@ -53,7 +53,7 @@ function Simulator({ insights, version }: { insights: Insights; version: string 
 
   return (
     <>
-      <Card>
+      <Card tour="impact-simulator">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <div className="text-xs font-medium uppercase tracking-wide text-fg-3">Alert when the fraud probability is at least</div>
@@ -81,7 +81,7 @@ function Simulator({ insights, version }: { insights: Insights; version: string 
         </div>
       </Card>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div data-tour="impact-kpis" className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat
           label="Taka saved"
           tone="good"
@@ -171,7 +171,7 @@ export default function ImpactPage() {
   const report = useApi<Report>("/v1/model/report");
   return (
     <>
-      <PageHeader
+      <PageHeader tour="impact-header"
         title="Impact simulator"
         sub="Move the alert threshold and see what it does to money saved, customers interrupted and reviewer workload, and what that is worth in taka a month."
       />

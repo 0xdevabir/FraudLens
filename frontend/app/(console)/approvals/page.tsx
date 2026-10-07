@@ -62,7 +62,7 @@ export default function ApprovalsPage() {
 
   return (
     <>
-      <PageHeader
+      <PageHeader tour="approvals-header"
         title="Freeze approvals"
         sub="Freezing a wallet takes two people: a reviewer asks, and a supervisor who is not that reviewer decides. Nothing here is automatic."
       />
@@ -101,7 +101,7 @@ export default function ApprovalsPage() {
         </Card>
       )}
 
-      <Card flush>
+      <Card flush tour="approvals-queue">
         <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-4 py-3">
           {STATUSES.map((value) => <Chip key={value} on={status === value} onClick={() => setStatus(value)}>{words(value)}</Chip>)}
         </div>

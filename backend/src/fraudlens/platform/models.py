@@ -40,6 +40,9 @@ VERDICTS = ("confirmed_fraud", "legitimate", "inconclusive")
 CASE_SOURCE = ("alert", "customer_report", "manual")
 FREEZE_STATUS = ("pending", "approved", "rejected")
 APPEAL_STATUS = ("pending", "approved", "rejected")
+# open: the case is still investigating; paid: upay returned money (maybe less than lost);
+# unrecoverable: fraud confirmed, nothing left in the wallet; declined: no refund.
+REFUND_STATUS = ("open", "paid", "unrecoverable", "declined")
 # How the customer says they know the person they are paying.
 APPEAL_RELATIONS = (
     "family",
@@ -365,6 +368,52 @@ class Appeal(Base):
     decided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     decision_note: Mapped[str | None] = mapped_column(Text)
     decided_at: Mapped[datetime | None] = mapped_column(Timestamp)
+    created_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
+
+
+class Refund(Base):
+    """A scam victim's claim to get back a payment they sent to a mule wallet.
+
+    Opened when the victim reports a completed payment. Settled by the case verdict:
+    once the wallet is confirmed fraud and frozen, what is still in it is returned to
+    the victims who claimed, shared in proportion to what each lost. upay's ledger
+    moves the money; this row is the instruction and the customer's receipt.
+    """
+
+    __tablename__ = "refunds"
+    __table_args__ = (
+        CheckConstraint(_one_of("status", REFUND_STATUS), name="status"),
+        CheckConstraint("amount_claimed > 0", name="claimed_positive"),
+        CheckConstraint(
+            "amount_refunded IS NULL"
+            " OR (amount_refunded >= 0 AND amount_refunded <= amount_claimed)",
+            name="refunded_within_claim",
+        ),
+        CheckConstraint("(status = 'paid') = (amount_refunded > 0)", name="paid_has_amount"),
+        CheckConstraint("(status = 'open') = (settled_at IS NULL)", name="settled_has_time"),
+        Index("ix_refunds_wallet_status", "wallet_id", "status"),
+        Index("ix_refunds_status_sla", "status", "sla_due_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # One claim per payment.
+    txn_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("transactions.txn_id", ondelete="CASCADE"), unique=True
+    )
+    victim_id: Mapped[str] = mapped_column(String(32), index=True)  # who sent it, and is paid back
+    wallet_id: Mapped[str] = mapped_column(String(32))  # where it went: the reported wallet
+    case_id: Mapped[int | None] = mapped_column(ForeignKey("cases.id"), index=True)
+    report_id: Mapped[int | None] = mapped_column(ForeignKey("customer_reports.id"))
+    amount_claimed: Mapped[float] = mapped_column(Money)
+    amount_refunded: Mapped[float | None] = mapped_column(Money)
+    status: Mapped[str] = mapped_column(String(16), server_default="open")
+    # Why it ended as it did: confirmed_fraud, not_confirmed, nothing_left, not_a_victim.
+    outcome: Mapped[str | None] = mapped_column(String(20))
+    filed_at: Mapped[datetime] = mapped_column(Timestamp)  # domain time, like opened_at
+    sla_due_at: Mapped[datetime] = mapped_column(Timestamp)
+    settled_at: Mapped[datetime | None] = mapped_column(Timestamp)
+    settled_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
 
 

@@ -10,11 +10,11 @@ export default function AgentsPage() {
   const agents = useApi<Agent[]>("/v1/agents/risk?limit=100");
   return (
     <>
-      <PageHeader
+      <PageHeader tour="agents-header"
         title="Agent risk"
         sub="Cash-out agents ranked by how far their business sits from other agents of the same size: who they serve, how fast money arrives and leaves, and how much of it is their own cash-in coming straight back. A high rank is a reason to look, not a finding."
       />
-      <Card flush>
+      <Card flush tour="agents-table">
         <Async state={agents}>
           {(data) =>
             data.length ? (

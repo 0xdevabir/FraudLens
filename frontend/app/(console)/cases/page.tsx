@@ -29,11 +29,11 @@ export default function CasesPage() {
 
   return (
     <>
-      <PageHeader
+      <PageHeader tour="cases-header"
         title="Cases"
         sub="One case per wallet under investigation. Held payments stay held until a reviewer closes the case with a verdict."
       />
-      <Card flush>
+      <Card flush tour="cases-list">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-line px-4 py-3">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="mr-1 text-xs font-medium text-fg-3">Status</span>

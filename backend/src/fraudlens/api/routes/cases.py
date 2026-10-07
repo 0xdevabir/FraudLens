@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from ...intel.attribute import categorise_report
 from ...intel.taxonomy import load_taxonomy
 from ...platform import cases as workflow
+from ...platform import refunds
 from ...platform.audit import WorkflowError
 from ...platform.events import Identifier
 from ...platform.models import (
@@ -20,6 +21,7 @@ from ...platform.models import (
     CustomerReport,
     Decision,
     FreezeRequest,
+    Refund,
     Transaction,
     User,
 )
@@ -35,7 +37,7 @@ from ..schemas import (
     Unfreeze,
     Verdict,
 )
-from ..views import alert_view, case_view, event_view, freeze_view, user_view
+from ..views import alert_view, case_view, event_view, freeze_view, refund_view, user_view
 
 router = APIRouter(tags=["cases"])
 
@@ -150,11 +152,14 @@ def get_case(case_id: RowId, p: Plat, s: Db, ctx: Reviewer) -> dict:
     reports = s.scalars(
         select(CustomerReport).where(CustomerReport.case_id == case_id).order_by(CustomerReport.id)
     ).all()
+    claims = s.scalars(select(Refund).where(Refund.case_id == case_id).order_by(Refund.id)).all()
     people = [case.assigned_to, case.closed_by, *(e.actor_id for e in events)]
     people += [who for f in freezes for who in (f.requested_by, f.decided_by)]
+    people += [r.settled_by for r in claims]
     names = _names(s, people)
+    now = p.scorer.now()
     return {
-        **case_view(case, p.scorer.now(), names),
+        **case_view(case, now, names),
         "subject": p.graph.risk(case.subject_id),
         "alerts": [alert_view(t, d) for t, d in alerts],
         "timeline": [
@@ -179,6 +184,12 @@ def get_case(case_id: RowId, p: Plat, s: Db, ctx: Reviewer) -> dict:
             }
             for r in reports
         ],
+        "refunds": {
+            "claims": [refund_view(r, now, names) for r in claims],
+            # What is still in the wallet: the most a confirmed verdict can return.
+            "recoverable": refunds.balance(s, case.subject_id),
+            "wallet_frozen": case.subject_id in p.scorer.frozen,
+        },
     }
 
 
@@ -202,13 +213,13 @@ def escalate(case_id: RowId, body: Escalate, p: Plat, ctx: Reviewer) -> dict:
 
 @router.post("/cases/{case_id}/verdict")
 def verdict(case_id: RowId, body: Verdict, p: Plat, ctx: Reviewer) -> dict:
-    """The human decision: closes the case and releases or blocks the held money."""
+    """The human decision: closes the case and releases or blocks the held money.
+
+    Confirmed fraud on a frozen wallet also refunds the victims who reported it; on a
+    wallet not frozen yet it requests the freeze, and its approval pays them.
+    """
     outcome = workflow.give_verdict(p.scorer, ctx, case_id, body.verdict, body.note)
-    return {
-        "case": case_view(outcome["case"], p.scorer.now()),
-        "released": outcome["released"],
-        "blocked": outcome["blocked"],
-    }
+    return {"case": case_view(outcome.pop("case"), p.scorer.now()), **outcome}
 
 
 # ---------------------------------------------------------------- freezes

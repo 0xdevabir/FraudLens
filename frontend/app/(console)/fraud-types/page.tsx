@@ -391,7 +391,7 @@ export default function FraudTypesPage() {
   const demo = useApi<PaymentClaims>("/v1/demo/payment-claims").data;
   return (
     <>
-      <PageHeader
+      <PageHeader tour="fraud-types-header"
         title="Fraud types"
         sub="The eight kinds of fraud wallet customers in Bangladesh meet, what detects each one here, and how well, measured."
       />

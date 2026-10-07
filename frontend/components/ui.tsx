@@ -10,9 +10,9 @@ export function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(" ");
 }
 
-export function PageHeader({ title, sub, actions }: { title: ReactNode; sub?: ReactNode; actions?: ReactNode }) {
+export function PageHeader({ title, sub, actions, tour }: { title: ReactNode; sub?: ReactNode; actions?: ReactNode; tour?: string }) {
   return (
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+    <div data-tour={tour} className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div className="min-w-0">
         <h1 className="text-[1.75rem] leading-tight font-bold tracking-tight text-fg">{title}</h1>
         {sub && <p className="mt-1.5 max-w-3xl text-[0.9375rem] text-fg-3">{sub}</p>}
@@ -23,12 +23,12 @@ export function PageHeader({ title, sub, actions }: { title: ReactNode; sub?: Re
 }
 
 export function Card({
-  title, hint, actions, children, className, flush,
+  title, hint, actions, children, className, flush, tour,
 }: {
-  title?: ReactNode; hint?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string; flush?: boolean;
+  title?: ReactNode; hint?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string; flush?: boolean; tour?: string;
 }) {
   return (
-    <section className={cx("overflow-hidden rounded-2xl border border-line bg-card", className)}>
+    <section data-tour={tour} className={cx("overflow-hidden rounded-2xl border border-line bg-card", className)}>
       {(title || actions) && (
         <header className="flex flex-wrap items-start justify-between gap-2 border-b border-line px-4 py-3">
           <div className="min-w-0">
@@ -99,6 +99,7 @@ const STATUS_TONE: Record<string, Tone> = {
   pending: "amber", approved: "red", confirmed_fraud: "red", legitimate: "green", inconclusive: "slate",
   stable: "green", watch: "amber", shifted: "red", frozen: "blue", active: "slate",
   fired: "red", not_fired: "slate", not_applicable: "slate",
+  paid: "green", unrecoverable: "orange", declined: "slate",
 };
 
 export function StatusBadge({ status }: { status: string | null | undefined }) {

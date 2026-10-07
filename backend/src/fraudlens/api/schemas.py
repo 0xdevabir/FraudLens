@@ -147,6 +147,10 @@ class AppealDecision(Body):
     note: Reason
 
 
+class RefundDecline(Body):
+    note: Reason
+
+
 class MessageCheck(Body):
     """A message the customer received and wants checked. It is read, never stored."""
 
