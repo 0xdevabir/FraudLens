@@ -515,6 +515,23 @@ export interface Report {
     single_decisions: { decisions: number; alerts: number; decide_ms: { p50: number; p95: number; max: number } } & Record<string, unknown>;
   } & Record<string, unknown>;
   insights: Insights | null;
+  label_realism?: LabelRealism | null;
+}
+
+/** Mean and standard deviation across seeds. */
+export interface Spread { mean: number; sd: number }
+
+export interface LabelRealism {
+  created_at: string;
+  seeds: number[];
+  operating_point: { version: string; tier: string; threshold: number; fpr: number };
+  regimes: string[];
+  summary: {
+    regimes: Record<string, {
+      pr_auc: Spread; loss_txn_recall: Spread; case_recall: Spread; taka_recall: Spread;
+      by_typology: Record<string, { case_recall: Spread; loss_txn_recall: Spread }>;
+    }>;
+  } & Record<string, unknown>;
 }
 
 export interface ModelInfo {

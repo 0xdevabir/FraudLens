@@ -14,6 +14,7 @@ from sqlalchemy import Date, cast, func, select, text
 from ...decision.evaluate import REPORT_FILE as POLICY_REPORT_FILE
 from ...decision.insights import INSIGHTS_FILE
 from ...models import registry
+from ...models.label_realism import REPORT_FILE as LABEL_REALISM_FILE
 from ...platform.audit import WorkflowError
 from ...platform.models import AuditLog, Case, Decision, FreezeRequest, Transaction
 from ..deps import Db, Oversight, Plat, Staff
@@ -263,7 +264,17 @@ def model_report(
         "model": _report(directory, "report.json"),
         "policy": _report(directory, POLICY_REPORT_FILE),
         "insights": _report(directory, INSIGHTS_FILE),
+        "label_realism": _label_realism(p.settings.artifacts_dir),
     }
+
+
+def _label_realism(artifacts: Path) -> dict | None:
+    """The under-reporting experiment (`make label-realism`), averaged over seeds."""
+    report = _report(artifacts / "reports", LABEL_REALISM_FILE)
+    if report is None:
+        return None
+    keep = ("created_at", "seeds", "operating_point", "regimes", "summary")
+    return {key: report.get(key) for key in keep}
 
 
 @router.get("/policy")
