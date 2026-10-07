@@ -706,6 +706,7 @@ export interface PayResult {
     tier: Tier; action: string; requires_review: boolean; risk_score: number; risk_band: string; mode: string;
     model_version: string; policy_version: string; customer_message: Text2 | null; cooling_off_minutes: number;
     review_sla_minutes: number | null; case_id: number | null; latency_ms: number;
+    scenario?: string | null; cue?: Cue | null;
   } | null;
 }
 
@@ -713,4 +714,30 @@ export interface Scenario {
   id: string;
   expected_tier: Tier;
   payment: { sender_id: string; receiver_id: string; amount: number; type: string; district: string; sender_balance_before: number };
+}
+
+/** Which scam a warning looks like, for the customer's app to explain in words. */
+export type Cue = "reported_recipient" | "impersonation" | "prize" | "investment" | "wrong_send" | "not_you" | "generic";
+export type AppealRelation = "family" | "friend" | "business" | "seller" | "landlord" | "employer" | "other" | "none";
+export type AppealStatus = "pending" | "approved" | "rejected";
+
+/** What the customer's app sees of its own appeal. */
+export interface CustomerAppeal {
+  id: number; txn_id: number; tier: Tier; status: AppealStatus;
+  filed_at: string; sla_due_at: string; decided_at: string | null; txn_status: string | null; now: string;
+}
+
+/** One row of the reviewers' appeals queue. */
+export interface Appeal {
+  id: number; txn_id: number; wallet_id: string; case_id: number | null; tier: Tier;
+  relation: AppealRelation; reason: string; status: AppealStatus;
+  filed_at: string; sla_due_at: string; overdue: boolean;
+  decided_by: number | null; decider: string | null; decision_note: string | null; decided_at: string | null;
+  amount?: number; receiver_id?: string; txn_status?: string; ts?: string;
+}
+
+export interface AppealQueue {
+  now: string;
+  counts: Record<AppealStatus, number>;
+  appeals: Appeal[];
 }

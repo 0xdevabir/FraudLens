@@ -80,12 +80,14 @@ served at `/docs` outside production.
 | Network | `GET /wallets/{id}`, `GET /wallets/{id}/network`, `GET /rings`, `GET /rings/{ring_id}`, `GET /agents/risk`, `GET /agents/{id}`, `GET /past-cases/{id}` | analyst, supervisor |
 | Customer | `POST /customer/recipient-check`, `POST /customer/transactions/{txn_id}/respond`, `POST /customer/reports` | service |
 | | `POST /customer/message-check`, `POST /customer/payment-verify` ([FRAUD_TAXONOMY.md](FRAUD_TAXONOMY.md)) | service |
+| | `POST\|GET /customer/transactions/{txn_id}/appeal` (§6) | service |
+| Appeals | `GET /appeals`, `POST /appeals/{id}/approve\|reject` (§6) | analyst, supervisor |
 | Fraud types | `GET /intel/taxonomy` | analyst, supervisor, admin |
 | Operations | `GET /metrics/summary`, `GET /metrics/daily`, `GET /model`, `GET /model/report`, `GET /policy` | analyst, supervisor, admin |
 | After deployment (§12) | `GET /models`, `GET /model/shadow`, `GET /metrics/drift`, `GET /feedback` | analyst, supervisor, admin |
 | Audit | `GET /audit` | supervisor, admin |
 | | `POST /audit/reveals` (§7) | analyst, supervisor |
-| Demo (§14), absent in production | `GET /demo/scenarios`, `GET /demo/payment-draft`, `GET /demo/payment-claims`, `POST /demo/pay\|respond\|report\|recipient-check\|message-check\|payment-verify\|advance-clock` | analyst, supervisor, admin |
+| Demo (§14), absent in production | `GET /demo/scenarios`, `GET /demo/payment-draft`, `GET /demo/payment-claims`, `GET /demo/appeal`, `POST /demo/pay\|respond\|report\|appeal\|recipient-check\|message-check\|payment-verify\|advance-clock` | analyst, supervisor, admin |
 | | `GET /health`, `GET /ready` | none |
 
 Errors always have the same shape, with the request id that is also in the
@@ -178,6 +180,25 @@ and each request still needs its own approval by a second person.
   from the SMS or screenshot shown, and only for payments made to the asking
   wallet. 10 a minute per wallet. Both are described in
   [FRAUD_TAXONOMY.md](FRAUD_TAXONOMY.md).
+- **Which scam it looks like.** `/v1/score` and the demo payment return
+  `decision.scenario` and `decision.cue` (`reported_recipient`, `impersonation`,
+  `prize`, `investment`, `wrong_send`, `not_you` or `generic`), so the app can
+  word its warning for that scam (`decision/customer.py`). The phone demo does,
+  in Bangla and English, with a live cooling-off or review countdown and a "what
+  happens next" timeline.
+- **Appealing.** `POST /customer/transactions/{txn_id}/appeal` (the sender only,
+  on a warned, step-up or held payment; one per payment; 5 an hour) with a
+  relation to the recipient and a reason (digits redacted). A person answers
+  every appeal: `GET /appeals`, `POST /appeals/{id}/approve|reject` (analyst,
+  supervisor; same escalation rules as the case). Deadlines: the hold's review
+  SLA (30 minutes) for a held payment, 24 hours for a warning. Approving a held
+  payment releases it, except into a confirmed-fraud or frozen wallet (`409`).
+  Approving a warning moves no money and grants no cooling-off waiver, so an
+  appeal cannot be used to coach a victim past the check. An approved appeal is a
+  `legitimate` label in `/feedback` (`source: appeal`) unless a case verdict says
+  otherwise; a rejected one adds nothing. The customer's view
+  (`GET /customer/transactions/{txn_id}/appeal`) shows status and deadline only.
+  Everything is audited. Migration `0004_appeals`.
 
 ## 7. Security
 

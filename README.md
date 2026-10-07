@@ -403,12 +403,13 @@ To run a challenger in shadow mode, set `FRAUDLENS_SHADOW_MODEL_VERSION` to its 
 <summary><b>Check it</b></summary>
 
 ```bash
-make test     # 227 backend tests; the platform tests need `make up`
+make test     # 230 backend tests; the platform tests need `make up`
 make lint     # ruff, tsc, eslint
 make smoke    # opens every console page as each role in a headless browser
+make e2e-phone  # the customer phone in Bangla and English, plus an appeal round trip
 ```
 
-`make smoke` needs the demo (or `make api` and `make console`) running and `make setup` done. CI (`.github/workflows/ci.yml`) runs the tests and the lint against real Postgres and Redis, builds the console and builds both images.
+`make smoke` and `make e2e-phone` need the demo (or `make api` and `make console`) running and `make setup` done. CI (`.github/workflows/ci.yml`) runs the tests and the lint against real Postgres and Redis, builds the console and builds both images.
 
 </details>
 
