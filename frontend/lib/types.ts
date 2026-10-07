@@ -294,6 +294,7 @@ export interface CaseDetail extends Omit<CaseRow, "alerts"> {
   timeline: CaseEvent[];
   freeze_requests: Freeze[];
   customer_reports: CustomerReport[];
+  refunds: CaseRefunds;
 }
 
 export interface Wallet {
@@ -809,6 +810,44 @@ export interface AppealQueue {
   now: string;
   counts: Record<AppealStatus, number>;
   appeals: Appeal[];
+}
+
+// ---- Refunds for scam victims (backend/src/fraudlens/platform/refunds.py)
+
+export type RefundStatus = "open" | "paid" | "unrecoverable" | "declined";
+export type RefundOutcome = "confirmed_fraud" | "not_confirmed" | "nothing_left" | "not_a_victim";
+
+/** What the victim's app sees of its own refund claim. */
+export interface CustomerRefund {
+  id: number; txn_id: number; status: RefundStatus; outcome: RefundOutcome | null;
+  amount_claimed: number; amount_refunded: number | null;
+  /** The receiving wallet is frozen: nothing more can be cashed out of it. */
+  protected: boolean;
+  filed_at: string; sla_due_at: string; settled_at: string | null; now: string;
+}
+
+/** One claim, as reviewers see it. */
+export interface Refund {
+  id: number; txn_id: number; victim_id: string; wallet_id: string; case_id: number | null;
+  amount_claimed: number; amount_refunded: number | null;
+  status: RefundStatus; outcome: RefundOutcome | null;
+  filed_at: string; sla_due_at: string; overdue: boolean;
+  settled_at: string | null; settled_by: number | null; settler: string | null; note: string | null;
+  wallet_frozen?: boolean;
+}
+
+export interface CaseRefunds {
+  claims: Refund[];
+  /** What is still in the wallet: the most a confirmed verdict can return. */
+  recoverable: number;
+  wallet_frozen: boolean;
+}
+
+export interface RefundQueue {
+  now: string;
+  counts: Record<RefundStatus, number>;
+  refunded_total: number;
+  refunds: Refund[];
 }
 
 // ---- Consortium: simulated cross-provider mule intelligence (docs/CONSORTIUM.md)

@@ -8,6 +8,8 @@ import { api, getToken, setToken, useApi } from "@/lib/api";
 import { idKind, maskId, words } from "@/lib/format";
 import type { Me, ModelInfo, Role } from "@/lib/types";
 
+import { TOUR_STEPS } from "./tour/steps";
+import { TourButton, TourProvider } from "./tour/tour";
 import { Badge, cx, ErrorNote, Loading } from "./ui";
 
 interface Session {
@@ -47,6 +49,7 @@ const NAV: { heading: string; items: { href: string; label: string; roles: Role[
       { href: "/approvals", label: "Freeze approvals", roles: ["analyst", "supervisor"] },
       { href: "/appeals", label: "Customer appeals", roles: ["analyst", "supervisor"] },
       { href: "/blocklist", label: "Blocklist", roles: ["analyst", "supervisor"] },
+      { href: "/refunds", label: "Victim refunds", roles: ["analyst", "supervisor"] },
     ],
   },
   {
@@ -76,6 +79,11 @@ const NAV: { heading: string; items: { href: string; label: string; roles: Role[
   },
 ];
 
+/** "Model and policy" → "model-and-policy", "/fraud-types" → "fraud-types". */
+function slug(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   if (href === "/network") return pathname === "/network" || pathname.startsWith("/wallets");
@@ -88,7 +96,7 @@ function ServingNote() {
   if (!model.data) return null;
   const fallback = model.data.mode !== "model";
   return (
-    <div className={cx("mx-3 mb-3 rounded-xl px-3 py-2 text-xs", fallback ? "bg-warn/15 text-warn" : "bg-white/6 text-fg-3")}>
+    <div data-tour="serving" className={cx("mx-3 mb-3 rounded-xl px-3 py-2 text-xs", fallback ? "bg-warn/15 text-warn" : "bg-white/6 text-fg-3")}>
       {fallback ? (
         <>Rules-only fallback: the model is unavailable, so decisions come from rules alone.</>
       ) : (
@@ -152,6 +160,7 @@ export function Console({ children }: { children: ReactNode }) {
 
   return (
     <SessionContext.Provider value={session}>
+      <TourProvider steps={TOUR_STEPS} role={session.me.role}>
       <div className="flex min-h-screen">
         <aside
           className={cx(
@@ -159,24 +168,28 @@ export function Console({ children }: { children: ReactNode }) {
             menu ? "translate-x-0" : "-translate-x-full",
           )}
         >
-          <div className="px-5 pt-6 pb-2">
+          <div data-tour="brand" className="px-5 pt-6 pb-2">
             <div className="flex items-center gap-2 text-lg font-bold tracking-tight text-fg">
               <span aria-hidden="true" className="size-2.5 rounded-full bg-accent" />
               FraudLens
             </div>
             <div className="mt-0.5 text-xs text-fg-4">Real-time fraud decisions for mobile money</div>
           </div>
+          <div data-tour="tour-button" className="px-3 pt-2">
+            <TourButton />
+          </div>
           <nav aria-label="Console" className="flex-1 overflow-y-auto px-3 pb-4">
             {NAV.map((group) => {
               const items = group.items.filter((item) => item.roles.includes(session.me.role));
               if (!items.length) return null;
               return (
-                <div key={group.heading} className="mt-4">
+                <div key={group.heading} data-tour={`nav-group-${slug(group.heading)}`} className="mt-4">
                   <div className="px-3 pb-1.5 text-xs font-medium text-fg-4">{group.heading}</div>
                   {items.map((item) => (
                     <Link
                       key={item.href}
                       href={item.href}
+                      data-tour={`nav-${item.href === "/" ? "home" : slug(item.href)}`}
                       onClick={() => setMenu(false)}
                       aria-current={isActive(pathname, item.href) ? "page" : undefined}
                       className={cx(
@@ -192,7 +205,7 @@ export function Console({ children }: { children: ReactNode }) {
             })}
           </nav>
           <ServingNote />
-          <div className="border-t border-line px-5 py-4 text-sm">
+          <div data-tour="user" className="border-t border-line px-5 py-4 text-sm">
             <div className="truncate font-medium text-fg">{session.me.display_name}</div>
             <div className="mt-1.5 flex items-center justify-between">
               <Badge tone="slate">{words(session.me.role)}</Badge>
@@ -218,6 +231,7 @@ export function Console({ children }: { children: ReactNode }) {
               </svg>
             </button>
             <span className="text-[0.9375rem] font-semibold text-fg">FraudLens</span>
+            <TourButton className="ml-auto" />
           </div>
           {/* Keyed by route, so each page arrives with the same short rise. */}
           <main key={pathname} className="min-w-0 flex-1 animate-rise px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
@@ -229,6 +243,7 @@ export function Console({ children }: { children: ReactNode }) {
           </main>
         </div>
       </div>
+      </TourProvider>
     </SessionContext.Provider>
   );
 }

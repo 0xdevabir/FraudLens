@@ -30,14 +30,14 @@ export default function ConsortiumPage() {
   const [tab, setTab] = useState<Tab>("feeds");
   return (
     <>
-      <PageHeader
+      <PageHeader tour="consortium-header"
         title="Mule consortium"
         sub="Four simulated providers share confirmed and suspected mule wallets as keyed tokens. No wallet number or handset id leaves a provider. Simulation on the FraudLens dataset; provider names are illustrative."
       />
       <Async state={overview}>
         {(o) => (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div data-tour="consortium-kpis" className="grid grid-cols-2 gap-3 md:grid-cols-4">
               <Stat label="Members" value={num(o.members.length)} sub={`key epoch ${o.key_epoch}`} />
               <Stat label="Confirmed listings shared" value={num(o.feeds.reduce((a, f) => a + f.confirmed_listings, 0))} sub="as tokens, signed per provider" />
               <Stat label="Suspected, in filters only" value={num(o.feeds.reduce((a, f) => a + f.suspected_in_filter, 0))} sub="testable, not listable" />

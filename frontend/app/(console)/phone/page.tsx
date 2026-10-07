@@ -9,9 +9,9 @@ import { useSession } from "@/components/session";
 import { Async, Badge, Button, Card, cx, ErrorNote, Facts, inputClass, PageHeader, StatusBadge, TierBadge } from "@/components/ui";
 import { api, ApiError, qs, useApi } from "@/lib/api";
 import { maskId, taka, when, words } from "@/lib/format";
-import type { AppealRelation, CustomerAppeal, PayResult, Scenario, Text2, Tier } from "@/lib/types";
+import type { AppealRelation, CustomerAppeal, CustomerRefund, PayResult, Scenario, Text2, Tier } from "@/lib/types";
 
-import { clockSpoken, clockText, CUE, digits, type Lang, RELATIONS, steps, STRIP_TEXT, T, type Words } from "./copy";
+import { clockSpoken, clockText, CUE, digits, type Lang, refundSteps, RELATIONS, steps, STRIP_TEXT, T, type Words } from "./copy";
 // upay's app icon. The name and the mark belong to UCB Fintech Company Limited.
 import upayLogo from "./upay-logo.png";
 
@@ -32,7 +32,7 @@ interface Habits {
 }
 interface Check { level: "none" | "caution" | "high"; message: Text2 | null }
 interface Outcome { status: string; status_reason: string | null }
-interface Reported { report_id: number; case_id: number; reference: string }
+interface Reported { report_id: number; case_id: number; reference: string; refund: CustomerRefund | null }
 
 // Addresses from the ranges reserved for documentation: they belong to nobody.
 const NETWORKS = [
@@ -251,6 +251,57 @@ function Timeline({ tier, minutes, lang }: { tier: Exclude<Tier, "allow">; minut
   );
 }
 
+/** Where the victim's refund stands, from report to money back. */
+function RefundTracker({ refund, lang, busy, onCheck }: { refund: CustomerRefund; lang: Lang; busy: boolean; onCheck: () => void }) {
+  const id = useId();
+  const settled = refund.status !== "open";
+  const money = (amount: number | null) => digits(taka(amount ?? 0), lang);
+  const by = digits(new Date(refund.sla_due_at).toLocaleDateString(lang === "bn" ? "bn-BD" : "en-GB", { day: "numeric", month: "long", timeZone: "Asia/Dhaka" }), lang);
+  const full = refund.status === "paid" && (refund.amount_refunded ?? 0) >= refund.amount_claimed;
+  return (
+    <section aria-labelledby={id} data-testid="phone-refund" data-status={refund.status} className="rounded-2xl border border-upay-blue/30 bg-upay-blue/5 px-3 py-2">
+      <h3 id={id} className="text-xs font-semibold tracking-wide text-upay-blue uppercase">{T.refundTitle[lang]}</h3>
+      {refund.status === "paid" ? (
+        <p role="status" className="mt-1.5 rounded-xl border border-green-300 bg-green-50 px-3 py-2 text-[13px] text-green-900">
+          <span className="block text-xl font-bold tabular-nums">{money(refund.amount_refunded)}</span>
+          {full ? T.refundPaid[lang] : `${T.refundPartOf[lang]} ${money(refund.amount_claimed)} ${T.refundPartTail[lang]}`}
+        </p>
+      ) : refund.status === "unrecoverable" ? (
+        <p role="status" className="mt-1.5 text-[13px] text-neutral-900">{T.refundNothingLeft[lang]}</p>
+      ) : refund.status === "declined" ? (
+        <p role="status" className="mt-1.5 text-[13px] text-neutral-900">{T.refundDeclined[lang]}</p>
+      ) : (
+        <>
+          <ol className="mt-2 space-y-2">
+            {refundSteps(refund.protected, settled, lang).map((step, index) => (
+              <li key={index} aria-current={step.state === "now" ? "step" : undefined} className="flex gap-2 text-[13px] leading-snug">
+                <span
+                  aria-hidden="true"
+                  className={cx(
+                    "mt-0.5 grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-bold",
+                    step.state === "done" ? "bg-green-700 text-white" : step.state === "now" ? "bg-upay-blue text-white" : "border border-neutral-400 text-neutral-600",
+                  )}
+                >
+                  {step.state === "done" ? "✓" : digits(index + 1, lang)}
+                </span>
+                <span className={cx(step.state === "next" ? "text-neutral-600" : "text-neutral-900", step.state === "now" && "font-semibold")}>{step.text}</span>
+              </li>
+            ))}
+          </ol>
+          <p className="mt-2 text-[13px] text-neutral-800">{T.refundBy[lang]} {by}</p>
+          <button type="button" onClick={onCheck} disabled={busy} className="min-h-11 text-[13px] font-semibold text-upay-blue underline underline-offset-2">
+            {T.checkRefund[lang]}
+          </button>
+        </>
+      )}
+      <p className="mt-1 flex gap-2 text-xs text-neutral-700">
+        <Icon d="M12 8v5M12 16.5v.5M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z" className="mt-0.5 size-4 shrink-0" />
+        {T.refundNoFee[lang]}
+      </p>
+    </section>
+  );
+}
+
 /** A visible countdown. Screen readers get the time on request rather than every second. */
 function Countdown({ seconds, total, label, lang, tone }: { seconds: number; total: number; label: string; lang: Lang; tone: "orange" | "red" }) {
   const done = total > 0 ? Math.min(1, Math.max(0, 1 - seconds / total)) : 1;
@@ -431,6 +482,14 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
     });
   };
 
+  /** Ask where the refund stands; it moves when a reviewer freezes the wallet and confirms the scam. */
+  const refreshRefund = () =>
+    run(async () => {
+      if (!result || !reported?.refund) return;
+      const fresh = await api<CustomerRefund>(`/v1/demo/refund${qs({ txn_id: result.txn_id })}`);
+      setReported({ ...reported, refund: fresh });
+    });
+
   /** Ask where the appeal stands; an approved hold has been released by then. */
   const refreshAppeal = () =>
     run(async () => {
@@ -452,8 +511,12 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
     });
 
   const reportButton = !reported && payment && (
-    <PhoneButton tone="red" onClick={() => setReporting(true)} disabled={busy}>{w(T.report)}</PhoneButton>
+    <PhoneButton tone="red" onClick={() => setReporting(true)} disabled={busy} data-testid="phone-report">
+      {/* Money that went through can still be claimed back. */}
+      {status === "completed" ? w(T.reportForRefund) : w(T.report)}
+    </PhoneButton>
   );
+  const refundNote = reported?.refund && <RefundTracker refund={reported.refund} lang={lang} busy={busy} onCheck={refreshRefund} />;
   // Disputing a warning or a hold. Offered once per payment; a hold that has ended has nothing left to appeal.
   const appealButton = !appeal && decision && decision.tier !== "allow" && (
     <PhoneButton tone="light" onClick={() => setAppealing(true)} disabled={busy} data-testid="phone-appeal">{w(T.appeal)}</PhoneButton>
@@ -692,6 +755,7 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
         </div>
         {party}
         <p className="text-neutral-800">{sent ? w(T.sentBody) : status === "cancelled" ? w(T.cancelledBody) : w(T.refusedBody)}</p>
+        {refundNote}
         {appealNote}
         <div className={FOOT}>
           {reportButton}
@@ -707,7 +771,7 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem_minmax(0,1fr)]">
       <div className="space-y-4">
-        <Card title="1 · Choose a payment" hint="Each is a recent payment that would still get this answer from the policy right now.">
+        <Card tour="phone-scenarios" title="1 · Choose a payment" hint="Each is a recent payment that would still get this answer from the policy right now.">
           <div className="space-y-2">
             {scenarios.map((scenario) => (
               <button
@@ -772,6 +836,7 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
         <div
           lang={lang}
           data-testid="phone"
+          data-tour="phone-device"
           className="mx-auto h-[40rem] w-full max-w-[22rem] overflow-hidden rounded-[2.75rem] border-[10px] border-black bg-white shadow-2xl shadow-black/60 ring-1 ring-white/15 [color-scheme:light]"
         >
           <div key={screenKey} className="h-full">{screen}</div>
@@ -782,6 +847,13 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
             {canReview ? <Link href={`/cases/${reported.case_id}`} className="text-info hover:underline">It is on case #{reported.case_id}</Link> : `It is on case #${reported.case_id}`}.
             {" "}Reference <code>{reported.reference}</code>:{" "}
             <Link href="/track" target="_blank" className="text-info hover:underline">follow it</Link>.
+            {reported.refund && (
+              <>
+                {" "}Refund claim #{reported.refund.id} is {words(reported.refund.status).toLowerCase()}
+                {reported.refund.status === "open" && ": freeze the wallet and confirm the fraud on the case to pay it"}.{" "}
+                {canReview && <Link href="/refunds" className="text-info hover:underline">Victim refunds</Link>}
+              </>
+            )}
           </p>
         )}
         {appeal && (
@@ -794,7 +866,7 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
       </div>
 
       <div className="space-y-4">
-        <Card title="2 · What FraudLens decided" hint="The customer sees only the phone. This is the other side of the same payment.">
+        <Card tour="phone-decision" title="2 · What FraudLens decided" hint="The customer sees only the phone. This is the other side of the same payment.">
           {result ? (
             decision ? (
               <Facts
@@ -861,7 +933,7 @@ export default function PhonePage() {
   const scenarios = useApi<{ now: string; scenarios: Scenario[] }>("/v1/demo/scenarios");
   return (
     <>
-      <PageHeader
+      <PageHeader tour="phone-header"
         title="Customer phone demo"
         sub="What a customer sees when FraudLens interrupts a payment, in Bangla or English: a warning that names the scam, a second check with a cooling-off countdown, or a pause for review with its deadline, what happens next, and a way to appeal or report."
       />

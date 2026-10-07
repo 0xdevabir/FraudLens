@@ -64,11 +64,11 @@ export default function AuditPage() {
 
   return (
     <>
-      <PageHeader
+      <PageHeader tour="audit-header"
         title="Audit log"
         sub="Every sign-in, every wallet opened, every identifier revealed and every decision a person took, with who did it and when. Rows are only ever added."
       />
-      <Card className="mb-4">
+      <Card tour="audit-filters" className="mb-4">
         <form onSubmit={apply} className="flex flex-wrap items-end gap-3 text-xs text-fg-2">
           <label>Who (username)<input className={`${inputClass} mt-1 block w-36`} maxLength={64} {...field("actor")} /></label>
           <label>
@@ -90,7 +90,7 @@ export default function AuditPage() {
           {invalid && <span className="text-bad">Letters, digits and . : _ - only.</span>}
         </form>
       </Card>
-      <Card flush>
+      <Card flush tour="audit-log">
         <Async state={rows}>
           {(data) =>
             data.length ? (

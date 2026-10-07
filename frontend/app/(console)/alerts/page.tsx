@@ -108,7 +108,7 @@ export default function AlertsPage() {
 
   return (
     <>
-      <PageHeader
+      <PageHeader tour="alerts-header"
         title="Alert queue"
         sub="Every payment the decision engine interrupted, newest first. Open one to see why it was flagged and what the customer was told."
         actions={
@@ -119,8 +119,8 @@ export default function AlertsPage() {
           </>
         }
       />
-      <Card flush>
-        <div className="space-y-2 border-b border-line px-4 py-3">
+      <Card flush tour="alerts-queue">
+        <div data-tour="alerts-filters" className="space-y-2 border-b border-line px-4 py-3">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="mr-1 text-xs font-medium text-fg-3">Tier</span>

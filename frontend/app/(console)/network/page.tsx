@@ -27,11 +27,11 @@ export default function NetworkPage() {
 
   return (
     <>
-      <PageHeader
+      <PageHeader tour="network-header"
         title="Network explorer"
         sub="Start from a wallet or an agent and follow the money: who paid in, where it went, which handsets are shared."
       />
-      <Card className="mb-4">
+      <Card tour="network-search" className="mb-4">
         <form onSubmit={go} className="flex flex-wrap items-end gap-2">
           <div>
             <label htmlFor="lookup" className="mb-1 block text-xs font-medium text-fg-2">Wallet or agent number</label>
@@ -73,7 +73,7 @@ export default function NetworkPage() {
             }
           </Async>
         </Card>
-        <Card title="Largest rings" hint="Groups of wallets tied together by shared handsets and transfers." actions={<Link href="/rings" className="text-xs text-info hover:underline">All rings</Link>} flush>
+        <Card tour="network-rings" title="Largest rings" hint="Groups of wallets tied together by shared handsets and transfers." actions={<Link href="/rings" className="text-xs text-info hover:underline">All rings</Link>} flush>
           <Async state={rings}>
             {(data) =>
               data.length ? (

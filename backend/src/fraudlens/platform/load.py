@@ -33,7 +33,7 @@ from .stream import RESET_SUFFIXES
 SYSTEM = Ctx(None, "system", None)
 # Everything the platform writes at run time. Never users, never the audit log.
 RUNTIME_TABLES = (
-    "appeals", "pending_decisions", "shadow_scores", "decisions", "case_events",
+    "refunds", "appeals", "pending_decisions", "shadow_scores", "decisions", "case_events",
     "freeze_requests", "customer_reports",
     "wallet_flags", "blocklist", "cases", "transactions", "past_cases", "wallets", "agents",
 )  # fmt: skip

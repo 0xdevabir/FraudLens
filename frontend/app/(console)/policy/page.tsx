@@ -51,6 +51,7 @@ function View({ policy, report }: { policy: Policy; report?: Report }) {
   return (
     <div className="space-y-4">
       <Card
+        tour="policy-tiers"
         title={`Policy ${policy.version}`}
         hint={policy.description}
         actions={<Badge tone={policy.mode === "model" ? "green" : "amber"}>{policy.mode === "model" ? "model and rules" : "rules-only fallback"}</Badge>}
@@ -79,7 +80,7 @@ function View({ policy, report }: { policy: Policy; report?: Report }) {
         </p>
       </Card>
 
-      <Card title="Rules" hint="Rules run beside the model and can only raise a tier. A hard rule applies whatever the score is." flush>
+      <Card tour="policy-rules" title="Rules" hint="Rules run beside the model and can only raise a tier. A hard rule applies whatever the score is." flush>
         <Table head={["Rule", "Raises to", "Fired in test", "Right when fired", "Changed the outcome"]}>
           {policy.rules.map((rule) => {
             const m = measured[rule.id];
@@ -282,7 +283,7 @@ export default function PolicyPage() {
   const report = useApi<Report>("/v1/model/report");
   return (
     <>
-      <PageHeader
+      <PageHeader tour="policy-header"
         title="Decision policy"
         sub="How a risk score becomes an action: the tier thresholds, the rules that sit beside the model, the rules-only fallback, and the words customers see."
       />

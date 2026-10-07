@@ -30,7 +30,7 @@ function Live({ summary, daily }: { summary: Summary; daily: DailyRow[] }) {
 
   return (
     <>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div data-tour="home-kpis" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat
           label="Money kept from leaving"
           value={taka(blocked.amount, true)}
@@ -56,7 +56,7 @@ function Live({ summary, daily }: { summary: Summary; daily: DailyRow[] }) {
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        <Card title="Payments interrupted per day" hint="Each bar is one day of live decisions, by what the customer saw.">
+        <Card tour="home-chart" title="Payments interrupted per day" hint="Each bar is one day of live decisions, by what the customer saw.">
           <StackedBars series={bars} labels={labels} />
           <div className="mt-2"><Legend items={bars} /></div>
         </Card>
@@ -176,7 +176,7 @@ export default function Overview() {
   const report = useApi<Report>("/v1/model/report");
   return (
     <>
-      <PageHeader
+      <PageHeader tour="home-header"
         title="Executive summary"
         sub={
           summary.data

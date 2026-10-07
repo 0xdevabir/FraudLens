@@ -7,7 +7,16 @@ from datetime import datetime
 from ..intel.attribute import categorise
 from ..intel.taxonomy import load_taxonomy
 from ..platform.cases import sla_state
-from ..platform.models import Appeal, Case, CaseEvent, Decision, FreezeRequest, Transaction, User
+from ..platform.models import (
+    Appeal,
+    Case,
+    CaseEvent,
+    Decision,
+    FreezeRequest,
+    Refund,
+    Transaction,
+    User,
+)
 from ..platform.pii import redact
 from ..platform.scoring import Result
 
@@ -102,6 +111,47 @@ def appeal_view(a: Appeal, now: datetime, names: dict[int, str] | None = None) -
         "decider": names.get(a.decided_by),
         "decision_note": a.decision_note,
         "decided_at": a.decided_at,
+    }
+
+
+def refund_view(r: Refund, now: datetime, names: dict[int, str] | None = None) -> dict:
+    names = names or {}
+    return {
+        "id": r.id,
+        "txn_id": r.txn_id,
+        "victim_id": r.victim_id,
+        "wallet_id": r.wallet_id,
+        "case_id": r.case_id,
+        "amount_claimed": r.amount_claimed,
+        "amount_refunded": r.amount_refunded,
+        "status": r.status,
+        "outcome": r.outcome,
+        "filed_at": r.filed_at,
+        "sla_due_at": r.sla_due_at,
+        "overdue": r.status == "open" and r.sla_due_at < now,
+        "settled_at": r.settled_at,
+        "settled_by": r.settled_by,
+        "settler": names.get(r.settled_by),
+        "note": redact(r.note) if r.note else None,
+    }
+
+
+def customer_refund_view(r: Refund, frozen: bool, now: datetime) -> dict:
+    """What the victim's app shows: where the claim stands and what came back, never
+    who decided or what else is known about the receiving wallet."""
+    return {
+        "id": r.id,
+        "txn_id": r.txn_id,
+        "status": r.status,
+        "outcome": r.outcome,
+        "amount_claimed": r.amount_claimed,
+        "amount_refunded": r.amount_refunded,
+        # The receiver can no longer cash out or send on what is left.
+        "protected": frozen or r.status == "paid",
+        "filed_at": r.filed_at,
+        "sla_due_at": r.sla_due_at,
+        "settled_at": r.settled_at,
+        "now": now,
     }
 
 

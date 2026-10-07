@@ -18,6 +18,7 @@ from ...platform import cases as workflow
 from ...platform.audit import WorkflowError
 from ..deps import Db, Plat, Platform, Service, TxnId
 from ..schemas import CustomerResponse, MessageCheck, PaymentVerify, RecipientCheck, ScamReport
+from ..views import customer_refund_view
 
 router = APIRouter(prefix="/customer", tags=["customer"])
 
@@ -73,13 +74,28 @@ def respond(txn_id: TxnId, body: CustomerResponse, p: Plat, ctx: Service) -> dic
 
 @router.post("/reports", status_code=201)
 def report(body: ScamReport, p: Plat, ctx: Service) -> dict:
-    """'I think I was scammed.' Opens a case for an analyst; decides nothing by itself."""
+    """'I think I was scammed.' Opens a case for an analyst; decides nothing by itself.
+
+    Reporting a payment that went through also claims a refund for it: `refund` is
+    where that claim stands (GET .../transactions/{txn_id}/refund follows it).
+    """
     _limit(p.report_limit, body.reporter_id)
-    made = workflow.report_scam(
+    return report_view(p, *workflow.report_scam(
         p.scorer, ctx, body.reporter_id, body.reported_wallet_id, body.txn_id,
         body.category, body.description,
-    )  # fmt: skip
-    return {"report_id": made.id, "case_id": made.case_id, "reference": made.reference}
+    ))  # fmt: skip
+
+
+def report_view(p: Platform, made, refund) -> dict:
+    claim = None
+    if refund is not None:
+        claim = customer_refund_view(refund, refund.wallet_id in p.scorer.frozen, p.scorer.now())
+    return {
+        "report_id": made.id,
+        "case_id": made.case_id,
+        "reference": made.reference,
+        "refund": claim,
+    }
 
 
 @router.post("/message-check")

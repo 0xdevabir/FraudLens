@@ -45,6 +45,7 @@ from .routes import (
     network,
     ops,
     public,
+    refunds,
     scoring,
     webhooks,
 )
@@ -216,6 +217,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         alerts,
         cases,
         appeals,
+        refunds,
         network,
         customer,
         intel,
