@@ -1,0 +1,33 @@
+# TLS in front of the API and the console: `make tls` (docker compose --profile tls).
+# FRAUDLENS_SITE is the public host name. Left at localhost, Caddy issues a
+# certificate from its own local CA (expect a browser warning, or trust it); with
+# a real domain it gets one from Let's Encrypt.
+#
+# Caddy is the edge: it drops any X-Forwarded-For a client sends and writes the
+# real peer address, so the API can believe this one proxy (FRAUDLENS_TRUSTED_PROXIES).
+
+{$FRAUDLENS_SITE:localhost} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		X-Frame-Options DENY
+		-Server
+	}
+
+	# Nothing the API takes is this big; refuse it here, not in Python.
+	request_body {
+		max_size 2MB
+	}
+
+	@api path /v1/* /health /ready /docs /openapi.json
+	handle @api {
+		reverse_proxy api:8010
+	}
+
+	handle {
+		reverse_proxy console:3100
+	}
+}

@@ -44,6 +44,9 @@ services:
     environment:
       FRAUDLENS_DATABASE_URL: postgresql+psycopg://fraudlens:${POSTGRES_PASSWORD:-fraudlens_dev}@postgres:5432/fraudlens
       FRAUDLENS_REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/0
+      # Only the TLS proxy's X-Forwarded-For is believed (its fixed address below).
+      FRAUDLENS_TRUSTED_PROXIES: '["172.30.250.10/32"]'
+    networks: [default, edge]
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,8 +77,32 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:3100:3100"
+    networks: [default, edge]
+
+  # `make tls`: HTTPS with HSTS in front of the API and the console (deploy/Caddyfile).
+  proxy:
+    profiles: [tls]
+    image: caddy:2-alpine
+    environment:
+      FRAUDLENS_SITE: ${FRAUDLENS_SITE:-localhost}
+    depends_on: [api, console]
+    ports:
+      - "127.0.0.1:${TLS_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+    networks:
+      edge:
+        ipv4_address: 172.30.250.10
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: 172.30.250.0/24
 
 volumes:
   pgdata:
   data:
   artifacts:
+  caddy:

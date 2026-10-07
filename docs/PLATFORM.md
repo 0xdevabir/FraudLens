@@ -70,6 +70,7 @@ served at `/docs` outside production.
 | Auth | `POST /auth/login`, `GET /auth/me`, `POST /auth/logout` | anyone / signed in / signed in |
 | Demo sign-in (§7, off by default) | `GET /auth/demo`, `POST /auth/demo-login` | anyone, when enabled |
 | Scoring | `POST /score`, `POST /events` (up to 500 per call, queued), `POST /wallet-flags` | service |
+| Ingest ([INGEST.md](INGEST.md)), off without a partner keyring | `POST /ingest/transactions[?wait=decision]`, `POST /ingest/transactions/batch` (pacs.008, HMAC-signed, no token) | partner key |
 | | `POST /score/what-if` | service, analyst, supervisor |
 | Alerts | `GET /alerts`, `GET /decisions/{txn_id}`, `GET /decisions/{txn_id}/narrative?lang=en\|bn`, `GET /stream/alerts` (server-sent events) | analyst, supervisor |
 | Cases | `GET /cases`, `POST /cases`, `GET /cases/{id}`, `POST /cases/{id}/assign\|notes\|escalate\|verdict`, `GET /users/reviewers` | analyst, supervisor |
@@ -108,6 +109,11 @@ repeat the value that was sent.
 4. Everything that needs no answer (cash-ins, bill payments, back-office flags):
    `POST /v1/events`. They keep the feature state current.
 5. When your own investigation confirms a wallet as fraud: `POST /v1/wallet-flags`.
+
+A core-banking system that would rather push than call with a token uses the
+signed webhook instead of steps 2 and 4: ISO 20022 pacs.008 credit transfers,
+HMAC-signed per request, with replay protection, idempotency keys and an optional
+signed decision callback ([INGEST.md](INGEST.md)).
 
 A transaction may carry `ip`, the address the customer's request came from
 (optional, IPv4 or IPv6). The platform reduces it to its network at the edge (the
@@ -214,7 +220,9 @@ and each request still needs its own approval by a second person.
 - **Production guard.** With `FRAUDLENS_ENVIRONMENT=production` the API refuses to
   start with the development signing secret, the development database password,
   a Redis URL without a password, `*` as a CORS origin, or demo sign-in enabled,
-  and the interactive docs are off.
+  and the interactive docs are off. It also refuses keyring keys shorter than 32
+  characters, partner callbacks that are not `https`, and a trusted-proxy list
+  that trusts everyone (`0.0.0.0/0`).
 - **Demo sign-in.** Off by default. `FRAUDLENS_DEMO_LOGIN=true` makes
   `POST /auth/demo-login` sign in as one of the five seeded console accounts
   without a password, and the login page shows a button for each. Anyone who can
@@ -222,6 +230,22 @@ and each request still needs its own approval by a second person.
   you can reach. Service accounts are never offered, each use is audited as
   `auth.login` with `demo: true`, and the endpoint answers 404 when the setting
   is off or the environment is production.
+- **Key rotation.** Each token names its signing key (`kid`). With
+  `FRAUDLENS_JWT_KEYRING` set, `make rotate-jwt` adds a key that signs from then
+  on, and the earlier ones keep verifying until the tokens they signed have
+  expired, so nobody is signed out. Partner HMAC keys rotate the same way
+  (`make partner-key`, with a grace period), and `keys retire` cuts off a leaked
+  key at once. The keyring files are re-read when they change; no restart.
+- **Secrets from files.** Every setting can come from a file:
+  `FRAUDLENS_JWT_SECRET_FILE=/run/secrets/jwt` (Docker or Kubernetes secrets),
+  never both the value and the file. `FRAUDLENS_SECRETS_PROVIDER=module:function`
+  plugs in a secrets manager; only a directory reader ships
+  (`fraudlens.secret_sources.directory_provider`).
+- **TLS and the client address.** `make tls` puts Caddy in front of the API and
+  the console (HTTPS, HSTS, a 2 MB body cap; `deploy/Caddyfile`). The API believes
+  `X-Forwarded-For` only from the addresses in `FRAUDLENS_TRUSTED_PROXIES`, and
+  only as far back as those proxies wrote it; a client's own header is ignored.
+  The threat model is [SECURITY.md](SECURITY.md).
 - **Redis password.** Optional in development: `REDIS_PASSWORD` in a `.env` next
   to `docker-compose.yml` turns it on, and `FRAUDLENS_REDIS_URL` carries the same
   password. Without it Redis relies on its port being bound to 127.0.0.1.
@@ -262,9 +286,10 @@ written before they existed is refused at load (`make features` rebuilds it).
 - **Recovery time grows** with the number of transactions since the snapshot. A
   production system would write snapshots periodically; this one has only the
   end-of-history snapshot.
-- **Rate limits and the login lockout use the address the API sees.** Behind a
-  proxy, run uvicorn with `--proxy-headers` and a trusted proxy list, or every
-  client shares one address.
+- **Rate limits and the login lockout use the client address** worked out from
+  `FRAUDLENS_TRUSTED_PROXIES`. Left empty behind a proxy, every client shares the
+  proxy's address; listing a proxy that passes on its clients' own headers lets
+  them choose their address.
 - **The live feed authenticates with the Bearer header**, which the browser's
   `EventSource` cannot send; the console reads it with `fetch`.
 - **Step-up is asserted by the caller** (`step_up_passed`). The platform trusts
@@ -277,8 +302,16 @@ written before they existed is refused at load (`make features` rebuilds it).
   sent to the language model is masked in the backend, before it leaves.
 - **The free-text mask is a pattern match.** It catches long numbers and e-mail
   addresses, not a name or an address written in words.
-- **No TLS, secrets manager or key rotation**: deployment concerns outside this
-  prototype.
+- **Security is partly built** ([SECURITY.md](SECURITY.md) lists each threat as
+  done, partial or not done). TLS ends at the proxy: the hops behind it (API,
+  Postgres, Redis) are plain on a private network. Secrets come from files or a
+  provider hook, but no secrets-manager client ships. Keys rotate when someone
+  runs the command; nothing rotates them on a schedule, and moving from the single
+  `FRAUDLENS_JWT_SECRET` to a keyring signs everyone out once.
+- **Decision callbacks** cover transactions queued through the ingest webhook,
+  not `/v1/events`. Delivery is at least once, and the outbound request does not
+  check where the partner's address resolves to: callback URLs are set by an
+  operator, not by the partner.
 
 ## 11. Measured
 

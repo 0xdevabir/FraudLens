@@ -111,5 +111,23 @@ lint: ## Lint and format check
 	cd backend && uv run ruff check src tests && uv run ruff format --check src tests
 	cd frontend && pnpm exec tsc --noEmit && pnpm exec eslint .
 
+.PHONY: tls rotate-jwt partner-key keys
+JWT_KEYRING ?= secrets/jwt.json
+INGEST_KEYRING ?= secrets/ingest.json
+
+tls: backend/.env ## The demo behind HTTPS with HSTS on https://localhost:8443 (deploy/Caddyfile)
+	docker compose --profile demo --profile tls up --build
+
+rotate-jwt: ## New token-signing key; sessions signed with the old one last until they expire
+	cd backend && mkdir -p -m 700 secrets && uv run python -m fraudlens.platform.keys rotate-jwt $(JWT_KEYRING)
+
+partner-key: ## New ingest HMAC key: make partner-key PARTNER=upay [CALLBACK=https://...]
+	cd backend && mkdir -p -m 700 secrets && uv run python -m fraudlens.platform.keys rotate-partner \
+		$(INGEST_KEYRING) --partner $(PARTNER) $(if $(CALLBACK),--callback-url $(CALLBACK))
+
+keys: ## List the key ids in both keyrings (never the secrets)
+	cd backend && for f in $(JWT_KEYRING) $(INGEST_KEYRING); do \
+		[ -f $$f ] && uv run python -m fraudlens.platform.keys list $$f; done; true
+
 fmt: ## Auto-format
 	cd backend && uv run ruff check --fix src tests && uv run ruff format src tests
