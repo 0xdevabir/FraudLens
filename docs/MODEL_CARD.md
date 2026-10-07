@@ -267,7 +267,8 @@ has not been done yet.
   real fraud. Precision in production would be lower at the same thresholds;
   thresholds must be re-fitted on real data.
 - **Labels.** Training uses ground-truth labels. In production only reported
-  cases are labelled (about half), which biases what the model learns.
+  cases are labelled (about half), which biases what the model learns. §15
+  measures what that costs and what wins it back.
 - **No adaptation.** The scammers behind every number above do not react to the
   controls. §14 adds scammers that do, and measures the decay.
 - **Young wallets and fast cash-out are risk signals.** New customers and
@@ -492,12 +493,97 @@ alerted, which is more feedback than real scammers get. The tactic set and its
 parameters are assumptions (DATA_ASSUMPTIONS.md). The retrained models are
 experiment-only and are not registered.
 
-## 15. Reproduce
+## 15. Under-reporting: training on reported scams only
+
+Every number here is read from `backend/artifacts/reports/label_realism.json`,
+which `make label-realism` writes (about 5 to 15 minutes). It does not change
+the served model or any number above.
+
+The served model learnt from every scam the simulator ran. A wallet provider
+only learns about the ones victims report. To measure what that costs, the
+transaction model is retrained, with the same LightGBM settings, training fold
+and early stopping as `make train`, on the labels a provider would have had,
+and every version is scored on **every** scam in the test period. Each is
+compared at the false-positive rate the served model (v4, warn tier) runs at
+on test, 0.523% of honest payments, so the rows differ only in how they rank.
+Five seeds (7, 11, 13, 17, 19) vary both the reporting draw and the model;
+values are mean ± sd.
+
+**How reporting is simulated.** A case is reported with a probability that
+averages the simulator's `report_rate` of 50% but is higher for larger losses,
+urban victims, accounts held for a year or more (the data has no person age)
+and account takeovers, and lower for lottery-fee and investment scams. Reports
+arrive after the simulator's delay (median 1.5 days, 5 for investment scams);
+only those in by the start of the test period count. A reported case labels all
+its transactions, including the mule's forwards and cash-outs. Unreported fraud
+is labelled clean. These weights are assumptions, listed in the JSON, not
+measurements. In the training data this labels 82% of takeovers, 56% of
+impersonations, 40% of wrong-send and 35% of lottery-fee cases.
+
+| Training labels | Scams caught | Loss transfers caught | Taka stopped | PR-AUC |
+| --- | --- | --- | --- | --- |
+| Every scam (as served) | 87.3% ± 0.5 | 81.7% ± 0.7 | 85.0% ± 0.6 | 0.831 ± 0.003 |
+| Reported only, half at random | 72.9% ± 5.3 | 66.4% ± 6.0 | 72.3% ± 7.4 | 0.595 ± 0.038 |
+| **Reported only, biased** | **78.8% ± 2.7** | 71.4% ± 2.2 | 77.9% ± 1.9 | 0.724 ± 0.019 |
+| + positive-unlabelled learning | 79.4% ± 1.5 | 72.1% ± 1.9 | 79.5% ± 1.9 | 0.762 ± 0.020 |
+| + same, report rate given as 50% | 79.0% ± 1.8 | 71.9% ± 1.8 | 78.8% ± 2.0 | 0.754 ± 0.020 |
+| + labels through mule wallets | 82.8% ± 2.2 | 75.6% ± 1.7 | 80.9% ± 1.5 | 0.770 ± 0.043 |
+| + analyst verdicts on alerts | 83.0% ± 2.0 | 76.1% ± 2.1 | 81.9% ± 1.6 | 0.769 ± 0.033 |
+| + mule-wallet labels and verdicts | 82.4% ± 1.4 | 75.0% ± 1.4 | 79.7% ± 2.1 | 0.781 ± 0.023 |
+
+Scams caught, by typology (mean over seeds):
+
+| Training labels | account_takeover | impersonation | lottery_fee | wrong_send | **investment_scam** (unseen) |
+| --- | --- | --- | --- | --- | --- |
+| Every scam | 100% | 96.8% | 98.5% | 100% | 71.2% ± 1.3 |
+| Reported only, biased | 100% | 96.8% | 95.8% | 100% | **52.4% ± 5.8** |
+| + positive-unlabelled | 100% | 96.8% | 95.2% | 100% | 54.1% ± 3.5 |
+| + labels through mule wallets | 100% | 96.8% | 96.7% | 100% | 61.5% ± 4.9 |
+| + analyst verdicts | 100% | 96.8% | 96.7% | 100% | 61.8% ± 4.5 |
+
+What this shows:
+
+- **Under-reporting costs about 8.5 points of scams caught** (87.3% to 78.8%)
+  at the same false-alert rate, and PR-AUC falls from 0.831 to 0.724.
+- **It hides the scam the model has not seen, not the ones it has.** Known
+  typologies stay at 96 to 100% caught: scripted fraud is easy enough that half
+  the examples suffice. The held-out investment scam falls from 71.2% to 52.4%.
+  With fewer examples the model learns the narrow signature of each reported
+  pattern rather than the general shape of a mule chain, which is what caught
+  the new scam.
+- **Who reports matters less than how many.** Biased reporting did better than
+  reporting at random (78.8% against 72.9%), with far less spread between
+  seeds, because it keeps the large, cleanly labelled takeover and
+  impersonation cases; it also labels more fraud rows (1,293 against 1,066 on
+  average). The random-reporting result swings by ±5 points with the draw.
+- **Positive-unlabelled learning does little.** Elkan–Noto weighting lifts
+  PR-AUC to 0.762 but scams caught by under one point, within noise, and
+  telling it the true report rate does not help. Its assumption, that labels go
+  missing at random among frauds, is what biased reporting breaks.
+- **What helps is the network and the analysts.** Spreading soft labels (weight
+  0.7) from reported mule wallets to their other incoming and outgoing money
+  within three days labels about 755 extra rows, 91% of them really fraud, and
+  wins back 4 points of scams caught and 9 of the unseen typology. Analyst
+  verdicts on the top 1% of a model's alerts over the last 15 training days
+  (about 978 reviews, 230 of them fraud no victim had reported) win back the
+  same. Together they are no better than either alone: they recover largely the
+  same rows. Roughly half the cost of under-reporting is recovered; the unseen
+  typology stays about 10 points below the ground-truth model.
+
+Cautions: the reviewers are simulated and always right (as in §13); the
+operating threshold is set on test negatives so every row has the same false-
+alert rate, which isolates ranking but is not how a threshold would be chosen in
+production; the report propensities are assumptions; and five seeds give
+standard deviations of 1.5 to 5 points, so differences under about 3 points
+between recovery methods are not meaningful.
+
+## 16. Reproduce
 
 ```
 make data features train     # about one minute; writes backend/artifacts/models/<version>/
 make policy insights         # policy_report.json and insights.json (fairness, drift, threshold sweep)
 make adversary               # §14: adaptive scammers vs frozen, retrained and drift-gated models
+make label-realism          # §15: reported-only labels and recovery methods
 make test                    # 203 tests, including leakage and round-trip checks
 ```
 
