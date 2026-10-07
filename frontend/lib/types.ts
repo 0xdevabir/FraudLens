@@ -594,6 +594,8 @@ export interface Report {
   } & Record<string, unknown>;
   insights: Insights | null;
   label_realism?: LabelRealism | null;
+  /** Young-wallet segment thresholds (policy v3) against the base policy; absent until `make mitigation` has run. */
+  mitigation?: Mitigation | null;
 }
 
 /** Mean and standard deviation across seeds. */
@@ -610,6 +612,69 @@ export interface LabelRealism {
       by_typology: Record<string, { case_recall: Spread; loss_txn_recall: Spread }>;
     }>;
   } & Record<string, unknown>;
+}
+
+type MitigationScales = Record<string, { warn: number; hold: number }>;
+
+export interface MitigationPoint {
+  scales: MitigationScales;
+  admissible: boolean;
+  meets_constraints: boolean;
+  chosen: boolean;
+  fit: Record<string, number | null>;
+  test: Record<string, number | null>;
+}
+
+export interface MitigationMetric {
+  key: string;
+  label: string;
+  before: number | null;
+  after: number | null;
+  difference: number | null;
+  before_ci: [number | null, number | null];
+  after_ci: [number | null, number | null];
+  difference_ci: [number | null, number | null];
+}
+
+export type IntersectionRow = FairRow & {
+  false_alert_rate_after: number | null;
+  false_hold_rate_after: number | null;
+  ratio_to_overall_after: number | null;
+  victim_transfers_alerted_after: number | null;
+};
+
+export interface Mitigation {
+  model_version: string;
+  base_policy: string;
+  policy_version: string;
+  fitted_on: string[];
+  evaluated_on: string;
+  rows: { fit: number; test: number };
+  days: number;
+  objective: {
+    minimise: string;
+    subject_to: Record<string, number | string>;
+    ties: string;
+    warn_scales: number[];
+    hold_scales: number[];
+  };
+  segments: {
+    id: string; description: string; applies_to: string[];
+    scale: Record<"warn" | "step_up" | "hold", number>;
+    thresholds: Record<"warn" | "step_up" | "hold", number>;
+    rows_test: number;
+  }[];
+  fit: {
+    candidates: number; admissible: number; meeting_constraints: number;
+    base: MitigationPoint; chosen: MitigationPoint;
+    frontier: MitigationPoint[]; path_warn: MitigationPoint[]; path_hold: MitigationPoint[];
+  };
+  policy_matches_fit: boolean;
+  engine_matches_grid: boolean;
+  tier_counts: { before: Record<string, number>; after: Record<string, number> };
+  tier_changes: { from: string; to: string; label: string; count: number }[];
+  before_after: { reps: number; resampled: string; metrics: MitigationMetric[] };
+  intersectional: { sender: IntersectionRow[]; receiver: IntersectionRow[] };
 }
 
 export interface ModelInfo {

@@ -80,6 +80,9 @@ class Decision:
     similar_cases: tuple[dict, ...]
     evidence: dict
     narrative: str | None
+    # The policy segment whose cut-offs set the model's tier, with those cut-offs; None
+    # when the policy's own cut-offs applied (or in rules-only mode).
+    segment: dict | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -144,7 +147,8 @@ class DecisionEngine:
             else []
         )
 
-        risk_score = display_score(risk, self.thresholds) if risk is not None else None
+        # Anchored to the cut-offs that applied, so 80 still means "held" inside a segment.
+        risk_score = display_score(risk, outcome.thresholds) if risk is not None else None
         band = _BANDS[outcome.model_tier] if outcome.model_tier else "not scored"
         evidence = {
             "transaction": {
@@ -201,6 +205,13 @@ class DecisionEngine:
             similar_cases=tuple(similar),
             evidence=evidence,
             narrative=template(evidence) if alert else None,
+            segment={
+                "id": outcome.segment.id,
+                "description": outcome.segment.description,
+                "thresholds": dict(outcome.thresholds),
+            }
+            if outcome.segment
+            else None,
         )
 
     # ------------------------------------------------------------- internals

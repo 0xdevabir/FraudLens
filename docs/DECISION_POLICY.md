@@ -279,8 +279,8 @@ check.
 
 ## 9. Changing the policy
 
-1. Copy `policies/v2.yaml` to `v3.yaml`, set `version: v3`, edit.
-2. `uv run python -m fraudlens.decision.evaluate --policy v3` reports what the
+1. Copy the newest file in `policies/` (now `v3.yaml`) to the next version, set `version:`, edit.
+2. `uv run python -m fraudlens.decision.evaluate --policy v4` reports what the
    change does to every tier before anything is served.
 3. A file that is malformed, has an unknown field, removes human review from
    holds, or declares a different version than its file name is refused at load.
@@ -289,5 +289,81 @@ check.
 
 ```
 make policy     # writes policy_report.json and similar_cases.npz next to the model
-make test       # 203 tests; 79 cover this layer
+make mitigation # fits and measures the v3 segments; writes fairness_mitigation.json
+make test       # 246 tests (52 need Postgres and skip without it); 19 cover the segments
 ```
+
+## 11. Young wallets: segment thresholds (policy v3)
+
+v2 interrupts honest payments involving a wallet under 30 days old far more than
+others ([MODEL_CARD §13](MODEL_CARD.md)). v3 is v2 plus a `segments:` block; v1 and
+v2 are unchanged, v2 stays the default, and `FRAUDLENS_POLICY_VERSION=v3` serves v3.
+
+**What a segment is.** A set of conditions (`r_age_days < 30` on a transfer;
+`s_age_days < 30` on any payment) and a `scale` per tier. Its cut-offs are the
+model's times the scale, so they follow whichever model version is resolved,
+including a shadow model. The first matching segment decides the model's tier;
+the rules then run exactly as for any payment, so R01/R02 still hold confirmed
+fraud and the mule rules still raise. Each decision records the segment and the
+cut-offs used (`segment` in the decision detail), and the 0–100 display score is
+anchored to those cut-offs.
+
+**Guards, enforced when the thresholds are resolved.**
+
+- A segment's warn cut-off is capped at the policy's hold cut-off: a payment the
+  model would hold for anyone is at least warned in every segment.
+- A segment's hold cut-off stays below 1 (it keeps at least 1/scale of the room
+  between the policy's hold cut-off and 1), so every segment can still be held for
+  a person; the hold tier keeps `human_review: true` as before.
+- Cut-offs out of order are refused at load, as for the policy's own.
+
+**The softer tier.** A hold scale above 1 means a payment between the policy's
+hold cut-off and the segment's gets step-up (re-authenticate and wait 30 minutes)
+instead of money held for an analyst. Step-up rather than a warning, because a
+young sender may be a takeover victim and step-up still stops someone who does
+not hold the credentials.
+
+**How the scales were chosen** (`fraudlens.decision.mitigation`, on val_a + val_b
+only, 110,090 payments). Warn scales 1–250 and hold scales 1–4 per segment, every
+combination (6,400). Objective: minimise the larger of the two young-wallet
+false-alert ratios, each against honest payments with no young wallet (a rate the
+segments cannot move; against the overall rate, helping one group raises the
+other's ratio). Subject to: at most 0.5 pp of victim transfers alerted lost, 0.5
+pp of victim money alerted, 1 pp of victim transfers held, and the guard. Ratios
+within 0.1 count as equal; ties go to the smaller sum of the two, the smaller
+false-hold ratio, then the smaller change. 2,420 combinations met the
+constraints. Chosen:
+
+| Segment | Warn | Step-up | Hold | Cut-offs on model v4 (warn / step-up / hold) |
+| --- | --- | --- | --- | --- |
+| S01 receiving wallet under 30 days | ×25 | ×6.03 | ×3 | 0.0496 / 0.0496 / 0.1494 |
+| S02 sender under 30 days | ×16 | ×3.86 | ×1 | 0.0318 / 0.0318 / 0.0498 |
+
+For both segments the warn and step-up cut-offs coincide, so below the hold a
+young wallet's payment gets step-up or nothing. On validation the choice costs no
+victim recall at warn (97.6% before and after; held 96.4% to 95.8%).
+
+**Measured on test** (`fairness_mitigation.json`; the full table with 95%
+bootstrap intervals is in MODEL_CARD §13):
+
+| | v2 | v3 |
+| --- | --- | --- |
+| Young senders, times the overall false-alert rate | 5.90 | 1.14 |
+| Young receiving wallets, times the overall rate | 16.17 | 7.03 |
+| Young receiving wallets, honest payments held | 1.50% | 0.70% |
+| Victim transfers alerted / held | 81.73% / 66.47% | 81.58% / 66.19% |
+| Victims' money alerted | 85.19% | 84.76% |
+| Alerts a day, precision at warn | 81.0, 64.7% | 71.7, 73.1% |
+
+The cost on test is one victim transfer no longer alerted and two moved from hold
+to step-up (৳15,300 of victims' money no longer alerted), against 232 honest
+payments no longer interrupted and 18 honest holds softened. The report also
+checks that the engine's decisions equal the fit's arithmetic for every test row
+and that the policy file carries the chosen scales.
+
+**What it does not do.** The gap for young receiving wallets is narrowed, not
+closed: even with no guard (warn ×250) it stays about 6× the no-young-wallet rate,
+because the rest comes from rules and from honest payments the model scores at
+hold level. Young receiving wallets on USSD remain the worst group (16× the
+overall rate in rural areas). Recommendation: serve v3 once a person has accepted
+the cost of one victim transfer in 695; watch young-wallet USSD transfers.
