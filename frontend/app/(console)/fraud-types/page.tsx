@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { Bullets, Contents, DocSection, H3, KeyPoints, P, Quote } from "@/components/doc";
 import { Async, Badge, Button, Card, CategoryBadges, Empty, ErrorNote, Facts, inputClass, PageHeader, Stat, Table, Tabs, Td, type Tone } from "@/components/ui";
 import { api, useApi } from "@/lib/api";
 import { num, pct, taka, when, words } from "@/lib/format";
@@ -10,10 +11,10 @@ import type { CheckLevel, FraudCategory, FraudTaxonomy, MessageCheck, PaymentCla
 type Tab = "coverage" | "message" | "payment";
 
 const DETECTOR: Record<string, { label: string; tone: Tone; what: string }> = {
-  transaction: { label: "Payment models", tone: "blue", what: "the transaction and recipient models, the rules and the payment graph" },
-  text: { label: "Message classifier", tone: "violet", what: "the scam-message classifier, trained on English, Bangla and Banglish" },
-  links: { label: "Link check", tone: "orange", what: "fixed checks on any link in a message; not a model" },
-  ledger: { label: "Ledger check", tone: "green", what: "the payment is looked up in the recorded transactions" },
+  transaction: { label: "Payment models", tone: "blue", what: "The models that score payments and receivers, the rules, and the map of who pays whom." },
+  text: { label: "Message check", tone: "violet", what: "A model that reads messages in English, Bangla and Banglish and spots scam wording." },
+  links: { label: "Link check", tone: "orange", what: "Fixed checks on any link in a message. This part is not a model." },
+  ledger: { label: "Payment record check", tone: "green", what: "Looks the payment up in our own records of real transactions." },
 };
 
 const LEVEL: Record<CheckLevel, { label: string; tone: Tone }> = {
@@ -39,80 +40,103 @@ function rate(value: number | null | undefined, digits = 0): string {
   return value == null ? "–" : pct(value, digits);
 }
 
+const anchor = (id: string) => `type-${id}`;
+
 function Coverage({ data }: { data: FraudTaxonomy }) {
   const report = data.report;
   return (
-    <>
-      {report ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat
-            label="Scam messages caught"
-            value={rate(report.test.with_link_check.recall, 1)}
-            tone="good"
-            sub={`new wording of scripts it was trained on, classifier with link check; ${num(report.test.scam)} scam messages`}
-          />
-          <Stat
-            label="Scripts it never saw"
-            value={rate(report.unseen.with_link_check.recall, 1)}
-            tone="warn"
-            sub={`${num(report.corpus.held_out_families)} whole scripts kept out of training; ${rate(report.unseen.caution.recall, 1)} by the classifier alone`}
-          />
-          <Stat
-            label="Harmless messages flagged"
-            value={rate(report.test.with_link_check.false_positive_rate, 2)}
-            sub={`of ${num(report.test.harmless)} harmless messages, real OTP notices and receipts among them`}
-          />
-          <Stat
-            label="Corpus"
-            value={num(Object.values(report.corpus.messages).reduce((a, b) => a + b, 0))}
-            sub={`synthetic messages from ${num(report.corpus.templates)} templates in ${num(report.corpus.families)} scripts`}
-          />
-        </div>
-      ) : (
-        <ErrorNote error="The scam-message classifier has not been trained yet (run `make intel`). The link check and the ledger check work without it." />
-      )}
+    <div className="space-y-10">
+      <KeyPoints
+        points={[
+          `There are ${data.categories.length} main kinds of fraud below. Each one says how it happens, the warning signs FraudLens looks for, and what the customer is told.`,
+          "Different parts of FraudLens spot different kinds: the payment models, the message check, the link check and the payment record check.",
+          "The test results below come from made-up messages, not real customer messages.",
+        ]}
+      />
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        {data.categories.map((category) => <Category key={category.id} category={category} report={report} />)}
-      </div>
+      <DocSection
+        number={1}
+        title="How well the message check works"
+        intro={<p>These results come from testing on made-up scam and safe messages.</p>}
+      >
+        {report ? (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Stat
+              label="Scam messages caught"
+              value={rate(report.test.with_link_check.recall, 1)}
+              tone="good"
+              sub={`Out of ${num(report.test.scam)} scam messages. They follow scam scripts it learned from, in new words. Message check and link check together.`}
+            />
+            <Stat
+              label="New scam scripts caught"
+              value={rate(report.unseen.with_link_check.recall, 1)}
+              tone="warn"
+              sub={`${num(report.corpus.held_out_families)} whole scripts were kept out of training to test this. The message check alone caught ${rate(report.unseen.caution.recall, 1)}.`}
+            />
+            <Stat
+              label="Safe messages flagged by mistake"
+              value={rate(report.test.with_link_check.false_positive_rate, 2)}
+              sub={`Out of ${num(report.test.harmless)} safe messages, including real OTP notices and receipts.`}
+            />
+            <Stat
+              label="Test messages"
+              value={num(Object.values(report.corpus.messages).reduce((a, b) => a + b, 0))}
+              sub={`Made-up messages, built from ${num(report.corpus.templates)} templates in ${num(report.corpus.families)} scripts.`}
+            />
+          </div>
+        ) : (
+          <ErrorNote error="The message check has not been trained yet (run `make intel`). The link check and the payment record check work without it." />
+        )}
+      </DocSection>
+
+      <DocSection number={2} title="The fraud types" intro={<p>Each type below explains how it works, in plain words.</p>}>
+        <Contents items={data.categories.map((category) => ({ id: anchor(category.id), label: category.name.en }))} />
+        <div className="mt-6 space-y-6">
+          {data.categories.map((category) => <Category key={category.id} category={category} report={report} />)}
+        </div>
+      </DocSection>
 
       {report && (
-        <div className="mt-4 grid gap-4 xl:grid-cols-2">
-          <Card title="By language" hint="Share of scam messages flagged, and of harmless ones flagged by mistake." flush>
-            <Table head={["Language", "Caught, known scripts", "Flagged by mistake", "Caught, unseen scripts"]}>
-              {Object.entries(report.test.languages).map(([lang, row]) => (
-                <tr key={lang}>
-                  <Td>{LANGUAGE[lang] ?? lang}</Td>
-                  <Td right>{rate(row.recall, 1)}</Td>
-                  <Td right>{rate(row.false_positive_rate, 2)}</Td>
-                  <Td right>{rate(report.unseen.languages[lang]?.recall, 1)}</Td>
-                </tr>
-              ))}
-            </Table>
-          </Card>
-          <Card title="Scripts held out of training" hint="Share of each script's messages the classifier flagged without ever seeing that script." flush>
-            <Table head={["Script", "Kind", "Messages", "Flagged"]}>
-              {Object.entries(report.unseen.families ?? {}).map(([family, row]) => (
-                <tr key={family}>
-                  <Td>{words(family)}</Td>
-                  <Td>{row.scam ? "scam" : "harmless"}</Td>
-                  <Td right>{num(row.messages)}</Td>
-                  <Td right>{rate(row.flagged, 0)}</Td>
-                </tr>
-              ))}
-            </Table>
-          </Card>
-        </div>
+        <DocSection number={3} title="Results in detail">
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Card title="By language" hint="How many scam messages were caught, and how many safe messages were flagged by mistake." flush>
+              <Table head={["Language", "Scams caught (known scripts)", "Safe flagged by mistake", "Scams caught (new scripts)"]}>
+                {Object.entries(report.test.languages).map(([lang, row]) => (
+                  <tr key={lang}>
+                    <Td>{LANGUAGE[lang] ?? lang}</Td>
+                    <Td right>{rate(row.recall, 1)}</Td>
+                    <Td right>{rate(row.false_positive_rate, 2)}</Td>
+                    <Td right>{rate(report.unseen.languages[lang]?.recall, 1)}</Td>
+                  </tr>
+                ))}
+              </Table>
+            </Card>
+            <Card title="Scripts kept out of training" hint="For each script the message check never saw, the share of its messages it flagged." flush>
+              <Table head={["Script", "Kind", "Messages", "Flagged"]}>
+                {Object.entries(report.unseen.families ?? {}).map(([family, row]) => (
+                  <tr key={family}>
+                    <Td>{words(family)}</Td>
+                    <Td>{row.scam ? "scam" : "safe"}</Td>
+                    <Td right>{num(row.messages)}</Td>
+                    <Td right>{rate(row.flagged, 0)}</Td>
+                  </tr>
+                ))}
+              </Table>
+            </Card>
+          </div>
+        </DocSection>
       )}
 
-      <Card className="mt-4" title="What this does not show">
-        <ul className="list-disc space-y-1.5 pl-5 text-sm text-fg-2">
-          {(report?.limits ?? []).map((limit) => <li key={limit}>{limit}</li>)}
-          <li>The category on an alert is read from evidence already on it (the scenario, similar past cases, the mule score). It is a label for the reviewer and changes no decision.</li>
-          <li>Text a customer sends to be checked is scored and thrown away. Only the level and the category names are kept in the audit log.</li>
-        </ul>
-      </Card>
-    </>
+      <DocSection number={report ? 4 : 3} title="What these results do not show">
+        <Bullets
+          items={[
+            ...(report?.limits ?? []),
+            "The fraud type shown on an alert comes from evidence already on it: the situation, similar past cases and the mule score. It only helps the reviewer. It does not change any decision.",
+            "When a customer sends a message to be checked, it is scored and then thrown away. Only the result level and the fraud type names are kept in the audit log.",
+          ]}
+        />
+      </DocSection>
+    </div>
   );
 }
 
@@ -121,39 +145,51 @@ function Category({ category, report }: { category: FraudCategory; report: Fraud
   const unseen = report?.unseen.categories[category.id];
   const reads = category.detectors.includes("text");
   return (
-    <Card
-      title={`${category.number}. ${category.name.en}`}
-      hint={category.name.bn}
-      actions={<span className="flex flex-wrap justify-end gap-1">{category.detectors.map((id) => (
-        <Badge key={id} tone={DETECTOR[id]?.tone ?? "slate"} title={DETECTOR[id]?.what}>{DETECTOR[id]?.label ?? words(id)}</Badge>
-      ))}</span>}
-    >
-      <p className="text-sm text-fg">{category.summary}</p>
-      <p className="mt-2 flex flex-wrap gap-1">{category.examples.map((example) => <Badge key={example}>{example}</Badge>)}</p>
+    <article id={anchor(category.id)} className="scroll-mt-20 rounded-2xl border border-line bg-card px-5 py-5 sm:px-6">
+      <header className="border-b border-line pb-3">
+        <h3 className="text-[1.0625rem] font-semibold tracking-tight text-fg">
+          <span className="mr-2 tabular-nums text-fg-4">{category.number}.</span>
+          {category.name.en}
+        </h3>
+        <p lang="bn" className="mt-0.5 text-sm text-fg-3">{category.name.bn}</p>
+      </header>
 
-      <h3 className="mt-4 text-xs font-semibold tracking-wide text-fg-3 uppercase">In Bangladesh</h3>
-      <p className="mt-1 text-sm text-fg-2">{category.bangladesh}</p>
+      <p className="mt-4 max-w-3xl text-base leading-7 text-fg">{category.summary}</p>
 
-      <h3 className="mt-4 text-xs font-semibold tracking-wide text-fg-3 uppercase">What FraudLens looks for</h3>
-      <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-fg-2">
-        {category.signals.map((signal) => <li key={signal}>{signal}</li>)}
+      <H3>Common examples</H3>
+      <p className="flex flex-wrap gap-1">{category.examples.map((example) => <Badge key={example}>{example}</Badge>)}</p>
+
+      <H3>How it happens in Bangladesh</H3>
+      <P>{category.bangladesh}</P>
+
+      <H3>Warning signs FraudLens looks for</H3>
+      <Bullets items={category.signals} />
+
+      <H3>Which parts of FraudLens spot it</H3>
+      <ul className="max-w-3xl space-y-1.5 text-sm text-fg-2">
+        {category.detectors.map((id) => (
+          <li key={id} className="flex flex-wrap items-baseline gap-2">
+            <Badge tone={DETECTOR[id]?.tone ?? "slate"}>{DETECTOR[id]?.label ?? words(id)}</Badge>
+            {DETECTOR[id] && <span className="text-fg-3">{DETECTOR[id].what}</span>}
+          </li>
+        ))}
       </ul>
 
-      <h3 className="mt-4 text-xs font-semibold tracking-wide text-fg-3 uppercase">What the customer is told</h3>
-      <p className="mt-1 text-sm text-fg-2">{category.advice.en}</p>
-      <p className="mt-1 text-sm text-fg-2" lang="bn">{category.advice.bn}</p>
+      <H3>What the customer is told</H3>
+      <Quote en={category.advice.en} bn={category.advice.bn} />
 
       {reads && known && (
-        <div className="mt-4 border-t border-line pt-3">
+        <div className="mt-5 border-t border-line pt-3">
+          <H3>How often the message check names this type correctly</H3>
           <Facts
             rows={[
-              ["Named correctly, known scripts", `${rate(known.recall)} of ${num(known.support)} messages, ${rate(known.precision)} of the times it says so are right`],
-              ["Named correctly, unseen scripts", unseen?.support ? `${rate(unseen.recall)} of ${num(unseen.support)} messages` : "no held-out script in this category"],
+              ["Known scam scripts", `${rate(known.recall)} of ${num(known.support)} messages. When it names this type, it is right ${rate(known.precision)} of the time.`],
+              ["New scam scripts", unseen?.support ? `${rate(unseen.recall)} of ${num(unseen.support)} messages` : "No script of this type was kept out for testing."],
             ]}
           />
         </div>
       )}
-    </Card>
+    </article>
   );
 }
 
@@ -163,7 +199,7 @@ function CheckResult({ found }: { found: MessageCheck }) {
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={LEVEL[found.level].tone}>{LEVEL[found.level].label}</Badge>
         <span className="text-xs text-fg-3">
-          {found.risk == null ? "classifier not loaded: links only" : `scam score ${num(found.risk, 3)} · model ${found.model_version}`}
+          {found.risk == null ? "message check not loaded: only the links were checked" : `scam score ${num(found.risk, 3)} · model ${found.model_version}`}
         </span>
       </div>
       <Facts
@@ -227,7 +263,7 @@ function MessageTab({ demoWallet }: { demoWallet: string }) {
   const check = useAsk<MessageCheck>();
   return (
     <div className="grid gap-4 xl:grid-cols-2">
-      <Card title="Is this message a scam?" hint="What the app's “check a message” answers. The text is scored and not stored.">
+      <Card title="Is this message a scam?" hint="This gives the same answer as “check a message” in the app. The message is checked, then thrown away. It is not saved.">
         <div className="space-y-3 text-sm">
           <label className="block text-fg-3">
             Asking wallet
@@ -285,7 +321,7 @@ function PaymentTab({ claims }: { claims: PaymentClaim[] }) {
     <div className="grid gap-4 xl:grid-cols-2">
       <Card
         title="Did this payment really arrive?"
-        hint="A forged screenshot or SMS looks exactly like a real one, so the answer comes from the ledger, not from the proof."
+        hint="A fake screenshot or SMS can look exactly like a real one. So the answer comes from our own payment records, not from the screenshot or SMS."
       >
         <div className="grid grid-cols-2 gap-3 text-sm text-fg-3">
           <label className="col-span-2">
@@ -347,7 +383,7 @@ function PaymentTab({ claims }: { claims: PaymentClaim[] }) {
       </Card>
       <Card title="Answer">
         {proof.error ? <ErrorNote error={proof.error} /> : !found ? (
-          <Empty>Only the receiving wallet can verify a payment. Anyone else gets the same answer as for a payment that does not exist.</Empty>
+          <Empty>Only the wallet that received the money can check a payment. For anyone else, the answer is the same as for a payment that does not exist.</Empty>
         ) : (
           <div className="space-y-3">
             <Badge tone={PROOF[found.status].tone}>{PROOF[found.status].label}</Badge>
@@ -393,11 +429,11 @@ export default function FraudTypesPage() {
     <>
       <PageHeader tour="fraud-types-header"
         title="Fraud types"
-        sub="The eight kinds of fraud wallet customers in Bangladesh meet, what detects each one here, and how well, measured."
+        sub="The main kinds of fraud that wallet customers in Bangladesh face, how FraudLens spots each one, and how well that works in tests."
       />
       <Tabs
         tabs={[
-          { id: "coverage", label: "Coverage" },
+          { id: "coverage", label: "Fraud types" },
           { id: "message", label: "Check a message" },
           { id: "payment", label: "Verify a payment" },
         ]}

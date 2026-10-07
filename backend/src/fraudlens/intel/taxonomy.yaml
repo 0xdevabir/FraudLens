@@ -18,24 +18,25 @@ categories:
     number: 1
     name: { en: Social engineering, bn: প্ররোচনামূলক প্রতারণা }
     summary: >-
-      Talking a customer into sending money or giving up a secret. The customer
-      presses the buttons, so nothing looks wrong to a system that only checks
-      who is signed in.
+      The fraudster talks the customer into sending money or sharing a secret
+      code. The customer presses the buttons themselves, so a system that only
+      checks who is signed in sees nothing wrong.
     bangladesh: >-
-      The usual opening is a phone call: "bKash/Nagad/upay office theke bolchi,
-      apnar account bondho hoye jabe", followed by a request for the OTP that
-      has just arrived, or for the PIN "to verify". Variants: a refund or
-      cashback that needs the customer's code first, a relative "in hospital"
-      writing from a new number, and long romance or friendship chats on
-      Facebook, IMO and WhatsApp that end with a gift stuck at customs. Callers
-      often learn the victim's number and last amount from an agent's register
-      or from someone standing nearby.
+      It usually starts with a phone call: "bKash/Nagad/upay office theke
+      bolchi, apnar account bondho hoye jabe" (I am calling from the
+      bKash/Nagad/upay office, your account will be closed). The caller then
+      asks for the OTP that has just arrived, or for the PIN "to verify". Other
+      versions: a refund or cashback that needs the customer's code first; a
+      relative "in hospital" writing from a new number; long romance or
+      friendship chats on Facebook, IMO and WhatsApp that end with a gift
+      "stuck at customs". Callers often learn the victim's number and last
+      payment amount from an agent's register, or from someone standing nearby.
     examples: [fake support call, OTP theft, PIN theft, romance scam, refund scam]
     detectors: [transaction, text]
     signals:
-      - a first payment to a wallet the sender has never paid, large against the sender's habits
-      - a receiver that many unrelated strangers started paying this week
-      - a message that asks for an OTP or PIN, or pushes the reader to act within minutes
+      - A first payment to a wallet the sender has never paid before, and the amount is large for this sender
+      - A receiver that many unrelated strangers started paying this week
+      - A message that asks for an OTP or PIN, or rushes the reader to act within minutes
     advice:
       en: >-
         upay never asks for your PIN or an OTP, by phone, SMS or chat. If someone
@@ -50,21 +51,22 @@ categories:
     number: 2
     name: { en: Fake identity and impersonation, bn: ভুয়া পরিচয় ও ছদ্মবেশ }
     summary: >-
-      Pretending to be someone the customer already trusts: the wallet company,
-      an agent, a bank, a government office, a merchant.
+      The fraudster pretends to be someone the customer already trusts: the
+      wallet company, an agent, a bank, a government office or a shop.
     bangladesh: >-
-      Fake "customer care" numbers and Facebook pages that copy a wallet's logo
-      and answer people who complain in public comments. Callers who say they
-      are the agent the customer just used, a bank officer, or an official of an
-      education board or a social-safety programme paying a stipend (উপবৃত্তি) or
-      an allowance (ভাতা). Fake merchant pages that take the name of a known
-      shop. The number is almost always an ordinary personal mobile number.
+      Fake "customer care" numbers and Facebook pages copy a wallet's logo.
+      They reply to people who complain in public comments. Some callers say
+      they are the agent the customer just used, or a bank officer. Others say
+      they are from an education board, or from a social-safety programme that
+      pays a stipend (উপবৃত্তি) or an allowance (ভাতা). Fake shop pages use the
+      name of a well-known shop. The number they use is almost always an
+      ordinary personal mobile number.
     examples: [fake customer care, fake agent, fake support page, fake merchant]
     detectors: [transaction, text, links]
     signals:
-      - a message that claims to come from the wallet, a bank or a government office
-      - a "helpline" that is a personal mobile number, or a page on a look-alike domain
-      - payments from many first-time senders to one personal wallet
+      - A message that says it comes from the wallet company, a bank or a government office
+      - A "helpline" that is a personal mobile number, or a web page on an address made to look like the real one
+      - Many people paying one personal wallet for the first time
     advice:
       en: >-
         This looks like someone pretending to be upay, an agent or an official.
@@ -79,21 +81,23 @@ categories:
     number: 3
     name: { en: Fake payment and transaction, bn: ভুয়া পেমেন্ট ও লেনদেন }
     summary: >-
-      Making it look as if money was sent when it was not, so the victim hands
-      over goods or "returns" money that never arrived.
+      The fraudster makes it look as if money was sent when it was not. The
+      victim then hands over goods, or "returns" money that never arrived.
     bangladesh: >-
-      "Bhai, vul kore apnar number e taka chole geche, ferot din": an SMS that
-      copies a cash-in notice, sent from a personal number, then a call asking
-      for the money back. Shopkeepers and F-commerce sellers are shown an edited
-      screenshot of a "successful" payment and asked to release the goods.
-      Fake refund and reversal notices work the same way. The notice never
-      comes from the wallet's own sender name and the balance does not change.
+      "Bhai, vul kore apnar number e taka chole geche, ferot din" (Brother,
+      money went to your number by mistake, please send it back). This comes as
+      an SMS that copies a cash-in notice, sent from a personal number, and then
+      a call asking for the money back. Shopkeepers and Facebook sellers are
+      shown an edited screenshot of a "successful" payment and asked to hand
+      over the goods. Fake refund and reversal notices work the same way. The
+      notice never comes from the wallet's own sender name, and the balance
+      does not change.
     examples: [fake screenshot, fake SMS, fake refund, transaction manipulation]
     detectors: [ledger, text]
     signals:
-      - a claimed transaction ID that is not in the ledger, or not to this wallet
-      - a claimed amount that differs from the recorded one
-      - a message asking to send back money "sent by mistake"
+      - A transaction ID that is not in our records, or that was not sent to this wallet
+      - An amount that is different from the one in our records
+      - A message asking to send back money "sent by mistake"
     advice:
       en: >-
         Check your own balance and transaction list before you return money or
@@ -108,21 +112,22 @@ categories:
     number: 4
     name: { en: Account and identity takeover, bn: অ্যাকাউন্ট ও পরিচয় দখল }
     summary: >-
-      Someone else gets into the customer's wallet and moves the money
+      Someone else gets into the customer's wallet and moves the money out
       themselves.
     bangladesh: >-
-      The OTP and PIN collected by a scam call are used to register the wallet
-      on the fraudster's handset, and the balance leaves within minutes, usually
-      to a mule wallet and then out at an agent in another district. Other
-      routes: a SIM replaced or re-registered with someone else's identity
-      papers, a stolen or borrowed phone with the PIN written down or guessed,
-      and remote-access apps the customer was told to install.
+      A scam call collects the OTP and PIN. The fraudster uses them to register
+      the wallet on their own phone. The balance is gone within minutes,
+      usually sent to a mule wallet (a wallet used to pass stolen money on) and
+      then cashed out at an agent in another district. Other ways in: a SIM
+      replaced or re-registered with someone else's ID papers; a stolen or
+      borrowed phone where the PIN was written down or guessed; and
+      remote-control apps the customer was told to install.
     examples: [OTP theft, PIN theft, SIM fraud, stolen phone, account takeover]
     detectors: [transaction, text]
     signals:
-      - a handset the wallet has used for minutes, not months
-      - a payment that empties the balance, from a district or network the wallet never uses
-      - a message that asks for a code, a SIM change or a new device registration
+      - A phone that has been on the wallet for minutes, not months
+      - A payment that empties the balance, from a district or mobile network the wallet never uses
+      - A message that asks for a code, a SIM change or registering a new phone
     advice:
       en: >-
         Someone may be trying to get into your wallet. Do not share any code,
@@ -137,22 +142,22 @@ categories:
     number: 5
     name: { en: Marketplace and merchant fraud, bn: মার্কেটপ্লেস ও মার্চেন্ট প্রতারণা }
     summary: >-
-      Fraud around buying and selling: goods that never arrive, sellers who are
-      not sellers, buyers who never paid.
+      Fraud in buying and selling: goods that never arrive, sellers who are not
+      real sellers, and buyers who never paid.
     bangladesh: >-
-      Facebook-page shops (F-commerce) and marketplace listings that ask for the
-      full price or a "booking" or "delivery charge" in advance to a personal
-      wallet, then block the buyer. Deep-discount pre-order schemes that collect
-      advance payments for months. Second-hand listings for phones and
-      motorbikes where the "seller" is in another district and wants a courier
-      fee first. Sellers are hit from the other side by fake payment proofs
-      (category 3).
+      Facebook page shops (F-commerce) and online listings ask for the full
+      price, or a "booking" or "delivery charge", in advance to a personal
+      wallet. Then they block the buyer. Big-discount pre-order schemes collect
+      advance payments for months. In second-hand listings for phones and
+      motorbikes, the "seller" is in another district and wants a courier fee
+      first. Sellers are also targeted the other way round, with fake payment
+      proofs (type 3).
     examples: [fake e-commerce, marketplace scam, advance payment, fake merchant]
     detectors: [text, transaction]
     signals:
-      - an advance payment asked to a personal wallet instead of a merchant account
-      - a price far below the market with a deadline
-      - one personal wallet receiving first-time payments from buyers across the country
+      - An advance payment asked to a personal wallet instead of a merchant account
+      - A price far below the market price, with a deadline
+      - One personal wallet getting first-time payments from buyers all over the country
     advice:
       en: >-
         Be careful with advance payments. Prefer cash on delivery or a merchant
@@ -166,20 +171,21 @@ categories:
     number: 6
     name: { en: Phishing and malicious technology, bn: ফিশিং ও ক্ষতিকর প্রযুক্তি }
     summary: >-
-      Links, apps and QR codes built to capture a wallet's credentials or to
+      Links, apps and QR codes made to steal a wallet's login details, or to
       take control of the phone.
     bangladesh: >-
-      Links sent by SMS, Messenger and WhatsApp to pages that copy a wallet's
-      login or a "KYC update" form. "Update" or "offer" apps sent as an .apk
-      file outside the Play Store. Callers who ask the customer to install
-      AnyDesk or TeamViewer "so the officer can fix the account". QR codes that
-      are said to *receive* money but open a payment to the fraudster.
+      Links sent by SMS, Messenger and WhatsApp lead to pages that copy a
+      wallet's login page or a "KYC update" (identity details) form. "Update"
+      or "offer" apps are sent as .apk files, outside the Play Store. Callers
+      ask the customer to install AnyDesk or TeamViewer "so the officer can fix
+      the account". Some QR codes are said to be for receiving money, but they
+      open a payment to the fraudster instead.
     examples: [phishing links, malicious APK, fake QR, remote access]
     detectors: [links, text]
     signals:
-      - a wallet's name on a domain that is not the wallet's
-      - a link shortener, a bare IP address or an .apk download
-      - a request to install a remote-access app or to scan a code "to receive"
+      - A wallet's name on a web address that does not belong to that wallet
+      - A shortened link, a link that is only numbers (an IP address), or an .apk download
+      - A request to install a remote-control app, or to scan a code "to receive" money
     advice:
       en: >-
         Do not open this link or install anything it offers. upay is only in the
@@ -194,21 +200,21 @@ categories:
     number: 7
     name: { en: Transaction and financial network fraud, bn: লেনদেন ও আর্থিক নেটওয়ার্ক প্রতারণা }
     summary: >-
-      What happens to stolen money afterwards: it is moved through wallets that
-      exist to receive it and is turned into cash before anyone can stop it.
+      What happens to stolen money next: it is passed through wallets that
+      exist only to receive it, then turned into cash before anyone can stop it.
     bangladesh: >-
-      Mule wallets opened with other people's identity documents, or rented from
-      students and day labourers for a small commission. Money from many victims
-      lands in one wallet, is forwarded through one or two more, and is cashed
-      out at agent points within minutes, often far from where the victims
-      live. The same pattern carries online betting and informal remittance
-      (hundi) money.
+      Mule wallets are opened with other people's ID documents, or rented from
+      students and day labourers for a small commission. Money from many
+      victims lands in one wallet. It is passed on through one or two more
+      wallets, then cashed out at agent points within minutes, often far from
+      where the victims live. Online betting money and informal remittance
+      (hundi) money move the same way.
     examples: [mule accounts, layered transfers, rapid cash-out, abnormal transactions]
     detectors: [transaction, text]
     signals:
-      - many unrelated senders, then a quick forward or cash-out of nearly everything received
-      - wallets that share a handset or pass money in a ring
-      - a message offering to rent a wallet or to "receive and forward" money for a commission
+      - Many unrelated senders, then almost everything received is quickly passed on or cashed out
+      - Wallets that share one phone, or pass money around in a circle
+      - A message offering to rent a wallet, or to "receive and forward" money for a commission
     advice:
       en: >-
         Never let anyone use your wallet to receive or pass on money, whatever
@@ -222,22 +228,23 @@ categories:
     number: 8
     name: { en: Scam campaigns, bn: সংঘবদ্ধ প্রতারণা প্রচারণা }
     summary: >-
-      One script sent to many people: a prize, a return, a job, a loan, a
-      donation. Each victim pays a small "fee" and the fees add up.
+      One script sent to many people: a prize, an investment return, a job, a
+      loan or a donation. Each victim pays a small "fee", and the fees add up.
     bangladesh: >-
-      "Apni 25 lakh taka lottery jitechen", with a registration or VAT fee to
-      pay first. Trading and MLM apps promising a daily return until
-      withdrawals stop. Part-time "like and subscribe" jobs on Telegram and
-      WhatsApp that pay a few taka, then ask for a deposit to unlock bigger
-      tasks. Instant-loan apps that charge a processing fee and never lend.
-      Stipend, allowance and remittance-bonus messages, fake cashback offers,
-      and charity appeals after floods and during Ramadan.
+      "Apni 25 lakh taka lottery jitechen" (You have won a 25 lakh taka
+      lottery), with a registration or VAT fee to pay first. Trading and MLM
+      apps promise a daily profit, until withdrawals stop. Part-time "like and
+      subscribe" jobs on Telegram and WhatsApp pay a few taka, then ask for a
+      deposit to unlock bigger tasks. Instant-loan apps charge a processing fee
+      and never give the loan. Also: stipend, allowance and remittance-bonus
+      messages, fake cashback offers, and charity appeals after floods and
+      during Ramadan.
     examples: [lottery, investment, job, loan, charity, fake cashback, fake remittance]
     detectors: [transaction, text]
     signals:
-      - small fee-sized payments from many strangers to one wallet
-      - a customer sending a series of rising amounts to the same new receiver
-      - a message promising money in return for a fee paid first
+      - Many strangers sending small, fee-sized payments to one wallet
+      - A customer sending bigger and bigger amounts to the same new receiver
+      - A message promising money if a fee is paid first
     advice:
       en: >-
         A prize, a job, a loan or an investment that asks you to pay first is a

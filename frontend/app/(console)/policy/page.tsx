@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 
+import { Details, DocSection, H3, KeyPoints, Note, Quote } from "@/components/doc";
 import { useSession } from "@/components/session";
 import { Async, Badge, Button, Card, ErrorNote, inputClass, Modal, PageHeader, Table, Td, type Tone, TierBadge } from "@/components/ui";
 import { api, download, useApi } from "@/lib/api";
-import { num, pct, TIERS, when, words } from "@/lib/format";
+import { num, pct, TIER_LABEL, TIERS, when, words } from "@/lib/format";
 import type { Report, Text2, Tier, TranslationText, Translations } from "@/lib/types";
 
 interface Condition { field: string; op: string; value: number | string }
@@ -27,13 +28,23 @@ interface Policy {
 }
 
 const ACTION: Record<string, string> = {
-  proceed: "The payment goes through",
-  show_warning: "The customer sees a warning and chooses",
-  step_up_auth: "The customer verifies again, then waits",
-  hold_for_review: "Paused until a reviewer decides",
+  proceed: "The payment goes through.",
+  show_warning: "The customer sees a warning, then chooses whether to go on.",
+  step_up_auth: "The customer must confirm again, then wait a short time.",
+  hold_for_review: "The payment is paused until a reviewer decides.",
 };
-const SCENARIO: Record<string, string> = { scam: "Paying a scammer", takeover: "Account taken over", unusual_access: "Unusual place or network", cash_out: "Cash-out" };
+const SCENARIO: Record<string, string> = {
+  scam: "Paying a scammer",
+  takeover: "Someone else has taken over the account",
+  unusual_access: "Payment from an unusual place or network",
+  cash_out: "Cash-out",
+};
 
+function tierName(tier: string): string {
+  return TIER_LABEL[tier as Tier] ?? words(tier);
+}
+
+/** A rule's exact condition, as the engine checks it. */
 function When({ conditions }: { conditions: Condition[] }) {
   if (!conditions.length) return <span className="text-fg-4">always</span>;
   return (
@@ -48,126 +59,192 @@ function When({ conditions }: { conditions: Condition[] }) {
 function View({ policy, report }: { policy: Policy; report?: Report }) {
   const measured = report?.policy.rules ?? {};
   const counts = report?.policy.tier_counts;
+  const overrides = Object.keys(policy.thresholds.overrides);
+  const fallbackPoints = Object.entries(policy.fallback.points).map(([tier, points]) => `${points} points means ${tierName(tier)}`);
   return (
-    <div className="space-y-4">
-      <Card
-        tour="policy-tiers"
-        title={`Policy ${policy.version}`}
-        hint={policy.description}
-        actions={<Badge tone={policy.mode === "model" ? "green" : "amber"}>{policy.mode === "model" ? "model and rules" : "rules-only fallback"}</Badge>}
-        flush
+    <div className="space-y-10">
+      <KeyPoints
+        points={[
+          "The model gives every payment a fraud score. The score alone does not decide anything.",
+          <>This policy turns the score into one of four levels: <TierBadge tier="allow" />, <TierBadge tier="warn" />, <TierBadge tier="step_up" /> or <TierBadge tier="hold" />.</>,
+          "Extra rules can make the level stricter. They can never make it softer.",
+          "No money is blocked or frozen without a person deciding.",
+          "Customers only see fixed messages that were written and approved in advance.",
+        ]}
+      />
+
+      <DocSection
+        number={1}
+        title="The four levels"
+        sub={`Policy ${policy.version}`}
+        aside={<Badge tone={policy.mode === "model" ? "green" : "amber"}>{policy.mode === "model" ? "Running: model and rules" : "Running: rules only (backup)"}</Badge>}
+        intro={
+          <>
+            <p>Each payment gets a fraud score. The higher the score, the stronger the action.</p>
+            <p><span className="font-medium text-fg">What this version adds:</span> {policy.description}</p>
+          </>
+        }
       >
-        <Table head={["Tier", "From fraud probability", "What happens", "A person decides", "Cooling-off", "Review deadline"]}>
-          {TIERS.map((tier) => {
-            const row = policy.tiers[tier];
-            return (
-              <tr key={tier}>
-                <Td><TierBadge tier={tier} /></Td>
-                <Td right>{tier === "allow" ? "below warn" : pct(policy.resolved_thresholds[tier], 2)}</Td>
-                <Td>{ACTION[row.action] ?? words(row.action)}</Td>
-                <Td>{row.human_review ? <Badge tone="red">yes</Badge> : "no"}</Td>
-                <Td right>{row.cooling_off_minutes ? `${row.cooling_off_minutes} min` : "–"}</Td>
-                <Td right>{row.review_sla_minutes ? `${row.review_sla_minutes} min` : "–"}</Td>
-              </tr>
-            );
-          })}
-        </Table>
-        <p className="border-t border-line px-4 py-2 text-xs text-fg-3">
-          Thresholds come from {policy.thresholds.source === "model" ? "the served model’s validation run, set to an alert budget" : words(policy.thresholds.source).toLowerCase()}
-          {Object.keys(policy.thresholds.overrides).length ? `, with overrides for ${Object.keys(policy.thresholds.overrides).join(", ")}` : ""}. The
-          model only produces a score; this policy, which is versioned and reviewed separately, turns it into an action. Nothing is blocked or frozen
-          without a person.
-        </p>
-      </Card>
+        <Card tour="policy-tiers" flush>
+          <Table head={["Level", "Starts at fraud score", "What happens", "Does a person decide?", "Waiting time", "Time limit for review"]}>
+            {TIERS.map((tier) => {
+              const row = policy.tiers[tier];
+              return (
+                <tr key={tier}>
+                  <Td><TierBadge tier={tier} /></Td>
+                  <Td right>{tier === "allow" ? `below ${tierName("warn")}` : pct(policy.resolved_thresholds[tier], 2)}</Td>
+                  <Td className="whitespace-normal">{ACTION[row.action] ?? words(row.action)}</Td>
+                  <Td>{row.human_review ? <Badge tone="red">yes</Badge> : "no"}</Td>
+                  <Td right>{row.cooling_off_minutes ? `${row.cooling_off_minutes} min` : "–"}</Td>
+                  <Td right>{row.review_sla_minutes ? `${row.review_sla_minutes} min` : "–"}</Td>
+                </tr>
+              );
+            })}
+          </Table>
+          <Note>
+            {policy.thresholds.source === "model"
+              ? "The starting scores were picked when the current model was tested, so that the number of alerts stays within a set limit."
+              : `The starting scores come from: ${words(policy.thresholds.source).toLowerCase()}.`}
+            {overrides.length > 0 && ` Some were set by hand: ${overrides.map(tierName).join(", ")}.`}{" "}
+            The model only gives a score. This policy decides the action, and it has its own version and its own review.
+          </Note>
+        </Card>
+      </DocSection>
 
-      <Card tour="policy-rules" title="Rules" hint="Rules run beside the model and can only raise a tier. A hard rule applies whatever the score is." flush>
-        <Table head={["Rule", "Raises to", "Fired in test", "Right when fired", "Changed the outcome"]}>
-          {policy.rules.map((rule) => {
-            const m = measured[rule.id];
-            return (
-              <tr key={rule.id}>
-                <Td className="whitespace-normal">
-                  <div className="flex items-center gap-1.5 font-mono text-xs text-fg-3">{rule.id}{rule.hard && <Badge tone="red">hard</Badge>}</div>
-                  <div className="text-fg">{rule.description}</div>
-                  <div lang="bn" className="text-xs text-fg-3">{rule.description_bn}</div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-fg-3">
-                    On {rule.applies_to.map((type) => words(type).toLowerCase()).join(" and ")}, when <When conditions={rule.when} />
-                  </div>
-                </Td>
-                <Td><TierBadge tier={rule.tier} /></Td>
-                <Td right>{m ? num(m.fired) : "–"}</Td>
-                <Td right>{m ? pct(m.fired_precision, 0) : "–"}</Td>
-                <Td right>{m ? num(m.decisive) : "–"}</Td>
-              </tr>
-            );
-          })}
-        </Table>
-        {counts?.policy && counts.model_only && (
-          <p className="border-t border-line px-4 py-2 text-xs text-fg-3">
-            On the test period the rules moved {num((counts.model_only.allow ?? 0) - (counts.policy.allow ?? 0))} payments out of “allow” that the
-            model alone would have let through. The rules that hold payments to confirmed-fraud wallets fire only once reviewers have confirmed
-            wallets, which the offline test does not have.
-          </p>
-        )}
-      </Card>
+      <DocSection
+        number={2}
+        title="Extra rules"
+        tour="policy-rules"
+        intro={
+          <>
+            <p>Rules run next to the model. A rule can only make the level stricter.</p>
+            <p>A rule marked <Badge tone="red">always applies</Badge> works whatever the fraud score is.</p>
+          </>
+        }
+      >
+        <Card flush>
+          <Table
+            head={[
+              "Rule",
+              "Raises to",
+              <span key="f" title="How many test payments this rule caught">Times used in testing</span>,
+              <span key="p" title="Of the payments this rule caught, the share that were really fraud">Was really fraud</span>,
+              <span key="d" title="How many times this rule set the final level">Changed the decision</span>,
+            ]}
+          >
+            {policy.rules.map((rule) => {
+              const m = measured[rule.id];
+              return (
+                <tr key={rule.id}>
+                  <Td className="whitespace-normal">
+                    <div className="flex flex-wrap items-center gap-1.5 text-fg">
+                      {rule.description}
+                      {rule.hard && <Badge tone="red">always applies</Badge>}
+                    </div>
+                    <div lang="bn" className="mt-0.5 text-[0.8125rem] text-fg-3">{rule.description_bn}</div>
+                    <div className="mt-1 text-xs text-fg-3">
+                      Checks: {rule.applies_to.map((type) => words(type).toLowerCase()).join(" and ")}
+                    </div>
+                    <Details>
+                      <div className="font-mono text-fg-3">{rule.id}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">Applies when <When conditions={rule.when} /></div>
+                    </Details>
+                  </Td>
+                  <Td><TierBadge tier={rule.tier} /></Td>
+                  <Td right>{m ? num(m.fired) : "–"}</Td>
+                  <Td right>{m ? pct(m.fired_precision, 0) : "–"}</Td>
+                  <Td right>{m ? num(m.decisive) : "–"}</Td>
+                </tr>
+              );
+            })}
+          </Table>
+          {counts?.policy && counts.model_only && (
+            <Note>
+              In testing, the rules stopped {num((counts.model_only.allow ?? 0) - (counts.policy.allow ?? 0))} payments from going straight
+              through that the model alone would have allowed. The rules about wallets confirmed as fraud only start working after reviewers
+              confirm a wallet. The test data has no confirmed wallets, so those rules could not be tested here.
+            </Note>
+          )}
+        </Card>
+      </DocSection>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Card
-          title="If the model is unavailable"
-          hint={`Decisions fall back to rules alone: each signal below scores one point. ${Object.entries(policy.fallback.points).map(([tier, points]) => `${points} points → ${words(tier).toLowerCase()}`).join(", ")}; never above ${words(policy.fallback.max_tier).toLowerCase()}.`}
-          flush
-        >
-          <Table head={["Signal", "When"]}>
+      <DocSection
+        number={3}
+        title="If the model stops working"
+        intro={
+          <>
+            <p>Simple checks take over. Each check that is true adds one point.</p>
+            <p>{fallbackPoints.join(". ")}. It never goes higher than {tierName(policy.fallback.max_tier)}.</p>
+          </>
+        }
+      >
+        <Card flush>
+          <Table head={["Check"]}>
             {policy.fallback.signals.map((signal) => (
               <tr key={signal.id}>
-                <Td>{words(signal.id)}</Td>
-                <Td><When conditions={signal.when} /></Td>
+                <Td className="whitespace-normal">
+                  {words(signal.id)}
+                  <Details><When conditions={signal.when} /></Details>
+                </Td>
               </tr>
             ))}
           </Table>
           {counts?.rules_only_fallback && (
-            <p className="border-t border-line px-4 py-2 text-xs text-fg-3">
-              Replayed on the test period, the fallback would have warned {num(counts.rules_only_fallback.warn)} payments and asked{" "}
-              {num(counts.rules_only_fallback.step_up)} to verify again. It holds nothing, because without the model there is no score strong enough
+            <Note>
+              Tried on the test data, this backup would have warned {num(counts.rules_only_fallback.warn)} payments and asked{" "}
+              {num(counts.rules_only_fallback.step_up)} to confirm again. It never holds a payment. Without the model, no score is strong enough
               to stop someone’s money.
-            </p>
+            </Note>
           )}
         </Card>
-        <Card title="Next steps suggested to reviewers" hint="Shown on a decision when its tier and conditions match. Suggestions only." flush>
-          <Table head={["From tier", "Suggestion"]}>
+      </DocSection>
+
+      <DocSection
+        number={4}
+        title="Next steps suggested to reviewers"
+        intro={<p>A suggestion shows on a decision when the level and the conditions match. These are only suggestions.</p>}
+      >
+        <Card flush>
+          <Table head={["From level", "Suggestion"]}>
             {policy.recommendations.map((item) => (
               <tr key={item.id}>
                 <Td><TierBadge tier={item.min_tier} /></Td>
                 <Td className="whitespace-normal">
-                  {item.en} {item.needs_second_approver && <Badge tone="violet">needs a second person</Badge>}
-                  <div lang="bn" className="text-xs text-fg-3">{item.bn}</div>
-                  {item.when.length > 0 && <div className="mt-1"><When conditions={item.when} /></div>}
+                  <div className="text-fg">
+                    {item.en} {item.needs_second_approver && <Badge tone="violet">needs a second person</Badge>}
+                  </div>
+                  <div lang="bn" className="mt-0.5 text-[0.8125rem] text-fg-3">{item.bn}</div>
+                  {item.when.length > 0 && <Details label="When it shows"><When conditions={item.when} /></Details>}
                 </Td>
               </tr>
             ))}
           </Table>
         </Card>
-      </div>
+      </DocSection>
 
-      <Card
+      <DocSection
+        number={5}
         title="What the customer is told"
-        hint="Fixed texts, written and approved in advance. The language model never writes to customers."
-        actions={<span className="text-xs text-fg-3">Takeover wording is used when <When conditions={policy.takeover_when} /></span>}
-        flush
+        intro={
+          <>
+            <p>These messages were written and approved in advance. They are shown word for word. The language model never writes to customers.</p>
+            <Details label={`When the “${SCENARIO.takeover}” wording is used`}><When conditions={policy.takeover_when} /></Details>
+          </>
+        }
       >
-        <Table head={["Situation", "Tier", "বাংলা", "English"]}>
-          {Object.entries(policy.messages).flatMap(([scenario, byTier]) =>
-            TIERS.filter((tier) => byTier[tier]).map((tier) => (
-              <tr key={`${scenario}-${tier}`}>
-                <Td>{SCENARIO[scenario] ?? words(scenario)}</Td>
-                <Td><TierBadge tier={tier} /></Td>
-                <Td className="max-w-md whitespace-normal"><span lang="bn">{byTier[tier]?.bn}</span></Td>
-                <Td className="max-w-md whitespace-normal text-fg-2">{byTier[tier]?.en}</Td>
-              </tr>
-            )),
-          )}
-        </Table>
-      </Card>
+        <div className="space-y-6">
+          {Object.entries(policy.messages).map(([scenario, byTier]) => (
+            <div key={scenario}>
+              <H3>{SCENARIO[scenario] ?? words(scenario)}</H3>
+              <div className="space-y-2">
+                {TIERS.filter((tier) => byTier[tier]).map((tier) => (
+                  <Quote key={tier} label={<TierBadge tier={tier} />} bn={byTier[tier]?.bn} en={byTier[tier]?.en} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </DocSection>
     </div>
   );
 }
@@ -236,45 +313,55 @@ function TranslationReview() {
   const [open, setOpen] = useState<TranslationText | null>(null);
   const [error, setError] = useState<Error | null>(null);
   return (
-    <Card
-      title="Bangla review"
-      hint="The texts were written by the developers. A translator signs each one off here; a sign-off covers the exact wording, so changing a text makes it unreviewed again."
-      actions={
-        <Button small onClick={() => download("/v1/policy/translations.csv", "fraudlens-bangla-texts.csv").catch(setError)}>
-          Sheet for the translator
-        </Button>
+    <DocSection
+      number={6}
+      title="Bangla translation check"
+      intro={
+        <>
+          <p>The developers wrote these Bangla texts. A translator checks each one and signs it off here.</p>
+          <p>A sign-off is for the exact wording. If a text is changed, it needs a new sign-off.</p>
+        </>
       }
-      flush
     >
-      {error && <div className="px-4 pt-3"><ErrorNote error={error} /></div>}
-      <Async state={sheet}>
-        {(data) => (
-          <>
-            <div className="flex flex-wrap gap-2 border-b border-line px-4 py-3 text-xs text-fg-2">
-              {(Object.keys(REVIEW_LABEL) as TranslationText["status"][]).map((s) => (
-                <Badge key={s} tone={REVIEW_TONE[s]}>{REVIEW_LABEL[s]}: {num(data.counts[s] ?? 0)}</Badge>
-              ))}
-              <span className="ml-auto text-fg-3">Policy {data.policy_version}</span>
-            </div>
-            <Table head={["Text", "বাংলা", "Review", ""]}>
-              {data.texts.map((item) => (
-                <tr key={item.key}>
-                  <Td className="whitespace-nowrap font-mono text-xs text-fg-3">{item.label}</Td>
-                  <Td className="max-w-xl whitespace-normal"><span lang="bn">{item.bn}</span></Td>
-                  <Td className="whitespace-normal">
-                    <Badge tone={REVIEW_TONE[item.status]}>{REVIEW_LABEL[item.status]}</Badge>
-                    {item.reviewed_by && <div className="mt-1 text-xs text-fg-3">{item.reviewed_by} · {when(item.reviewed_at)}</div>}
-                    {item.note && <div className="text-xs text-fg-3">{item.note}</div>}
-                  </Td>
-                  <Td>{canAudit && <Button small onClick={() => setOpen(item)}>Sign off</Button>}</Td>
-                </tr>
-              ))}
-            </Table>
-            {open && <SignOff item={open} onClose={() => setOpen(null)} onDone={sheet.reload} />}
-          </>
-        )}
-      </Async>
-    </Card>
+      <Card
+        title="Bangla texts"
+        actions={
+          <Button small onClick={() => download("/v1/policy/translations.csv", "fraudlens-bangla-texts.csv").catch(setError)}>
+            Sheet for the translator
+          </Button>
+        }
+        flush
+      >
+        {error && <div className="px-4 pt-3"><ErrorNote error={error} /></div>}
+        <Async state={sheet}>
+          {(data) => (
+            <>
+              <div className="flex flex-wrap gap-2 border-b border-line px-4 py-3 text-xs text-fg-2">
+                {(Object.keys(REVIEW_LABEL) as TranslationText["status"][]).map((s) => (
+                  <Badge key={s} tone={REVIEW_TONE[s]}>{REVIEW_LABEL[s]}: {num(data.counts[s] ?? 0)}</Badge>
+                ))}
+                <span className="ml-auto text-fg-3">Policy {data.policy_version}</span>
+              </div>
+              <Table head={["Text", "বাংলা", "Review", ""]}>
+                {data.texts.map((item) => (
+                  <tr key={item.key}>
+                    <Td className="whitespace-nowrap font-mono text-xs text-fg-3">{item.label}</Td>
+                    <Td className="max-w-xl whitespace-normal"><span lang="bn">{item.bn}</span></Td>
+                    <Td className="whitespace-normal">
+                      <Badge tone={REVIEW_TONE[item.status]}>{REVIEW_LABEL[item.status]}</Badge>
+                      {item.reviewed_by && <div className="mt-1 text-xs text-fg-3">{item.reviewed_by} · {when(item.reviewed_at)}</div>}
+                      {item.note && <div className="text-xs text-fg-3">{item.note}</div>}
+                    </Td>
+                    <Td>{canAudit && <Button small onClick={() => setOpen(item)}>Sign off</Button>}</Td>
+                  </tr>
+                ))}
+              </Table>
+              {open && <SignOff item={open} onClose={() => setOpen(null)} onDone={sheet.reload} />}
+            </>
+          )}
+        </Async>
+      </Card>
+    </DocSection>
   );
 }
 
@@ -285,10 +372,10 @@ export default function PolicyPage() {
     <>
       <PageHeader tour="policy-header"
         title="Decision policy"
-        sub="How a risk score becomes an action: the tier thresholds, the rules that sit beside the model, the rules-only fallback, and the words customers see."
+        sub="How FraudLens decides what to do with each payment, and what the customer is told."
       />
       <Async state={policy}>{(data) => <View policy={data} report={report.data} />}</Async>
-      <div className="mt-4"><TranslationReview /></div>
+      <div className="mt-10"><TranslationReview /></div>
     </>
   );
 }
