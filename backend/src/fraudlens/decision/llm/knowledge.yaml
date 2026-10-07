@@ -1,0 +1,227 @@
+# What a language model is told about FraudLens before it writes a case note, in
+# English and Bangla. It explains words and gives wording; it is never evidence.
+#
+# Rules, checked when the file is loaded (decision/llm/knowledge.py):
+#   - every entry has an `en` and a `bn` text;
+#   - no digits anywhere, in either script. A note may only contain numbers that
+#     are in the evidence, so nothing here may tempt a model to copy one;
+#   - tier, band, typology and reason ids must be ones the platform uses.
+# Editing this file changes its version, so cached notes are written again.
+
+context:
+  en: >-
+    FraudLens protects customers of upay, a mobile money wallet in Bangladesh, from
+    scams in which the victim sends the money themselves. Trained models score every
+    payment and a versioned policy turns the score into a decision. A case note is
+    read by a fraud analyst who has to understand one transaction quickly. The note
+    restates the evidence; it never makes or changes the decision.
+  bn: >-
+    ফ্রডলেন্স বাংলাদেশের মোবাইল ওয়ালেট উপায়ের গ্রাহকদের এমন প্রতারণা থেকে রক্ষা করে,
+    যেখানে প্রতারিত মানুষটি নিজেই টাকা পাঠান। প্রশিক্ষিত মডেল প্রতিটি লেনদেনের ঝুঁকি
+    স্কোর করে এবং একটি নির্দিষ্ট সংস্করণের নীতিমালা সেই স্কোর থেকে সিদ্ধান্ত নেয়। কেস
+    নোট পড়েন একজন প্রতারণা বিশ্লেষক, যাঁকে দ্রুত একটি লেনদেন বুঝতে হয়। নোট শুধু প্রমাণ
+    নতুন করে গুছিয়ে বলে; এটি কোনো সিদ্ধান্ত নেয় না বা বদলায় না।
+
+tiers:
+  allow:
+    en: The payment goes through and the customer sees nothing.
+    bn: লেনদেন সম্পন্ন হয়, গ্রাহককে কিছু দেখানো হয় না।
+  warn:
+    en: >-
+      The customer sees a scam warning before the money moves and decides whether to
+      continue.
+    bn: >-
+      টাকা যাওয়ার আগে গ্রাহক প্রতারণার সতর্কবার্তা দেখেন এবং নিজেই ঠিক করেন লেনদেন
+      চালিয়ে যাবেন কি না।
+  step_up:
+    en: >-
+      The customer must verify their identity again and wait out a cooling-off period
+      before the money moves.
+    bn: >-
+      টাকা যাওয়ার আগে গ্রাহককে আবার পরিচয় যাচাই করতে হয় এবং একটি অপেক্ষার সময় পার
+      করতে হয়।
+  hold:
+    en: >-
+      The money stays in the sender's wallet until a human analyst decides. Nothing is
+      refused or frozen automatically.
+    bn: >-
+      একজন বিশ্লেষক সিদ্ধান্ত না নেওয়া পর্যন্ত টাকা প্রেরকের ওয়ালেটেই থাকে।
+      স্বয়ংক্রিয়ভাবে কিছুই বাতিল বা ফ্রিজ করা হয় না।
+
+decided_by:
+  model:
+    en: The trained model's score set the tier; no rule raised it.
+    bn: প্রশিক্ষিত মডেলের স্কোর থেকে স্তর ঠিক হয়েছে; কোনো নিয়ম তা বাড়ায়নি।
+  rule:
+    en: >-
+      A policy rule raised the tier. The rule's id is in the evidence and should be
+      copied exactly.
+    bn: >-
+      নীতিমালার একটি নিয়ম স্তর বাড়িয়েছে। নিয়মের আইডি প্রমাণে আছে, হুবহু লিখতে হবে।
+  rules_only:
+    en: >-
+      No model score was available, so the decision used the policy's fallback signals
+      only. Without a model the system never holds money.
+    bn: >-
+      মডেলের স্কোর পাওয়া যায়নি, তাই শুধু নীতিমালার বিকল্প সংকেত দিয়ে সিদ্ধান্ত নেওয়া
+      হয়েছে। মডেল ছাড়া সিস্টেম কখনো টাকা আটকে রাখে না।
+
+risk_bands:
+  low:
+    en: low risk
+    bn: কম ঝুঁকি
+  elevated:
+    en: somewhat raised risk
+    bn: কিছুটা বেশি ঝুঁকি
+  high:
+    en: high risk
+    bn: বেশি ঝুঁকি
+  very high:
+    en: very high risk
+    bn: খুব বেশি ঝুঁকি
+
+typologies:
+  impersonation:
+    en: >-
+      Impersonation: a caller poses as wallet staff or an official, says the account is
+      at risk and has the victim move money to a "safe" number.
+    bn: >-
+      কর্মকর্তা সেজে প্রতারণা: কেউ ওয়ালেটের কর্মী বা কর্মকর্তা সেজে বলে অ্যাকাউন্ট ঝুঁকিতে
+      আছে এবং টাকা একটি "নিরাপদ" নম্বরে সরাতে বলে।
+  lottery_fee:
+    en: >-
+      Lottery fee: the victim is told they won a prize and keeps paying "fees" to
+      release it.
+    bn: >-
+      লটারি ফি প্রতারণা: গ্রাহককে বলা হয় তিনি পুরস্কার জিতেছেন, আর তা ছাড়াতে তিনি
+      বারবার "ফি" দিতে থাকেন।
+  account_takeover:
+    en: >-
+      Account takeover: someone else has the PIN and code and uses the wallet from
+      another handset, often to empty it.
+    bn: >-
+      অ্যাকাউন্ট দখল: অন্য কেউ পিন ও কোড জেনে অন্য হ্যান্ডসেট থেকে ওয়ালেট ব্যবহার করে,
+      প্রায়ই সব টাকা সরিয়ে নিতে।
+  investment_scam:
+    en: >-
+      Investment scam: the victim is promised daily returns; small payouts build trust
+      before larger deposits.
+    bn: >-
+      বিনিয়োগ প্রতারণা: প্রতিদিন লাভের প্রতিশ্রুতি দেওয়া হয়; ছোট ছোট লাভ দিয়ে আস্থা
+      তৈরি করে পরে বড় অঙ্কের টাকা নেওয়া হয়।
+  wrong_send:
+    en: >-
+      Wrong send: someone claims they sent money by mistake and asks for it back,
+      sometimes after a small real transfer as bait.
+    bn: >-
+      ভুল করে টাকা পাঠানোর অজুহাতে প্রতারণা: কেউ দাবি করে ভুল করে টাকা পাঠিয়েছে এবং
+      ফেরত চায়, কখনো আগে টোপ হিসেবে অল্প কিছু টাকা পাঠিয়ে।
+
+reasons:
+  RECIPIENT_PASS_THROUGH:
+    en: The receiving wallet moves money on quickly after it arrives, as mule wallets do.
+    bn: প্রাপক ওয়ালেট টাকা আসার পরপরই দ্রুত সরিয়ে ফেলে, যেমনটা মিউল ওয়ালেট করে।
+  RECIPIENT_NEW_WALLET:
+    en: The receiving wallet is young or has little activity of its own.
+    bn: প্রাপক ওয়ালেটটি নতুন বা এর নিজস্ব লেনদেন খুব কম।
+  RECIPIENT_INFLOW:
+    en: Many unrelated people have started paying the receiving wallet.
+    bn: অনেক অপরিচিত মানুষ প্রাপক ওয়ালেটে টাকা পাঠাতে শুরু করেছেন।
+  RECIPIENT_FRAUD_LINK:
+    en: The receiver is linked to confirmed fraud through transfers or a shared handset.
+    bn: লেনদেন বা একই হ্যান্ডসেটের মাধ্যমে প্রাপকের সাথে নিশ্চিত প্রতারণার যোগসূত্র আছে।
+  SENDER_DEVICE:
+    en: The handset is new to this wallet or has been used by a confirmed fraud wallet.
+    bn: হ্যান্ডসেটটি এই ওয়ালেটে নতুন, অথবা নিশ্চিত প্রতারণার কোনো ওয়ালেট এটি ব্যবহার করেছে।
+  AMOUNT:
+    en: The amount is unusual for this sender.
+    bn: এই প্রেরকের জন্য পরিমাণটি অস্বাভাবিক।
+  SENDER_VELOCITY:
+    en: The sender has been unusually active recently.
+    bn: প্রেরক সম্প্রতি অস্বাভাবিক বেশি লেনদেন করেছেন।
+  SENDER_FUNDING:
+    en: The money arrived in the sender's wallet shortly before this payment.
+    bn: এই লেনদেনের কিছুক্ষণ আগে টাকা প্রেরকের ওয়ালেটে এসেছে।
+  SENDER_PASS_THROUGH:
+    en: Money passes through the sender's wallet instead of staying there.
+    bn: টাকা প্রেরকের ওয়ালেটে না থেকে তা দিয়ে পার হয়ে যাচ্ছে।
+  SENDER_FRAUD_LINK:
+    en: The sender is linked to confirmed fraud.
+    bn: প্রেরকের সাথে নিশ্চিত প্রতারণার যোগসূত্র আছে।
+  SENDER_HISTORY:
+    en: The sender's own history, such as how long the wallet has existed.
+    bn: প্রেরকের নিজের ইতিহাস, যেমন ওয়ালেটটি কতদিন ধরে আছে।
+  TIME_AND_PLACE:
+    en: The time of day or the place is unusual for this wallet.
+    bn: দিনের এই সময় বা এই জায়গা এই ওয়ালেটের জন্য অস্বাভাবিক।
+  RELATIONSHIP:
+    en: Whether the sender has paid this receiver before.
+    bn: প্রেরক আগে কখনো এই প্রাপককে টাকা পাঠিয়েছেন কি না।
+  AGENT_PATTERN:
+    en: The cash-out agent's pattern stands out against agents like it.
+    bn: ক্যাশ-আউট এজেন্টের ধরন একই রকম অন্য এজেন্টদের তুলনায় আলাদা।
+  RECIPIENT_CONFIRMED_FRAUD:
+    en: An investigation has confirmed the receiving wallet as fraud.
+    bn: তদন্তে প্রাপক ওয়ালেটটি প্রতারণায় জড়িত বলে নিশ্চিত হয়েছে।
+  SENDER_CONFIRMED_FRAUD:
+    en: An investigation has confirmed the sending wallet as fraud.
+    bn: তদন্তে প্রেরক ওয়ালেটটি প্রতারণায় জড়িত বলে নিশ্চিত হয়েছে।
+  RECIPIENT_MULE_SCORE:
+    en: The mule model rates the receiving wallet above its alert threshold.
+    bn: মিউল মডেল প্রাপক ওয়ালেটকে সতর্কতা-সীমার উপরে স্কোর দিয়েছে।
+  RECIPIENT_BLOCKLISTED:
+    en: The receiving number is on the blocklist of reported scam numbers.
+    bn: প্রাপকের নম্বরটি অভিযোগ পাওয়া প্রতারণার নম্বরের তালিকায় আছে।
+  SMALL_AMOUNT:
+    en: The amount is small, which lowers the concern.
+    bn: পরিমাণটি ছোট, তাই উদ্বেগ কিছুটা কম।
+  UNUSUAL_PLACE:
+    en: A large payment from a place this wallet is not normally used from.
+    bn: ওয়ালেটটি সাধারণত যেখান থেকে ব্যবহৃত হয় না, সেখান থেকে বড় লেনদেন।
+  UNFAMILIAR_NETWORK:
+    en: A large payment over a network this wallet has never been used from.
+    bn: ওয়ালেটটি আগে কখনো যে নেটওয়ার্ক থেকে ব্যবহৃত হয়নি, সেখান থেকে বড় লেনদেন।
+
+terms:
+  mule:
+    en: >-
+      Mule wallet: a wallet that receives scam money and passes it on or cashes it out
+      quickly. Its owner may be recruited or may be a fraudster.
+    bn: >-
+      মিউল ওয়ালেট: যে ওয়ালেট প্রতারণার টাকা গ্রহণ করে দ্রুত অন্যত্র পাঠায় বা ক্যাশ-আউট
+      করে। এর মালিক ভাড়াটে হতে পারেন, প্রতারকও হতে পারেন।
+  cash_out:
+    en: >-
+      Cash-out: turning wallet money into cash at an agent.
+    bn: >-
+      ক্যাশ-আউট: এজেন্টের কাছ থেকে ওয়ালেটের টাকা নগদে তোলা।
+  agent:
+    en: >-
+      Agent: a shop that handles cash-in and cash-out for customers.
+    bn: >-
+      এজেন্ট: যে দোকান গ্রাহকদের ক্যাশ-ইন ও ক্যাশ-আউট করে দেয়।
+  similar_case:
+    en: >-
+      Similar past case: the closest confirmed case from history. It shows a resemblance,
+      not proof about this transaction.
+    bn: >-
+      কাছাকাছি আগের ঘটনা: ইতিহাসে সবচেয়ে মিল থাকা নিশ্চিত কেস। এটি মিল দেখায়, এই
+      লেনদেন সম্পর্কে প্রমাণ নয়।
+  freeze:
+    en: >-
+      Freeze: stopping a wallet from moving money. It needs a request and the approval
+      of a second person.
+    bn: >-
+      ফ্রিজ: একটি ওয়ালেটের টাকা লেনদেন বন্ধ করা। এর জন্য একজনের অনুরোধ এবং আরেকজনের
+      অনুমোদন লাগে।
+
+style:
+  en: >-
+    Plain, calm English for a busy analyst. Say "risk" or "signals", never that someone
+    committed fraud: the evidence shows risk and an analyst decides. Name a scam type
+    only if the evidence names it. Write amounts with the taka sign as in the evidence.
+  bn: >-
+    ব্যস্ত বিশ্লেষকের জন্য সহজ, শান্ত, প্রমিত বাংলা। "ঝুঁকি" বা "সংকেত" বলুন; কেউ
+    প্রতারণা করেছে এমন কথা কখনো বলবেন না, কারণ প্রমাণ শুধু ঝুঁকি দেখায় আর সিদ্ধান্ত নেন
+    বিশ্লেষক। প্রমাণে প্রতারণার ধরন থাকলেই কেবল তার নাম বলুন। টাকার অঙ্ক টাকার চিহ্নসহ
+    প্রমাণের মতোই লিখুন। ওয়ালেট আইডি, নিয়মের আইডি ও কোড ইংরেজি অক্ষরে হুবহু রাখুন।

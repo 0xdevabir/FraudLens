@@ -100,6 +100,13 @@ function Rules({ trace }: { trace: RuleTrace[] }) {
   );
 }
 
+const PROVIDERS: Record<string, string> = {
+  nova: "Nova",
+  gemini: "Gemini",
+  groq: "Groq",
+  openrouter: "OpenRouter",
+};
+
 function CaseSummary({ id, lang }: { id: string; lang: Lang }) {
   const narrative = useApi<Narrative>(`/v1/decisions/${id}/narrative?lang=${lang}`);
   return (
@@ -108,7 +115,9 @@ function CaseSummary({ id, lang }: { id: string; lang: Lang }) {
         <div lang={data.lang}>
           <div className="mb-2 flex flex-wrap items-center gap-2" lang="en">
             <Badge tone={data.source === "llm" ? "violet" : "slate"}>
-              {data.source === "llm" ? "Written by the language model" : "Written from a template"}
+              {data.source === "llm"
+                ? `Written by the language model${data.provider ? ` (${PROVIDERS[data.provider] ?? data.provider})` : ""}`
+                : "Written from a template"}
             </Badge>
             <span className="text-xs text-fg-3">
               Built only from the structured evidence on this page. It describes the decision; it does not make it.
@@ -119,8 +128,8 @@ function CaseSummary({ id, lang }: { id: string; lang: Lang }) {
           ))}
           {data.rejected.length > 0 && (
             <p className="mt-2 text-xs text-warn" lang="en">
-              A language-model draft was discarded because it failed the evidence check ({data.rejected.join("; ")}), so
-              the template text is shown.
+              A language-model draft was discarded because it failed the evidence or format check (
+              {data.rejected.join("; ")}), so the template text is shown.
             </p>
           )}
         </div>

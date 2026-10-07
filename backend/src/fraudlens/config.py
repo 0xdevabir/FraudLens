@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from .secret_sources import SecretFilesSource
@@ -73,8 +73,30 @@ class Settings(BaseSettings):
     # only you can reach; ignored in production, where the API also refuses to start.
     demo_login: bool = False
 
-    # Case notes from the language model. Off unless enabled and ANTHROPIC_API_KEY is set.
+    # Case notes from language models (decision/llm). Off unless enabled. Providers with
+    # a key are asked in `llm_providers` order; the first gets `llm_primary_attempts`
+    # tries per note, each other one try. With no provider key set, ANTHROPIC_API_KEY
+    # (Claude) is used as before. Nothing here is on the scoring path.
     llm_notes: bool = False
+    llm_providers: list[Literal["nova", "gemini", "groq", "openrouter"]] = [
+        "nova",
+        "gemini",
+        "groq",
+        "openrouter",
+    ]
+    llm_primary_attempts: int = Field(3, ge=1, le=5)
+    llm_attempt_timeout_seconds: float = Field(25.0, gt=0, le=120)
+    llm_deadline_seconds: float = Field(120.0, gt=0, le=600)  # for one note, all providers
+    nova_api_key: SecretStr | None = None
+    nova_url: str = "https://nova.zohirrayhan.me/api/chat"
+    nova_model: Literal["nova_g", "nova_c"] = "nova_g"
+    gemini_api_key: SecretStr | None = None
+    gemini_model: str = "gemini-3.8-flash"
+    gemini_thinking_level: str | None = "low"  # unset for models without thinking levels
+    groq_api_key: SecretStr | None = None
+    groq_model: str = "openai/gpt-oss-120b"
+    openrouter_api_key: SecretStr | None = None
+    openrouter_model: str = "nvidia/nemotron-3-super-120b-a12b:free"
 
     # Where the console is served from in development (`make console`).
     cors_origins: list[str] = ["http://localhost:3100", "http://127.0.0.1:3100"]

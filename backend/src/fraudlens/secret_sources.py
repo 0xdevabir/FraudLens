@@ -35,7 +35,11 @@ def read_secret_file(path: str | Path) -> str:
     if len(data) > MAX_SECRET_BYTES:
         raise ValueError(f"{path} is larger than a secret should be")
     text = data.decode()
-    return text[:-1] if text.endswith("\n") else text
+    # One trailing line ending, as editors add it; a Windows one is two characters.
+    for ending in ("\r\n", "\n"):
+        if text.endswith(ending):
+            return text[: -len(ending)]
+    return text
 
 
 def load_provider(spec: str) -> Provider:

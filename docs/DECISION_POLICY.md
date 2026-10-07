@@ -233,7 +233,31 @@ features).
 The case note has three paragraphs: what happened, why it is risky, what happens
 next. By default it is a deterministic template in English or Bangla.
 
-A language model (Claude, through the Anthropic API) may write the note instead.
+A language model may write the note instead, when `FRAUDLENS_LLM_NOTES=true`. The
+providers are tried in the order of `FRAUDLENS_LLM_PROVIDERS` (default: Nova,
+Gemini, Groq, OpenRouter; `decision/llm/`), and only those with an API key take
+part. Every note request starts again at the first provider, which gets
+`FRAUDLENS_LLM_PRIMARY_ATTEMPTS` tries (default 3, with short pauses); each backup
+gets one, and a backup that fails three times in a row is skipped for a minute.
+A timeout, a rate limit, a server error, an empty or unfinished answer, or a note
+that fails the checks below moves on to the next try; a rejected key or request
+moves straight to the next provider. The whole note has a deadline
+(`FRAUDLENS_LLM_DEADLINE_SECONDS`, default 120). With no provider key set, Claude
+is used through `ANTHROPIC_API_KEY` as before.
+
+Each provider reads the same prompt: the instructions, a knowledge base in the
+note's language (`decision/llm/knowledge.yaml`, English and Bangla: tiers, how a
+decision is reached, risk bands, scam types, reason codes, terms, style), then the
+evidence as JSON. The knowledge base contains no digits, so it can never be the
+source of a number in a note, and its ids are checked against the platform's. A
+note is accepted only if it has the three labelled paragraphs, is written in the
+requested language and in no other script, quotes times and dates exactly as the
+evidence has them (grounding alone would accept "00:00" for "01:00", since "00"
+is a number the evidence contains), mixes no Bangla and Latin digits in one
+number, and passes the grounding check. The
+response names the provider that wrote it. Notes are cached per transaction,
+language and knowledge-base version.
+
 It is fenced in:
 
 1. **It never decides.** It is called after the decision exists. Thresholds,
@@ -258,10 +282,12 @@ check.
 
 ## 8. Limits, stated plainly
 
-- **The language-model path has not been run against the live API.** No API key
-  was available in the build environment. It is tested with a stand-in client
-  (request shape, masking, refusal, truncation, connection error), and every
-  result in this document uses the template.
+- **The language-model path has been run live on one evidence document only.**
+  Each of the four providers wrote accepted notes in English and Bangla for it,
+  and the checks rejected the drafts that invented a number. The tests use mock
+  transports (request shape, every failure kind, retries, fallback order,
+  deadline), and every result in this document uses the template. The Claude
+  path has not been run against the live API.
 - **The grounding check covers digits and identifiers only.** It does not catch a
   number written in words ("fourteen"), a wrong relation between two correct
   numbers, or an unsupported claim with no number in it. It is a guard against

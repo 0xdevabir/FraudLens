@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -54,7 +55,8 @@ def test_a_rotated_jwt_key_keeps_verifying_until_its_tokens_expire(tmp_path):
     # The next rotation prunes it; the file is for the owner only.
     rotate_jwt(path, ttl_minutes=480, now=gone)
     assert first.kid not in Keyring.from_json(path.read_text()).keys
-    assert path.stat().st_mode & 0o077 == 0
+    if os.name != "nt":  # Windows has no group or other permission bits to check
+        assert path.stat().st_mode & 0o077 == 0
 
 
 def test_tokens_carry_the_key_id_and_survive_a_rotation(tmp_path):
