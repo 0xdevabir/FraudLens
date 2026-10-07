@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react";
 
 import { ApiError, type Loaded } from "@/lib/api";
 import { countdown, TIER_LABEL, words } from "@/lib/format";
@@ -12,9 +12,10 @@ export function cx(...parts: (string | false | null | undefined)[]): string {
 
 export function PageHeader({ title, sub, actions, tour }: { title: ReactNode; sub?: ReactNode; actions?: ReactNode; tour?: string }) {
   return (
-    <div data-tour={tour} className="mb-6 flex flex-wrap items-end justify-between gap-3">
+    <div data-tour={tour} className="mb-5 flex flex-wrap items-end justify-between gap-3 lg:mb-6">
       <div className="min-w-0">
-        <h1 className="text-[1.75rem] leading-tight font-bold tracking-tight text-fg">{title}</h1>
+        {/* An iOS large title on a phone. */}
+        <h1 className="text-[2rem] leading-tight font-bold tracking-tight text-fg lg:text-[1.75rem]">{title}</h1>
         {sub && <p className="mt-1.5 max-w-3xl text-[0.9375rem] text-fg-3">{sub}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
@@ -155,7 +156,8 @@ export function Button({
       {...rest}
       className={cx(
         "inline-flex items-center justify-center gap-1.5 rounded-full whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100",
-        small ? "px-3 py-1 text-xs" : "px-4 py-2 text-sm",
+        // A finger needs more room than a pointer: 36 and 44 points tall on a touch screen.
+        small ? "px-3 py-1 text-xs pointer-coarse:min-h-9 pointer-coarse:px-3.5 pointer-coarse:text-[0.8125rem]" : "px-4 py-2 text-sm pointer-coarse:min-h-11",
         BUTTON[variant],
         className,
       )}
@@ -252,7 +254,7 @@ export function Chip({ on, onClick, children }: { on: boolean; onClick: () => vo
       aria-pressed={on}
       onClick={onClick}
       className={cx(
-        "rounded-full px-3 py-1 text-xs font-medium",
+        "rounded-full px-3 py-1 text-xs font-medium pointer-coarse:min-h-8 pointer-coarse:px-3.5 pointer-coarse:text-[0.8125rem]",
         on ? "bg-accent text-accent-ink" : "bg-white/8 text-fg-2 hover:bg-white/14",
       )}
     >
@@ -261,23 +263,80 @@ export function Chip({ on, onClick, children }: { on: boolean; onClick: () => vo
   );
 }
 
-export function Table({ head, children, className }: { head: ReactNode[]; children: ReactNode; className?: string }) {
+/** Give each cell of a row its column's heading, so a phone can show it beside the value. */
+function labelled(rows: ReactNode, head: ReactNode[]): ReactNode {
+  return Children.map(rows, (row) => {
+    if (!isValidElement(row) || row.type !== "tr") return row;
+    const cells = (row as ReactElement<{ children?: ReactNode }>).props.children;
+    return cloneElement(row as ReactElement<{ children?: ReactNode }>, {
+      // toArray drops the `false` of a cell left out with `cond && <Td/>`, as the heading row does.
+      children: Children.toArray(cells).map((cell, i) =>
+        isValidElement(cell) && cell.type === Td ? cloneElement(cell as ReactElement<TdProps>, { label: head[i], first: i === 0 }) : cell,
+      ),
+    });
+  });
+}
+
+/**
+ * A table on a laptop. On a phone (`stack`, the default) each row becomes an iOS list group:
+ * its first cell as the title, every other cell as "heading … value". Pass `stack={false}`
+ * for a grid of numbers that only reads as a grid; it then scrolls sideways instead.
+ */
+export function Table({ head, children, className, stack = true }: { head: ReactNode[]; children: ReactNode; className?: string; stack?: boolean }) {
+  const s = stack;
   return (
-    <div className={cx("overflow-x-auto", className)}>
-      <table className="w-full min-w-max text-left text-sm">
-        <thead>
+    <div className={cx("overflow-x-auto overscroll-x-contain", className)}>
+      <table className={cx("w-full text-left text-sm", s ? "md:min-w-max max-md:block" : "min-w-max")}>
+        <thead className={cx(s && "max-md:hidden")}>
           <tr className="border-b border-line text-xs font-medium text-fg-3">
             {head.map((label, i) => <th key={i} className="whitespace-nowrap px-4 py-2.5 font-medium">{label}</th>)}
           </tr>
         </thead>
-        <tbody className="divide-y divide-line">{children}</tbody>
+        <tbody className={cx("divide-y divide-line", s && "max-md:block [&>tr]:max-md:block [&>tr]:max-md:px-4 [&>tr]:max-md:py-3 [&>tr]:active:max-md:bg-wash")}>
+          {s ? labelled(children, head) : children}
+        </tbody>
       </table>
     </div>
   );
 }
 
-export function Td({ children, right, className, title }: { children?: ReactNode; right?: boolean; className?: string; title?: string }) {
-  return <td title={title} className={cx("px-4 py-2.5 align-middle", right && "text-right tabular-nums", className)}>{children}</td>;
+interface TdProps {
+  children?: ReactNode;
+  right?: boolean;
+  className?: string;
+  title?: string;
+  /** Set by a stacking `Table`: the column heading, and whether this is the row's first cell. */
+  label?: ReactNode;
+  first?: boolean;
+}
+
+export function Td({ children, right, className, title, label, first }: TdProps) {
+  const stacked = label !== undefined;
+  return (
+    <td
+      title={title}
+      className={cx(
+        "px-4 py-2.5 align-middle",
+        right && "text-right tabular-nums",
+        className,
+        stacked && "max-md:whitespace-normal max-md:px-0 max-md:text-left",
+        stacked && (first
+          ? "max-md:block max-md:pb-1 max-md:text-[0.9375rem] max-md:font-semibold"
+          : label
+            ? "max-md:grid max-md:grid-cols-[minmax(0,7rem)_minmax(0,1fr)] max-md:items-baseline max-md:gap-3 max-md:py-1"
+            : "max-md:block max-md:py-1.5 max-md:empty:hidden"),
+      )}
+    >
+      {stacked && !first && label ? (
+        <>
+          <span aria-hidden="true" className="text-[0.8125rem] font-normal text-fg-3 md:hidden">{label}</span>
+          <div className="min-w-0 md:contents [&_.w-48]:max-md:w-auto">{children}</div>
+        </>
+      ) : (
+        children
+      )}
+    </td>
+  );
 }
 
 /** Label and value pairs, for profiles. */
@@ -307,7 +366,8 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
       onClick={(event) => event.target === ref.current && onClose()}
       className="sheet"
     >
-      <div className="px-5 pt-5 text-lg font-semibold tracking-tight text-fg">{title}</div>
+      <div aria-hidden="true" className="mx-auto mt-2 h-1.5 w-9 rounded-full bg-white/25 sm:hidden" />
+      <div className="px-5 pt-5 text-lg font-semibold tracking-tight text-fg max-sm:pt-3">{title}</div>
       <div className="p-5 pt-3">{children}</div>
     </dialog>
   );
@@ -370,4 +430,5 @@ export function ReasonDialog({
 }
 
 export const inputClass =
-  "rounded-xl border border-transparent bg-white/8 px-3 py-2 text-sm text-fg placeholder:text-fg-4 hover:bg-white/10 focus:border-accent/60 focus:bg-white/10 focus:ring-4 focus:ring-accent/15 focus:outline-none";
+  // 16px on a phone, or iOS zooms the page into the field.
+  "rounded-xl border border-transparent bg-white/8 px-3 py-2 text-base sm:text-sm text-fg placeholder:text-fg-4 hover:bg-white/10 focus:border-accent/60 focus:bg-white/10 focus:ring-4 focus:ring-accent/15 focus:outline-none";

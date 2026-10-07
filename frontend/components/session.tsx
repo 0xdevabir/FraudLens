@@ -6,9 +6,11 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useM
 
 import { api, getToken, setToken, useApi } from "@/lib/api";
 import { idKind, maskId, words } from "@/lib/format";
-import type { Me, ModelInfo, Role } from "@/lib/types";
+import { isActive, NAV, NAV_ITEMS, slug } from "@/lib/nav";
+import type { Me, ModelInfo } from "@/lib/types";
 
 import { TOUR_STEPS } from "./tour/steps";
+import { Glyph, MoreSheet, TabBar, TopBar } from "./mobile-nav";
 import { TourButton, TourProvider } from "./tour/tour";
 import { Badge, cx, ErrorNote, Loading } from "./ui";
 
@@ -33,64 +35,6 @@ export function useSession(): Session {
   return session;
 }
 
-const NAV: { heading: string; items: { href: string; label: string; roles: Role[] }[] }[] = [
-  {
-    heading: "Business",
-    items: [
-      { href: "/", label: "Executive summary", roles: ["analyst", "supervisor", "admin"] },
-      { href: "/impact", label: "Impact simulator", roles: ["analyst", "supervisor", "admin"] },
-    ],
-  },
-  {
-    heading: "Investigate",
-    items: [
-      { href: "/alerts", label: "Alert queue", roles: ["analyst", "supervisor"] },
-      { href: "/cases", label: "Cases", roles: ["analyst", "supervisor"] },
-      { href: "/approvals", label: "Freeze approvals", roles: ["analyst", "supervisor"] },
-      { href: "/appeals", label: "Customer appeals", roles: ["analyst", "supervisor"] },
-      { href: "/blocklist", label: "Blocklist", roles: ["analyst", "supervisor"] },
-      { href: "/refunds", label: "Victim refunds", roles: ["analyst", "supervisor"] },
-    ],
-  },
-  {
-    heading: "Network",
-    items: [
-      { href: "/network", label: "Network explorer", roles: ["analyst", "supervisor"] },
-      { href: "/rings", label: "Mule rings", roles: ["analyst", "supervisor"] },
-      { href: "/consortium", label: "Mule consortium", roles: ["analyst", "supervisor"] },
-      { href: "/agents", label: "Agent risk", roles: ["analyst", "supervisor"] },
-    ],
-  },
-  {
-    heading: "Model and policy",
-    items: [
-      { href: "/model", label: "Model monitoring", roles: ["analyst", "supervisor", "admin"] },
-      { href: "/fairness", label: "Fairness report", roles: ["analyst", "supervisor", "admin"] },
-      { href: "/policy", label: "Decision policy", roles: ["analyst", "supervisor", "admin"] },
-      { href: "/fraud-types", label: "Fraud types", roles: ["analyst", "supervisor", "admin"] },
-      { href: "/audit", label: "Audit log", roles: ["supervisor", "admin"] },
-      { href: "/webhooks", label: "Webhooks", roles: ["supervisor", "admin"] },
-      { href: "/api-keys", label: "Partner API keys", roles: ["supervisor", "admin"] },
-    ],
-  },
-  {
-    heading: "Customer side",
-    items: [{ href: "/phone", label: "Customer phone demo", roles: ["analyst", "supervisor", "admin"] }],
-  },
-];
-
-/** "Model and policy" → "model-and-policy", "/fraud-types" → "fraud-types". */
-function slug(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
-
-function isActive(pathname: string, href: string): boolean {
-  if (href === "/") return pathname === "/";
-  if (href === "/network") return pathname === "/network" || pathname.startsWith("/wallets");
-  if (href === "/alerts") return pathname.startsWith("/alerts") || pathname.startsWith("/decisions");
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
-
 function ServingNote() {
   const model = useApi<ModelInfo>("/v1/model", 30_000);
   if (!model.data) return null;
@@ -113,7 +57,7 @@ export function Console({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [revealed, setRevealed] = useState<ReadonlySet<string>>(new Set());
-  const [menu, setMenu] = useState(false);
+  const [more, setMore] = useState(false);
 
   useEffect(() => {
     if (!getToken()) {
@@ -155,19 +99,15 @@ export function Console({ children }: { children: ReactNode }) {
   if (error) return <div className="mx-auto max-w-md p-8"><ErrorNote error={error} retry={() => window.location.reload()} /></div>;
   if (!session) return <Loading label="Signing in…" />;
 
-  const allowed = NAV.flatMap((group) => group.items).find((item) => isActive(pathname, item.href));
+  const allowed = NAV_ITEMS.find((item) => isActive(pathname, item.href));
   const denied = allowed && !allowed.roles.includes(session.me.role);
 
   return (
     <SessionContext.Provider value={session}>
       <TourProvider steps={TOUR_STEPS} role={session.me.role}>
-      <div className="flex min-h-screen">
-        <aside
-          className={cx(
-            "fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-line bg-base/80 text-fg-2 backdrop-blur-2xl backdrop-saturate-150 transition-transform duration-500 ease-ios lg:sticky lg:top-0 lg:h-screen lg:shrink-0 lg:translate-x-0",
-            menu ? "translate-x-0" : "-translate-x-full",
-          )}
-        >
+      <div className="flex min-h-dvh">
+        {/* A sidebar from a laptop up; on a phone or a tablet, the title bar and the tab bar below. */}
+        <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r border-line bg-base/80 text-fg-2 backdrop-blur-2xl backdrop-saturate-150 lg:flex">
           <div data-tour="brand" className="px-5 pt-6 pb-2">
             <div className="flex items-center gap-2 text-lg font-bold tracking-tight text-fg">
               <span aria-hidden="true" className="size-2.5 rounded-full bg-accent" />
@@ -190,13 +130,13 @@ export function Console({ children }: { children: ReactNode }) {
                       key={item.href}
                       href={item.href}
                       data-tour={`nav-${item.href === "/" ? "home" : slug(item.href)}`}
-                      onClick={() => setMenu(false)}
                       aria-current={isActive(pathname, item.href) ? "page" : undefined}
                       className={cx(
-                        "block rounded-xl px-3 py-1.5 text-[0.9375rem] active:scale-[0.98]",
+                        "flex items-center gap-2.5 rounded-xl px-3 py-1.5 text-[0.9375rem] active:scale-[0.98]",
                         isActive(pathname, item.href) ? "bg-accent/15 font-medium text-accent" : "text-fg-2 hover:bg-white/6",
                       )}
                     >
+                      <Glyph d={item.icon} className="size-[1.125rem] shrink-0 opacity-80" />
                       {item.label}
                     </Link>
                   ))}
@@ -215,26 +155,13 @@ export function Console({ children }: { children: ReactNode }) {
             </div>
           </div>
         </aside>
-        {menu && (
-          <button
-            type="button"
-            aria-label="Close menu"
-            className="fixed inset-0 z-20 animate-[rise_0.3s_ease_backwards] bg-black/50 backdrop-blur-xs active:scale-100 lg:hidden"
-            onClick={() => setMenu(false)}
-          />
-        )}
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-base/75 px-3 py-2 backdrop-blur-2xl backdrop-saturate-150 lg:hidden">
-            <button type="button" onClick={() => setMenu(true)} aria-label="Open menu" className="rounded-full p-2 text-accent hover:bg-white/8">
-              <svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-                <path d="M3 6h14M3 10h14M3 14h9" />
-              </svg>
-            </button>
-            <span className="text-[0.9375rem] font-semibold text-fg">FraudLens</span>
-            <TourButton className="ml-auto" />
-          </div>
+          <TopBar pathname={pathname} />
           {/* Keyed by route, so each page arrives with the same short rise. */}
-          <main key={pathname} className="min-w-0 flex-1 animate-rise px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
+          <main
+            key={pathname}
+            className="min-w-0 flex-1 animate-rise px-4 pt-5 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:px-6 lg:px-10 lg:py-8"
+          >
             {denied ? (
               <ErrorNote error={`This page is not available to the ${session.me.role} role.`} />
             ) : (
@@ -243,6 +170,8 @@ export function Console({ children }: { children: ReactNode }) {
           </main>
         </div>
       </div>
+      <TabBar me={session.me} pathname={pathname} moreOpen={more} onMore={() => setMore(true)} />
+      {more && <MoreSheet me={session.me} pathname={pathname} serving={<ServingNote />} onSignOut={signOut} onClose={() => setMore(false)} />}
       </TourProvider>
     </SessionContext.Provider>
   );

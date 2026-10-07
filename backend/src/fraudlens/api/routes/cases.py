@@ -426,7 +426,37 @@ def freeze_requests(
         query = query.where(FreezeRequest.status == status)
     rows = s.scalars(query).all()
     names = _names(s, [who for r in rows for who in (r.requested_by, r.decided_by)])
-    return [freeze_view(r, names) for r in rows]
+    claims = _open_claims(s, {r.wallet_id for r in rows if r.status == "pending"})
+    return [freeze_view(r, names) | {"refunds": claims.get(r.wallet_id)} for r in rows]
+
+
+def _open_claims(s: Session, wallets: set[str]) -> dict[str, dict]:
+    """Victims waiting on each wallet's freeze: those whose fraud is already confirmed are
+    paid the moment the freeze is approved."""
+    if not wallets:
+        return {}
+    confirmed = Case.verdict == "confirmed_fraud"
+    rows = s.execute(
+        select(
+            Refund.wallet_id,
+            func.count(),
+            func.sum(Refund.amount_claimed),
+            func.count().filter(confirmed),
+            func.coalesce(func.sum(Refund.amount_claimed).filter(confirmed), 0),
+        )
+        .join(Case, Case.id == Refund.case_id)
+        .where(Refund.wallet_id.in_(wallets), Refund.status == "open")
+        .group_by(Refund.wallet_id)
+    ).all()
+    return {
+        wallet: {
+            "open": n,
+            "claimed": float(claimed),
+            "paid_on_approval": n_confirmed,
+            "paid_on_approval_claimed": float(confirmed_claimed),
+        }
+        for wallet, n, claimed, n_confirmed, confirmed_claimed in rows
+    }
 
 
 @router.post("/freeze-requests/{request_id}/approve")

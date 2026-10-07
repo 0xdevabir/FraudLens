@@ -275,6 +275,8 @@ export interface Freeze {
   decision_note: string | null;
   decided_at: string | null;
   created_at: string;
+  /** Victims waiting on this freeze (pending requests in the queue only). */
+  refunds?: { open: number; claimed: number; paid_on_approval: number; paid_on_approval_claimed: number } | null;
 }
 
 export interface CustomerReport {
