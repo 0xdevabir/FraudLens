@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { connection } from "next/server";
 
+import { Intro } from "@/components/intro";
+
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -25,7 +27,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   await connection();
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full font-sans">{children}</body>
+      <body className="min-h-full font-sans">
+        <Intro />
+        {children}
+      </body>
     </html>
   );
 }
+

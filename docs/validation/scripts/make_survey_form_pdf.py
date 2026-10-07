@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a printable FraudLens survey form with columns for 3 respondents."""
+"""Build a printable Upay-branded FraudLens survey form (3 respondents)."""
 
 from pathlib import Path
 
@@ -11,6 +11,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
+    Image,
     KeepTogether,
     Paragraph,
     SimpleDocTemplate,
@@ -19,7 +20,9 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+ROOT = Path(__file__).resolve().parents[3]
 OUT = Path(__file__).resolve().parents[1] / "printables" / "customer_survey_3_respondents.pdf"
+LOGO = ROOT / "frontend" / "app" / "(console)" / "phone" / "upay-logo.png"
 FONT_CANDIDATES = [
     Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
     Path("/Library/Fonts/Arial Unicode.ttf"),
@@ -30,10 +33,13 @@ SIDE = 14 * mm
 CONTENT_W = PAGE_W - 2 * SIDE
 PERSON_W = CONTENT_W / 3
 
-BRAND = colors.HexColor("#0B3D5C")
-HEADER_BG = colors.HexColor("#E8EEF5")
+# upay colours from frontend/app/globals.css (measured from the app icon)
+UPAY_YELLOW = colors.HexColor("#ffd600")
+UPAY_BLUE = colors.HexColor("#0054a5")
+HEADER_BG = colors.HexColor("#E8F1FA")  # light blue wash
 GRID = colors.HexColor("#8A8A8A")
-MUTED = colors.HexColor("#555555")
+MUTED = colors.HexColor("#444444")
+BLACK = colors.black
 
 
 def register_font() -> str:
@@ -51,9 +57,9 @@ def styles(font: str):
             "brand",
             parent=base["Heading1"],
             fontName=font,
-            fontSize=16,
-            leading=19,
-            textColor=BRAND,
+            fontSize=15,
+            leading=18,
+            textColor=UPAY_BLUE,
             alignment=TA_LEFT,
             spaceAfter=0,
         ),
@@ -70,11 +76,11 @@ def styles(font: str):
             "title",
             parent=base["Heading2"],
             fontName=font,
-            fontSize=12,
-            leading=15,
+            fontSize=11.5,
+            leading=14,
             alignment=TA_LEFT,
-            textColor=colors.HexColor("#1a1a1a"),
-            spaceBefore=2 * mm,
+            textColor=BLACK,
+            spaceBefore=1.5 * mm,
             spaceAfter=2 * mm,
         ),
         "h": ParagraphStyle(
@@ -85,7 +91,7 @@ def styles(font: str):
             leading=13,
             spaceBefore=3 * mm,
             spaceAfter=1.5 * mm,
-            textColor=BRAND,
+            textColor=UPAY_BLUE,
         ),
         "body": ParagraphStyle(
             "body",
@@ -103,14 +109,6 @@ def styles(font: str):
             fontSize=8,
             leading=10.5,
             alignment=TA_LEFT,
-        ),
-        "opt": ParagraphStyle(
-            "opt",
-            parent=base["Normal"],
-            fontName=font,
-            fontSize=7,
-            leading=9,
-            textColor=colors.HexColor("#333333"),
         ),
         "note": ParagraphStyle(
             "note",
@@ -143,11 +141,11 @@ def three_col_table(header_cells, data_row, font: str):
             [
                 ("FONTNAME", (0, 0), (-1, -1), font),
                 ("FONTSIZE", (0, 0), (-1, 0), 8),
-                ("BACKGROUND", (0, 0), (-1, 0), HEADER_BG),
-                ("TEXTCOLOR", (0, 0), (-1, 0), BRAND),
+                ("BACKGROUND", (0, 0), (-1, 0), UPAY_YELLOW),
+                ("TEXTCOLOR", (0, 0), (-1, 0), BLACK),
                 ("ALIGN", (0, 0), (-1, 0), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("GRID", (0, 0), (-1, -1), 0.4, GRID),
+                ("GRID", (0, 0), (-1, -1), 0.4, UPAY_BLUE),
                 ("LEFTPADDING", (0, 0), (-1, -1), 4),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 4),
                 ("TOPPADDING", (0, 0), (-1, -1), 4),
@@ -170,29 +168,54 @@ def draw_header_footer(canvas, doc):
     canvas.saveState()
     font = doc.survey_font
 
-    canvas.setFillColor(BRAND)
-    canvas.rect(0, PAGE_H - 12 * mm, PAGE_W, 12 * mm, fill=1, stroke=0)
-    canvas.setFillColor(colors.white)
-    canvas.setFont(font, 9)
-    canvas.drawString(SIDE, PAGE_H - 7.5 * mm, "FraudLens")
-    canvas.setFont(font, 7)
-    canvas.drawRightString(
-        PAGE_W - SIDE,
-        PAGE_H - 7.5 * mm,
-        "Real-time fraud decisions for mobile money",
-    )
+    # upay yellow status/title bar (matches phone demo)
+    canvas.setFillColor(UPAY_YELLOW)
+    canvas.rect(0, PAGE_H - 14 * mm, PAGE_W, 14 * mm, fill=1, stroke=0)
 
-    canvas.setStrokeColor(GRID)
-    canvas.setLineWidth(0.4)
+    # logo in yellow bar
+    if LOGO.is_file():
+        logo_size = 10 * mm
+        canvas.drawImage(
+            str(LOGO),
+            SIDE,
+            PAGE_H - 12.5 * mm,
+            width=logo_size,
+            height=logo_size,
+            mask="auto",
+            preserveAspectRatio=True,
+        )
+        text_x = SIDE + logo_size + 3 * mm
+    else:
+        text_x = SIDE
+
+    canvas.setFillColor(BLACK)
+    canvas.setFont(font, 11)
+    canvas.drawString(text_x, PAGE_H - 6.5 * mm, "upay")
+    canvas.setFont(font, 7)
+    canvas.setFillColor(UPAY_BLUE)
+    canvas.drawString(text_x, PAGE_H - 10.5 * mm, "Customer validation survey")
+    canvas.setFillColor(BLACK)
+    canvas.setFont(font, 7)
+    canvas.drawRightString(PAGE_W - SIDE, PAGE_H - 8 * mm, "উপায়")
+
+    # blue accent line under bar
+    canvas.setStrokeColor(UPAY_BLUE)
+    canvas.setLineWidth(1.2)
+    canvas.line(0, PAGE_H - 14 * mm, PAGE_W, PAGE_H - 14 * mm)
+
+    # Footer
+    canvas.setStrokeColor(UPAY_BLUE)
+    canvas.setLineWidth(0.6)
     y = 10 * mm
-    canvas.line(SIDE, y + 4 * mm, PAGE_W - SIDE, y + 4 * mm)
+    canvas.line(SIDE, y + 4.5 * mm, PAGE_W - SIDE, y + 4.5 * mm)
     canvas.setFillColor(MUTED)
-    canvas.setFont(font, 6.5)
+    canvas.setFont(font, 6)
     canvas.drawString(
         SIDE,
         y,
-        "FraudLens · student research project · anonymous · not an MFS provider or Bangladesh Bank",
+        "upay survey · FraudLens student research · anonymous · not Bangladesh Bank",
     )
+    canvas.setFillColor(UPAY_BLUE)
     canvas.drawRightString(PAGE_W - SIDE, y, f"Page {doc.page}")
     canvas.restoreState()
 
@@ -207,36 +230,70 @@ def build():
         pagesize=A4,
         leftMargin=SIDE,
         rightMargin=SIDE,
-        topMargin=18 * mm,
+        topMargin=20 * mm,
         bottomMargin=16 * mm,
-        title="FraudLens customer survey — 3 respondents",
-        author="FraudLens",
-        subject="Validation survey: scam experience and warn / step-up / hold reactions",
+        title="upay customer survey — 3 respondents (FraudLens validation)",
+        author="FraudLens / upay validation",
+        subject="upay customer survey: scam experience and warn / step-up / hold reactions",
     )
     doc.survey_font = font
 
     story = []
-    story.append(Paragraph("FraudLens", s["brand"]))
-    story.append(
-        Paragraph(
-            "Stop the scam before the money moves — real-time fraud decisions for mobile money, "
-            "explained in Bangla and reviewed by people.",
-            s["tagline"],
+
+    # Identity block with logo
+    if LOGO.is_file():
+        logo = Image(str(LOGO), width=16 * mm, height=16 * mm)
+        identity = Table(
+            [
+                [
+                    logo,
+                    [
+                        Paragraph("<b>upay</b> · উপায়", s["brand"]),
+                        Paragraph(
+                            "FraudLens validation survey for <b>upay</b> customers only — "
+                            "real-time fraud decisions for mobile money.",
+                            s["tagline"],
+                        ),
+                    ],
+                ]
+            ],
+            colWidths=[20 * mm, CONTENT_W - 20 * mm],
         )
-    )
+        identity.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                    ("BACKGROUND", (0, 0), (-1, -1), HEADER_BG),
+                    ("BOX", (0, 0), (-1, -1), 0.8, UPAY_BLUE),
+                    ("LEFTPADDING", (0, 0), (0, 0), 3),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ]
+            )
+        )
+        story.append(identity)
+    else:
+        story.append(Paragraph("upay · উপায়", s["brand"]))
+
+    story.append(Spacer(1, 2 * mm))
     story.append(Paragraph("Customer validation survey (3 respondents per sheet)", s["title"]))
     story.append(
         Paragraph(
-            "<b>System:</b> FraudLens &nbsp;|&nbsp; <b>Purpose:</b> measure real scam exposure and "
-            "acceptance of warn / step-up / hold interventions &nbsp;|&nbsp; "
-            "<b>Duration:</b> ~8 minutes &nbsp;|&nbsp; <b>Who:</b> adult (18+) personal MFS users "
-            "(bKash, Nagad, Rocket, etc.)",
+            "<b>Partner:</b> upay (UCB Fintech) &nbsp;|&nbsp; "
+            "<b>System:</b> FraudLens &nbsp;|&nbsp; "
+            "<b>Purpose:</b> scam exposure + acceptance of warn / step-up / hold &nbsp;|&nbsp; "
+            "<b>Duration:</b> ~8 minutes &nbsp;|&nbsp; "
+            "<b>Who:</b> adult (18+) personal <b>upay</b> account holders only",
             s["note"],
         )
     )
     story.append(
         Paragraph(
-            "<b>Never record:</b> name, phone, wallet number, PIN, OTP, NID, or account balance. "
+            "<b>Never record:</b> name, phone, upay wallet number, PIN, OTP, NID, or balance. "
             "If someone starts to say a PIN/OTP, stop them. Answers are anonymous and used only in aggregate.",
             s["note"],
         )
@@ -248,38 +305,39 @@ def build():
         "<b>area</b> ☐ urban ☐ rural<br/><br/>"
         "<b>consent</b> ☐ yes ☐ no"
     )
-    profile = three_col_table(
-        ["Person 1", "Person 2", "Person 3"],
-        [Paragraph(profile_cell, s["cell"]) for _ in range(3)],
-        font,
+    story.append(
+        three_col_table(
+            ["Person 1", "Person 2", "Person 3"],
+            [Paragraph(profile_cell, s["cell"]) for _ in range(3)],
+            font,
+        )
     )
-    story.append(profile)
 
     story.append(Paragraph("Consent (read aloud before any question)", s["h"]))
     story.append(
         Paragraph(
-            "আসসালামু আলাইকুম। আমরা <b>FraudLens</b> নামে একটি ছাত্র প্রকল্পের পক্ষ থেকে এসেছি। "
-            "আমরা মোবাইল ব্যাংকিং (যেমন বিকাশ, নগদ, রকেট) প্রতারণা কমানোর একটি পদ্ধতি নিয়ে কাজ করছি। "
-            "এতে প্রায় ৮ মিনিট লাগবে। আমরা নাম, ফোন, অ্যাকাউন্ট, পিন বা ওটিপি জানতে চাইব না। "
+            "আসসালামু আলাইকুম। আমরা <b>upay</b> গ্রাহকদের জন্য FraudLens নামে একটি ছাত্র প্রকল্পের পক্ষ থেকে এসেছি। "
+            "আমরা <b>upay</b> মোবাইল ব্যাংকিং প্রতারণা কমানোর একটি পদ্ধতি নিয়ে কাজ করছি। "
+            "এতে প্রায় ৮ মিনিট লাগবে। আমরা নাম, ফোন, upay অ্যাকাউন্ট, পিন বা ওটিপি জানতে চাইব না। "
             "উত্তর বেনামে রাখা হবে। অংশ নেওয়া আপনার ইচ্ছা। আপনি কি অংশ নিতে রাজি আছেন?",
             s["body"],
         )
     )
     story.append(
         Paragraph(
-            "If consent = no: thank them and stop. If they lost money: mention provider helpline "
-            "(resolve within 10 working days) and Bangladesh Bank CIPC.",
+            "If consent = no: thank them and stop. If they lost money: mention the upay helpline "
+            "(providers must resolve disputes within 10 working days) and Bangladesh Bank CIPC.",
             s["note"],
         )
     )
 
-    story.append(Paragraph("Part A — scam experience (last 12 months)", s["h"]))
+    story.append(Paragraph("Part A — scam experience with upay (last 12 months)", s["h"]))
 
     story.append(
         question_block(
             "Q1",
             "Has anyone called, texted or messaged you trying to get money or a PIN/OTP "
-            "from your mobile wallet? / কেউ কি কল/মেসেজ করে টাকা বা PIN/OTP নিতে চেয়েছে?",
+            "from your <b>upay</b> wallet? / কেউ কি কল/মেসেজ করে আপনার <b>upay</b> থেকে টাকা বা PIN/OTP নিতে চেয়েছে?",
             "☐ yes &nbsp;&nbsp; ☐ no",
             s,
             font,
@@ -288,7 +346,8 @@ def build():
     story.append(
         question_block(
             "Q2",
-            "Did you lose money to a scam of this kind? / এই ধরনের প্রতারণায় টাকা গেছে কি?",
+            "Did you lose money from your <b>upay</b> account to a scam of this kind? / "
+            "এই ধরনের প্রতারণায় আপনার <b>upay</b> থেকে টাকা গেছে কি?",
             "☐ yes &nbsp;&nbsp; ☐ no<br/><font size='6'>(if no → skip Q3–Q6)</font>",
             s,
             font,
@@ -317,7 +376,7 @@ def build():
         question_block(
             "Q5",
             "(If yes) Who did you tell? / কাকে জানিয়েছেন?",
-            "☐ nobody<br/>☐ provider<br/>☐ police<br/>☐ cipc<br/>☐ several",
+            "☐ nobody<br/>☐ upay / provider<br/>☐ police<br/>☐ cipc<br/>☐ several",
             s,
             font,
         )
@@ -334,14 +393,14 @@ def build():
 
     story.append(
         Paragraph(
-            "Part B — reactions to the three FraudLens screens "
+            "Part B — reactions to the three upay / FraudLens screens "
             "(1 = strongly disagree … 5 = strongly agree)",
             s["h"],
         )
     )
     story.append(
         Paragraph(
-            "<b>Warn (FraudLens):</b> “Before you send Tk 8,000: this number was opened 2 days ago "
+            "<b>Warn (upay):</b> “Before you send Tk 8,000: this number was opened 2 days ago "
             "and has received money from many people today… Do you know this person?” "
             "[Send anyway] [Cancel]",
             s["note"],
@@ -358,7 +417,7 @@ def build():
     )
     story.append(
         Paragraph(
-            "<b>Step-up (FraudLens):</b> “This payment looks like a common scam, so it is paused "
+            "<b>Step-up (upay):</b> “This payment looks like a common scam, so it is paused "
             "for 30 minutes. Enter your PIN again… after the pause it goes through unless you cancel.”",
             s["note"],
         )
@@ -375,8 +434,8 @@ def build():
     )
     story.append(
         Paragraph(
-            "<b>Hold (FraudLens):</b> “We are holding this Tk 15,000 transfer for up to 30 minutes "
-            "so a person can check it. You can cancel now, or call your provider’s helpline.”",
+            "<b>Hold (upay):</b> “We are holding this Tk 15,000 transfer for up to 30 minutes "
+            "so a person can check it. You can cancel now, or call the upay helpline.”",
             s["note"],
         )
     )
@@ -402,8 +461,8 @@ def build():
     story.append(
         question_block(
             "Q11",
-            "How many false alarms per year before you stop trusting it? / "
-            "বছরে কতবার ভুল সতর্কতায় আর বিশ্বাস করবেন না?",
+            "How many false alarms per year before you stop trusting <b>upay</b>? / "
+            "বছরে কতবার ভুল সতর্কতায় আর <b>upay</b>-তে বিশ্বাস করবেন না?",
             "__________ / year",
             s,
             font,
@@ -412,7 +471,7 @@ def build():
     story.append(
         question_block(
             "Q12",
-            "If your wallet showed screens like these, would you trust it more, the same, or less?",
+            "If your <b>upay</b> app showed screens like these, would you trust it more, the same, or less?",
             "☐ more &nbsp; ☐ same &nbsp; ☐ less",
             s,
             font,
@@ -430,7 +489,7 @@ def build():
     story.append(
         question_block(
             "Q14",
-            "Anything else you want to tell us? / আর কিছু বলতে চান?",
+            "Anything else you want to tell us about upay safety? / upay নিরাপত্তা নিয়ে আর কিছু?",
             "_______________________________<br/>_______________________________",
             s,
             font,
@@ -438,21 +497,24 @@ def build():
     )
 
     story.append(Paragraph("Extra notes (optional)", s["h"]))
-    notes = three_col_table(
-        ["Person 1", "Person 2", "Person 3"],
-        [
-            Paragraph("<br/><br/><br/><br/>", s["cell"]),
-            Paragraph("<br/><br/><br/><br/>", s["cell"]),
-            Paragraph("<br/><br/><br/><br/>", s["cell"]),
-        ],
-        font,
+    story.append(
+        three_col_table(
+            ["Person 1", "Person 2", "Person 3"],
+            [
+                Paragraph("<br/><br/><br/><br/>", s["cell"]),
+                Paragraph("<br/><br/><br/><br/>", s["cell"]),
+                Paragraph("<br/><br/><br/><br/>", s["cell"]),
+            ],
+            font,
+        )
     )
-    story.append(notes)
     story.append(Spacer(1, 3 * mm))
     story.append(
         Paragraph(
-            "<b>FraudLens analysis:</b> after fieldwork, copy answers into CSV columns from "
-            "docs/validation/customer_survey.md, then run "
+            "<b>Attribution:</b> upay name and logo belong to UCB Fintech Company Limited. "
+            "This form is a student research mock for FraudLens validation with upay customers — "
+            "not an official upay document. "
+            "After fieldwork: "
             "<font face='Courier' size='6.5'>cd backend &amp;&amp; uv run python -m "
             "fraudlens.validation.survey_analysis responses.csv --by area</font>",
             s["note"],

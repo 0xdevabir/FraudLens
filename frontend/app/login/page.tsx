@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { Brand } from "@/components/brand";
 import { Button, ErrorNote, inputClass } from "@/components/ui";
 import { api, setToken, useApi } from "@/lib/api";
 
@@ -46,9 +47,10 @@ export default function LoginPage() {
       <div aria-hidden="true" className="pointer-events-none absolute -top-40 left-1/2 size-[36rem] -translate-x-1/2 rounded-full bg-accent/20 blur-[120px]" />
       <div aria-hidden="true" className="pointer-events-none absolute -bottom-56 -left-24 size-[28rem] rounded-full bg-info/10 blur-[120px]" />
       <div className="relative w-full max-w-sm animate-rise">
-        <div className="mb-7 text-center">
-          <h1 className="text-[2rem] leading-tight font-bold tracking-tight text-fg">FraudLens</h1>
-          <p className="mt-1.5 text-[0.9375rem] text-fg-3">Real-time fraud decisions for mobile money</p>
+        <div className="mb-7 flex flex-col items-center text-center">
+          <h1 className="sr-only">FraudLens</h1>
+          <Brand size={48} className="text-[1.75rem]" />
+          <p className="mt-3 text-[0.9375rem] text-fg-3">Real-time fraud decisions for mobile money</p>
         </div>
         <form onSubmit={submit} className="space-y-4 rounded-3xl border border-white/12 bg-white/6 p-6 shadow-2xl shadow-black/40 backdrop-blur-2xl">
           <div>
@@ -96,3 +98,4 @@ export default function LoginPage() {
     </main>
   );
 }
+

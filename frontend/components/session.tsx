@@ -12,6 +12,7 @@ import type { Me, ModelInfo } from "@/lib/types";
 import { TOUR_STEPS } from "./tour/steps";
 import { Glyph, MoreSheet, TabBar, TopBar } from "./mobile-nav";
 import { TourButton, TourProvider } from "./tour/tour";
+import { Brand } from "./brand";
 import { Badge, cx, ErrorNote, Loading } from "./ui";
 
 interface Session {
@@ -109,11 +110,8 @@ export function Console({ children }: { children: ReactNode }) {
         {/* A sidebar from a laptop up; on a phone or a tablet, the title bar and the tab bar below. */}
         <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r border-line bg-base/80 text-fg-2 backdrop-blur-2xl backdrop-saturate-150 lg:flex">
           <div data-tour="brand" className="px-5 pt-6 pb-2">
-            <div className="flex items-center gap-2 text-lg font-bold tracking-tight text-fg">
-              <span aria-hidden="true" className="size-2.5 rounded-full bg-accent" />
-              FraudLens
-            </div>
-            <div className="mt-0.5 text-xs text-fg-4">Real-time fraud decisions for mobile money</div>
+            <Brand size={28} className="text-lg" />
+            <div className="mt-1.5 text-xs text-fg-4">Real-time fraud decisions for mobile money</div>
           </div>
           <div data-tour="tour-button" className="px-3 pt-2">
             <TourButton />
@@ -213,3 +211,5 @@ export function Id({ value, link = true, caseId }: { value: string | null | unde
     </span>
   );
 }
+
+

@@ -49,6 +49,47 @@
       transform: translateY(10px);
     }
   }
+
+  @keyframes lens-scan {
+    0%,
+    100% {
+      opacity: 0.45;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes fl-intro-in {
+    from {
+      opacity: 0;
+      transform: translateY(14px) scale(0.94);
+    }
+  }
+
+  @keyframes fl-intro-tag {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+
+  @keyframes fl-intro-glow {
+    from {
+      opacity: 0;
+      transform: scale(0.55);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes fl-intro-exit {
+    to {
+      transform: translateY(-105%);
+    }
+  }
 }
 
 :root {
@@ -161,6 +202,50 @@ body {
       }
     }
   }
+}
+
+/* Opening curtain: brand holds, then lifts — same beat as WebNest / ShopZen. */
+.fl-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: var(--color-base);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.fl-intro--exit {
+  animation: fl-intro-exit 0.75s var(--ease-ios) forwards;
+}
+
+.fl-intro__glow {
+  position: absolute;
+  width: min(28rem, 80vw);
+  height: min(28rem, 80vw);
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgb(168 188 161 / 0.22) 0%, rgb(150 238 251 / 0.06) 42%, transparent 68%);
+  animation: fl-intro-glow 0.9s var(--ease-ios) both;
+}
+
+.fl-intro__brand {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+  animation: fl-intro-in 0.7s var(--ease-ios) both;
+}
+
+.fl-intro__tag {
+  margin: 0;
+  max-width: 18rem;
+  text-align: center;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--color-fg-3);
+  animation: fl-intro-tag 0.55s var(--ease-ios) 0.28s both;
 }
 
 @media (prefers-reduced-motion: reduce) {
