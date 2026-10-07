@@ -1,36 +1,83 @@
-consortium.py 120L cognitive
-// /Users/mdabirhossain/Documents/WebDevelopment/FraudLens/backend/src/fraudlens/api/routes/consortium.py
-§ function service(p (L30-L39)
+"""The cross-provider mule-intelligence consortium (simulated; see docs/CONSORTIUM.md).
+
+Read-only views of partner feeds, matches and the hub's audit chain, a receiver
+lookup, and the dispute path. The state comes from `artifacts/consortium/`, written
+by `python -m fraudlens.consortium.simulate`; without it these routes answer 404 and
+nothing else in the platform changes.
+"""
+
+from __future__ import annotations
+
+import threading
+from typing import Annotated, Literal
+
+from fastapi import APIRouter, Path, Query
+from pydantic import BaseModel, Field
+
+from ...consortium.demo import ConsortiumService
+from ...consortium.protocol import ProtocolError
+from ...platform.audit import WorkflowError, audit
+from ...platform.events import Identifier
+from ...platform.scoring import clean
+from ..deps import Db, Plat, Reviewer, Supervisor
+
+router = APIRouter(prefix="/consortium", tags=["consortium"])
+
+_lock = threading.Lock()
+_services: dict[str, ConsortiumService | None] = {}
+
+
 def service(p: Plat) -> ConsortiumService:
     key = str(p.settings.artifacts_dir)
     with _lock:
-        # Reload when missing so placing artifacts (or Retry) works without a process restart.
-        if _services.get(key) is None:
+        if key not in _services:
             _services[key] = ConsortiumService.load(p.settings.artifacts_dir)
     svc = _services[key]
     if svc is None:
         raise WorkflowError(404, "consortium_not_built",
                             "run `python -m fraudlens.consortium.simulate` first")  # fmt: skip
     return svc
-// ... 21 lines omitted
-§ function overview(p (L61-L63)
+
+
+class Lookup(BaseModel):
+    wallet_id: Identifier
+
+
+class DisputeIn(BaseModel):
+    listing_id: str = Field(pattern=r"^[a-z]{2,16}:\d{1,8}$")
+    raised_by: str = Field(pattern=r"^[a-z]{2,16}$")
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class Resolve(BaseModel):
+    outcome: Literal["upheld", "withdrawn"]
+
+
+def _protocol(exc: ProtocolError) -> WorkflowError:
+    return WorkflowError(409, "consortium_refused", str(exc))
+
+
+@router.get("")
 def overview(p: Plat, ctx: Reviewer) -> dict:
     """Members, their latest signed feeds, the privacy guarantees and the measured results."""
     return clean(service(p).overview())
-// ... 3 lines omitted
-§ function matches(p (L67-L70)
+
+
+@router.get("/matches")
 def matches(p: Plat, ctx: Reviewer,
             limit: Annotated[int, Query(ge=1, le=500)] = 200) -> list[dict]:  # fmt: skip
     """Test-period receivers that matched a partner listing (one row per wallet)."""
     return clean(service(p).matches(limit))
-// ... 3 lines omitted
-§ function hub_audit(p (L74-L77)
+
+
+@router.get("/audit")
 def hub_audit(p: Plat, ctx: Reviewer,
               limit: Annotated[int, Query(ge=1, le=500)] = 100) -> list[dict]:  # fmt: skip
     """The hub's hash-chained log, newest first: counts and ids, never identifiers."""
     return clean(service(p).audit(limit))
-// ... 3 lines omitted
-§ function lookup(body (L81-L90)
+
+
+@router.post("/lookup")
 def lookup(body: Lookup, p: Plat, s: Db, ctx: Reviewer) -> dict:
     svc = service(p)
     try:
@@ -41,8 +88,9 @@ def lookup(body: Lookup, p: Plat, s: Db, ctx: Reviewer) -> dict:
           matches=len(out["matches"]), signal=out["signal"])  # fmt: skip
     s.commit()
     return clean(out)
-// ... 3 lines omitted
-§ function open_dispute(body (L94-L102)
+
+
+@router.post("/disputes", status_code=201)
 def open_dispute(body: DisputeIn, p: Plat, s: Db, ctx: Reviewer) -> dict:
     """Contest a listing: it stops counting for every member at once."""
     try:
@@ -52,8 +100,9 @@ def open_dispute(body: DisputeIn, p: Plat, s: Db, ctx: Reviewer) -> dict:
     audit(s, ctx, "consortium.dispute", "listing", body.listing_id, dispute=out["dispute_id"])
     s.commit()
     return clean(out)
-// ... 3 lines omitted
-§ function resolve (L106-L120)
+
+
+@router.post("/disputes/{dispute_id}/resolve")
 def resolve(
     dispute_id: Annotated[str, Path(pattern=r"^D\d{4}$")],
     body: Resolve,
@@ -69,5 +118,3 @@ def resolve(
     audit(s, ctx, "consortium.resolve", "dispute", dispute_id, outcome=body.outcome)
     s.commit()
     return clean(out)
-7/18 chunks shown (647 tokens)
-[lean-ctx] full source: read "/Users/mdabirhossain/Documents/WebDevelopment/FraudLens/backend/src/fraudlens/api/routes/consortium.py" directly (no MCP)  ·  or ctx_read("/Users/mdabirhossain/Documents/WebDevelopment/FraudLens/backend/src/fraudlens/api/routes/consortium.py", mode="full")
