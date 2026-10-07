@@ -13,6 +13,7 @@ from sqlalchemy import Date, cast, func, select, text
 
 from ...decision.evaluate import REPORT_FILE as POLICY_REPORT_FILE
 from ...decision.insights import INSIGHTS_FILE
+from ...decision.mitigation import MITIGATION_FILE
 from ...models import registry
 from ...platform.audit import WorkflowError
 from ...platform.models import AuditLog, Case, Decision, FreezeRequest, Transaction
@@ -249,12 +250,19 @@ def model_report(
     """How a model version (default: the served one) and the policy did on the test period.
 
     A back-test with known labels: `model` is the model card's numbers, `policy` the
-    effect of the rules, `insights` the threshold sweep, drift and fairness tables.
+    effect of the rules, `insights` the threshold sweep, drift and fairness tables,
+    `mitigation` the young-wallet segment thresholds measured before and after.
     """
     if version is None and p.scorer.bundle is not None:
         version = p.scorer.bundle.version
     if version is None:
-        return {"model_version": None, "model": None, "policy": None, "insights": None}
+        return {
+            "model_version": None,
+            "model": None,
+            "policy": None,
+            "insights": None,
+            "mitigation": None,
+        }
     if version not in registry.versions(p.settings.models_dir):
         raise WorkflowError(404, "model_not_found", f"no model version {version}")
     directory = p.settings.models_dir / version
@@ -263,6 +271,7 @@ def model_report(
         "model": _report(directory, "report.json"),
         "policy": _report(directory, POLICY_REPORT_FILE),
         "insights": _report(directory, INSIGHTS_FILE),
+        "mitigation": _report(directory, MITIGATION_FILE),
     }
 
 

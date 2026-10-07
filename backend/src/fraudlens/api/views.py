@@ -146,6 +146,7 @@ def decision_view(t: Transaction, d: Decision) -> dict:
                 "recommended_actions",
                 "similar_cases",
                 "headline",
+                "segment",
             )
         },  # fmt: skip
     }

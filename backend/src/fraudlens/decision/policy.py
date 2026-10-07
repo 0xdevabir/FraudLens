@@ -124,6 +124,60 @@ class Thresholds(_Model):
     overrides: dict[Literal["warn", "step_up", "hold"], float] = Field(default_factory=dict)
 
 
+class Segment(_Model):
+    """A group of payments scored against its own cut-offs, e.g. to a wallet under 30 days old.
+
+    The cut-offs are the model's own times `scale`, so they follow the model version
+    they are resolved against. A segment changes only the model's tier: rules are
+    applied afterwards exactly as for any other payment, so a hard rule still holds.
+    Guards, applied when the thresholds are resolved: the segment's warn cut-off is
+    capped at the policy's hold cut-off, so a payment held for anyone is at least
+    warned in every segment; the hold cut-off stays below 1, so every segment can
+    still be held for a person; and a file whose cut-offs still break
+    `0 < warn <= step_up <= hold < 1` (a scale below 1) is refused.
+    """
+
+    id: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$")
+    description: str = Field(min_length=1)
+    applies_to: tuple[str, ...] = SCORED_TYPES
+    when: tuple[Condition, ...] = Field(min_length=1)
+    scale: dict[Literal["warn", "step_up", "hold"], float]
+    # How the scale was chosen, so the file says where its numbers come from.
+    fitted: str = ""
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Segment:
+        if unknown := set(self.applies_to) - set(SCORED_TYPES):
+            raise ValueError(f"segment {self.id}: unknown transaction types {sorted(unknown)}")
+        if set(self.scale) != set(ALERT_TIERS):
+            raise ValueError(f"segment {self.id}: scale needs each of {list(ALERT_TIERS)}")
+        if not all(0 < value < 1_000 for value in self.scale.values()):
+            raise ValueError(f"segment {self.id}: scales must be positive and below 1000")
+        return self
+
+    def thresholds(self, base: Mapping[str, float]) -> dict[str, float]:
+        """This segment's cut-offs, given the policy's resolved ones; refused if unsafe."""
+        scaled = {tier: float(base[tier]) * self.scale[tier] for tier in ALERT_TIERS}
+        # The same scales are resolved against every model version (a shadow model uses
+        # the served policy), and their spacing differs. So rather than the file being
+        # refused for one model and accepted for another: the warn cut-off is capped at
+        # the policy's hold cut-off; the hold cut-off keeps at least 1/scale of the
+        # policy's room below 1 (so something can always be held); step-up stays between.
+        scaled["warn"] = min(scaled["warn"], float(base["hold"]))
+        if self.scale["hold"] > 1:
+            room = (1 - float(base["hold"])) / self.scale["hold"]
+            scaled["hold"] = min(scaled["hold"], 1 - room)
+        scaled["step_up"] = min(max(scaled["step_up"], scaled["warn"]), scaled["hold"])
+        try:
+            check_thresholds(scaled)
+        except PolicyError as exc:
+            raise PolicyError(f"segment {self.id}: {exc}") from exc
+        return scaled
+
+    def matches(self, txn_type: str, fields: Mapping[str, float]) -> bool:
+        return txn_type in self.applies_to and evaluate(self.when, fields) == "fired"
+
+
 class Signal(_Model):
     id: str
     when: tuple[Condition, ...] = Field(min_length=1)
@@ -169,6 +223,8 @@ class Policy(_Model):
     version: str = Field(min_length=1)
     description: str = ""
     thresholds: Thresholds = Thresholds()
+    # Payments scored against their own cut-offs; the first segment that matches applies.
+    segments: tuple[Segment, ...] = ()
     tiers: dict[Tier, TierSpec]
     rules: tuple[Rule, ...]
     fallback: Fallback
@@ -188,6 +244,9 @@ class Policy(_Model):
         ids = [r.id for r in self.rules]
         if len(ids) != len(set(ids)):
             raise ValueError("rule ids must be unique")
+        segment_ids = [s.id for s in self.segments]
+        if len(segment_ids) != len(set(segment_ids)):
+            raise ValueError("segment ids must be unique")
         rec_ids = [r.id for r in self.recommendations]
         if len(rec_ids) != len(set(rec_ids)):
             raise ValueError("recommendation ids must be unique")
@@ -215,7 +274,12 @@ class Policy(_Model):
             base = {tier: float(manifest["thresholds"][tier]) for tier in ALERT_TIERS}
         resolved = base | dict(self.thresholds.overrides)
         check_thresholds(resolved)
+        for segment in self.segments:  # refuse an unsafe segment now, not at the first payment
+            segment.thresholds(resolved)
         return resolved
+
+    def segment_for(self, txn_type: str, fields: Mapping[str, float]) -> Segment | None:
+        return next((s for s in self.segments if s.matches(txn_type, fields)), None)
 
 
 def check_thresholds(thresholds: Mapping[str, float]) -> None:
@@ -257,6 +321,8 @@ class Outcome:
     trace: tuple[dict, ...]
     fired: tuple[Rule, ...]
     fallback_signals: tuple[str, ...] = ()
+    segment: Segment | None = None  # the segment whose cut-offs set the model's tier
+    thresholds: Mapping[str, float] | None = None  # the cut-offs actually used
 
 
 def apply_policy(
@@ -274,6 +340,7 @@ def apply_policy(
     if txn_type not in SCORED_TYPES:
         raise ValueError(f"{txn_type} transactions are not scored")
     signals: tuple[str, ...] = ()
+    segment = None
     if risk is None or thresholds is None:
         mode, model_tier = "rules_only", None
         fallback = policy.fallback
@@ -290,6 +357,9 @@ def apply_policy(
         if math.isnan(risk):
             raise ValueError("risk is NaN")
         mode, decided_by = "model", "model"
+        # A segment moves the model's cut-offs only; the rules below see every payment alike.
+        if segment := policy.segment_for(txn_type, fields):
+            thresholds = segment.thresholds(thresholds)
         tier = model_tier = tier_for(risk, thresholds)
 
     trace, fired = [], []
@@ -325,7 +395,9 @@ def apply_policy(
             if rule.effect == "cap_at" and RANK[rule.tier] < RANK[tier]:
                 tier, decided_by = rule.tier, f"cap:{rule.id}"
 
-    return Outcome(tier, model_tier, mode, decided_by, tuple(trace), tuple(fired), signals)
+    return Outcome(
+        tier, model_tier, mode, decided_by, tuple(trace), tuple(fired), signals, segment, thresholds
+    )
 
 
 def _plain(value: float | None) -> float | None:

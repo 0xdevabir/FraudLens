@@ -319,13 +319,62 @@ interrupted (warn or above). Overall it is 0.53%, and 0.04% are held. Groups und
   receiving wallet is also the strongest honest signal of a mule, so the gap
   cannot be removed by dropping the feature without losing most of the recall.
   What limits the harm is the form of the interruption: a warning the customer
-  can dismiss, and a hold with a 30-minute review deadline. A deployment should
-  watch this rate and consider a separate, higher threshold for new wallets.
+  can dismiss, and a hold with a 30-minute review deadline. Policy v3 gives new
+  wallets cut-offs of their own; what that buys and costs is measured below.
 - Location, channel and balance gaps are within about a factor of two. No
   protected attribute exists in the data, so nothing is known about gender, age
   or religion, and nothing can be claimed.
 - These are rates on synthetic customers. The report is a method and a place on
   the dashboard, not evidence about real people.
+
+### Narrowing the gap: policy v3
+
+Policy v3 is v2 plus two segments: a transfer to a wallet under 30 days old, and a
+payment from one. They are scored against the model's cut-offs times a scale
+fitted on the validation period (`make mitigation`; method in
+[DECISION_POLICY.md §11](DECISION_POLICY.md#11-young-wallets-segment-thresholds-policy-v3)).
+Every rule, hard ones included, still applies, and a held payment still waits
+for a person. Measured on the test period (134,545 payments, 25 days) against v2,
+on model v4; intervals are 95%, from 1,000 bootstrap resamples of sending
+customers.
+
+| | v2 | v3 | Change (95% interval) |
+| --- | --- | --- | --- |
+| Senders under 30 days: honest payments interrupted | 3.17% | 0.41% | −3.45 to −2.12 pp |
+| … times the overall rate | 5.90 | 1.14 | −5.97 to −3.68 |
+| Receiving wallet under 30 days: interrupted | 8.88% | 2.42% | −7.54 to −5.35 pp |
+| … times the overall rate (all transfers) | 16.17 | 7.03 | −10.65 to −7.54 |
+| Receiving wallet under 30 days: held | 1.50% | 0.70% | −1.17 to −0.47 pp |
+| All honest payments interrupted | 0.537% | 0.363% | −0.20 to −0.15 pp |
+| Victim transfers alerted | 81.73% | 81.58% | −0.51 to 0.00 pp |
+| Victim transfers held | 66.47% | 66.19% | −0.73 to 0.00 pp |
+| Victims' money alerted | 85.19% | 84.76% | −1.53 to 0.00 pp |
+| All payments held | 0.765% | 0.750% | −0.022 to −0.009 pp |
+
+- **The trade-off, honestly.** 232 honest payments are no longer interrupted and
+  18 honest holds become a step-up instead. In exchange, among fraudulent payments,
+  one that v2 stepped up is now allowed, one is warned instead of stepped up, and
+  two that v2 held are stepped up instead (the customer re-authenticates and
+  waits, but the money is not held for an analyst). Victims' money alerted falls
+  by ৳15,300 (৳3,024,010 to ৳3,008,710). Precision at warn rises from 64.7% to
+  73.1%, and alerts fall from 81.0 to 71.7 a day.
+- **It narrows the gap; it does not close it.** Raising the young-receiver warn
+  cut-off past the guard (×25 the model's, the hold cut-off) would bring the
+  ratio only from 7.4 to about 6.1 against payments with no young wallet, because
+  the rest is rules (the mule rule R04 lifts young receiving wallets) and honest
+  payments the model scores at hold level. Those are not touched: the guard keeps
+  a payment held for anyone warned in every segment.
+- **Intersectional view** (account age × channel × area, in `fairness_mitigation.json`
+  and on the console). Young receiving wallets on USSD carry the largest remaining
+  gap: rural ones fall from 29.1× to 16.1× the overall rate (288 honest payments),
+  urban ones from 30.7× to 22.9× (89 payments, too few to judge). Young senders on
+  the app in rural areas stay highest among senders (6.9× to 2.7×). Older groups'
+  ratios rise slightly (for example 0.99 to 1.21) only because the overall rate
+  they are divided by fell; their own rates all fell.
+- The segments were fitted on validation, where they cost no victim recall at all;
+  the one missed and two softened victim transfers appear only on test. The
+  default served policy stays v2 until someone chooses v3
+  (`FRAUDLENS_POLICY_VERSION=v3`).
 
 ### Verdicts as labels
 

@@ -99,7 +99,7 @@ class Result:
 
 _ALERT_DETAIL = (
     "rule_trace", "fallback_signals", "reasons", "customer_message",
-    "recommended_actions", "similar_cases", "evidence",
+    "recommended_actions", "similar_cases", "evidence", "segment",
 )  # fmt: skip
 
 
@@ -400,7 +400,7 @@ class Scorer:
             }
         else:  # an allowed transaction keeps only which rules it went through
             trace = [{"id": r["id"], "status": r["status"]} for r in full["rule_trace"]]
-            detail = {"rule_trace": trace}
+            detail = {"rule_trace": trace, "segment": full["segment"]}
         decision_row = {
             "txn_id": t.txn_id, "tier": tier, "action": decision.action,
             "requires_review": decision.requires_review, "mode": decision.mode,
