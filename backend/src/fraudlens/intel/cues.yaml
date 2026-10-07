@@ -4,7 +4,8 @@
 #
 # Patterns are regular expressions matched on normalised text: lower case, every
 # digit written as 0, every link written as `urltoken`. They cover Bangla script,
-# Bangla in Latin letters (spelling varies, so the patterns are loose) and English.
+# Bangla in Latin letters (spelling varies, so the patterns are loose), English,
+# and the two scripts mixed in one message ("OTP টা বলুন").
 #
 # `benign: true` marks a cue that points away from a scam (a warning not to share
 # a code, a transaction receipt). Those are features too, but never shown as a reason.
@@ -20,6 +21,8 @@ cues:
       - '(?:otp|\bpin\b|passw|passcode|\bc[o0]de?\b|\bkod\b|confirmation number|0 digit|\bid shown)[^.!?।]{0,60}(?:bol[ue]n|bolben|\bbolo\b|\bd[ie]n\b|diben|\bdao\b|janan|forward|share|\btell\b|\bgive\b|reply|read me|enter|provide|approve)'
       - '(?:\btell\b|\bgive\b|share|forward|reply with|read me|confirm your|enter your|provide)[^.!?।]{0,40}(?:otp|\bpin\b|passw|passcode|\bcode\b|digit|\bid\b)'
       - '(?:ওটিপি|পিন|কোড|পাসওয়ার্ড|নম্বর আসবে)[^.!?।]{0,50}(?:বলুন|বলবেন|দিন|জানান|পাঠান|বলো|দাও)'
+      # Both scripts at once: an English word for the secret, a Bangla verb for giving it.
+      - '(?:otp|\bpin\b|passw|\bc[o0]dee?\b)[^.!?।]{0,50}(?:বলুন|বলবেন|দিন|দেন|জানান|পাঠান|বলো|দাও|শেয়ার)'
 
   - id: warn_secret
     benign: true
@@ -78,6 +81,7 @@ cues:
       - 'agrim|jamanot ?(?:hisebe|den|din)|full payment'
       - '(?:ফি|চার্জ|ট্যাক্স|ভ্যাট|অগ্রিম|জমা|ডিউটি)[^.!?।]{0,50}(?:পাঠান|পাঠাতে|পাঠালে|পাঠিয়ে|দিতে হবে|দিন|দিয়ে|লাগবে)'
       - 'আগে[^.!?।]{0,40}(?:টাকা|চার্জ|ফি)[^.!?।]{0,30}(?:পাঠ|দিতে|জমা)'
+      - '(?:\bfee\b|charge|\btax\b|\bvat\b|deposit|advance|clearance)[^.!?।]{0,50}(?:পাঠান|পাঠাতে|পাঠালে|দিতে হবে|দিন|দেন|লাগবে|করুন)'
 
   - id: return_money
     label:

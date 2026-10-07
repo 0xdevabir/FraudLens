@@ -40,6 +40,7 @@ from ..decision import Decision as EngineDecision
 from ..decision import DecisionEngine, SimilarCases, context_from_engine, load_policy
 from ..decision.policy import RANK
 from ..features import SCORED_TYPES, FeatureEngine, Txn
+from ..intel.memory import MessageMemory, escalate
 from ..mlops.shadow import Shadow
 from ..models import registry
 from .audit import WorkflowError
@@ -159,6 +160,7 @@ class Scorer:
         self.engine = FeatureEngine()
         self.clock = Clock(0.0)
         self.frozen: set[str] = set()
+        self.messages = MessageMemory()  # flagged messages a payment may follow
         self.mule_scores: dict[str, float] = {}  # wallets the mule model has alerted on
         self.seq = 0  # last position written to the log
         self._new_wallets: list[dict] = []
@@ -369,6 +371,8 @@ class Scorer:
         t0 = time.perf_counter()
         features = self.engine.features(t)
         decision = self.decision.decide(t, features, context_from_engine(self.engine, t))
+        if (link := self.messages.link(t.sender_id, t.receiver_id, t.amount, when)) is not None:
+            decision = escalate(decision, link, self.policy)  # paid what a flagged message asked
         latency_ms = (time.perf_counter() - t0) * 1000
         if self.shadow is not None and decision.risk is not None:
             self._shadow_score(t.txn_id, features)  # after the clock stopped: not in latency_ms

@@ -1,4 +1,4 @@
-.PHONY: help setup up redis down data features train policy insights intel pipeline test lint fmt \
+.PHONY: help setup up redis down data features train policy insights intel intel-compare pipeline test lint fmt \
 	migrate seed load api replay replay-live verify platform \
 	review retrain shadow models promote console console-build smoke \
 	demo demo-reset
@@ -54,6 +54,9 @@ insights: ## Threshold sweep, drift and fairness tables for the dashboards
 
 intel: ## Train and evaluate the scam-message classifier (docs/FRAUD_TAXONOMY.md)
 	cd backend && uv run python -m fraudlens.intel.train
+
+intel-compare: ## Compare message models, MiniLM included with the transformer extra (compare.json)
+	cd backend && uv run --extra transformer python -m fraudlens.intel.compare
 
 pipeline: data features train policy insights intel ## Data, features, models and policy end to end
 

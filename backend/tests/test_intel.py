@@ -246,3 +246,112 @@ def test_a_customer_report_is_labelled_from_the_choice_and_the_description(model
     read = categorise_report("other", OTP_SCAM, model, TAXONOMY)
     assert read and all(c["basis"] == ["description"] for c in read)
     assert categorise_report("other", LUNCH, None, TAXONOMY) == []
+
+
+# ------------------------------------------------- cue-level reasons, both scripts
+
+
+@pytest.mark.parametrize(
+    "text, cue, phrase",
+    [
+        (OTP_SCAM, "ask_secret", "OTP code ta bolun"),
+        ("আপনার অ্যাকাউন্ট বন্ধ হয়ে যাবে, এখনই ওটিপি কোডটি বলুন।", "ask_secret", "ওটিপি কোডটি বলুন"),
+        ("Sir আপনার account block হবে, OTP টা এখনই বলুন।", "ask_secret", "OTP টা এখনই বলুন"),
+        ("Prize পেতে ৫০০ টাকা processing fee পাঠান।", "pay_first", "fee পাঠান"),
+    ],
+)
+def test_a_reason_points_at_the_words_that_showed_it(text, cue, phrase):
+    from fraudlens.intel.explain import cue_phrases, mapped
+
+    assert mapped(text)[0] == normalise(text)  # the offsets follow the same normalisation
+    found = {c.id: phrases for c, phrases in cue_phrases(text)}
+    assert cue in found
+    spans = found[cue]
+    assert any(phrase in p["text"] for p in spans), spans
+    assert all(text[p["start"] : p["end"]].strip() == p["text"] for p in spans)
+
+
+def test_a_flagged_message_carries_its_phrases_and_highlighted_words(model):
+    found = check_message(OTP_SCAM, model, TAXONOMY)
+    secret = next(s for s in found["signals"] if s["id"] == "ask_secret")
+    assert secret["label"]["bn"] and secret["phrases"][0]["text"]
+    words = found["highlights"]
+    assert words and all(OTP_SCAM[w["start"] : w["end"]] == w["text"] for w in words)
+    assert words == sorted(words, key=lambda w: -w["weight"])
+    assert check_message(LUNCH, model, TAXONOMY)["highlights"] == []
+
+
+# -------------------------------------------------------------- public corpus
+
+
+def test_the_public_corpus_is_used_only_when_it_is_the_pinned_one(tmp_path):
+    from fraudlens.intel import external
+
+    assert external.load(tmp_path) is None  # nothing there: trained on the corpus alone
+    (tmp_path / "train.parquet").write_bytes(b"not the pinned file")
+    assert external.load(tmp_path) is None
+    meta = external.provenance()
+    assert meta["licence"] == "MIT" and len(meta["revision"]) == 40
+    assert all(len(f["sha256"]) == 64 for f in meta["files"].values())
+
+
+def test_every_scam_family_has_a_typology_and_each_is_held_out_once():
+    families = corpus.load_families()
+    scams = [f for f in families if f.labels]
+    assert all(f.typology in corpus.TYPOLOGIES for f in scams)
+    assert all(f.typology is None for f in families if not f.labels)
+    held = {f.typology for f in scams if f.held_out}
+    assert set(corpus.TYPOLOGIES) - {"other"} <= held
+
+
+# ------------------------------------------------------- message, then payment
+
+
+def test_a_payment_that_follows_a_flagged_message_is_linked_to_it():
+    from datetime import timedelta
+
+    from fraudlens.intel.memory import MessageMemory, targets
+
+    wallets, phones, amounts = targets("ভুল করে ৳২,৫০০ গেছে, W0000331 নম্বরে ফেরত দিন বা 01712345678")
+    assert wallets == {"W0000331"} and phones == {"01712345678"} and amounts == (2500.0,)
+
+    memory, now = MessageMemory(), datetime(2026, 1, 1, 12, tzinfo=UTC)
+    flagged = {"level": "high", "categories": [{"id": "social_engineering"}]}
+    text = "Bhul kore 2,500 taka gese, W0000331 e ferot pathan"
+    assert not memory.remember("W1", text, {"level": "none"}, now)  # not flagged: not kept
+    assert memory.remember("W1", text, flagged, now)
+    later = now + timedelta(minutes=10)
+    assert memory.link("W1", "W0000331", 100.0, later)["matched"] == ["receiver"]
+    assert memory.link("W1", "W0000999", 2500.0, later)["matched"] == ["amount"]
+    assert memory.link("W1", "W0000999", 100.0, later) is None
+    assert memory.link("W2", "W0000331", 2500.0, later) is None  # someone else's message
+    assert memory.link("W1", "W0000331", 2500.0, now + timedelta(minutes=31)) is None
+
+
+def test_a_linked_payment_is_warned_with_the_reason_in_both_languages():
+    from dataclasses import dataclass, field
+
+    from fraudlens.decision import load_policy
+    from fraudlens.intel.memory import escalate
+
+    @dataclass(frozen=True)
+    class Decision:
+        tier: str = "allow"
+        action: str = "proceed"
+        scenario: str | None = None
+        customer_message: dict | None = None
+        decided_by: str = "model"
+        reasons: tuple = ()
+        evidence: dict = field(default_factory=dict)
+
+    policy = load_policy(Settings().policy_version)
+    link = {"matched": ["receiver", "amount"], "minutes_ago": 4, "level": "high", "categories": []}
+    warned = escalate(Decision(), link, policy)
+    assert warned.tier == "warn" and warned.scenario == "scam"
+    assert warned.action == policy.tiers["warn"].action and warned.customer_message["bn"]
+    reason = warned.reasons[0]
+    assert reason["code"] == "follows_flagged_message" and reason["direction"] == "raises"
+    assert "4 minutes" in reason["detail_en"] and reason["detail_bn"]
+    assert warned.evidence["message_link"] == link
+    held = escalate(Decision(tier="hold", action="hold_for_review"), link, policy)
+    assert held.tier == "hold" and held.reasons[0]["code"] == "follows_flagged_message"

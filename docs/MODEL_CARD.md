@@ -1,7 +1,7 @@
 # Model card — FraudLens risk models, version v4
 
 Every number below is read from `backend/artifacts/models/v4/report.json`, which
-`make train` writes, except where §13 says otherwise. Nothing here is
+`make train` writes, except where §13 and §15 say otherwise. Nothing here is
 hand-entered or rounded up. The data is synthetic
 ([DATA_ASSUMPTIONS.md](DATA_ASSUMPTIONS.md)); absolute values will not transfer
 to real traffic.
@@ -402,3 +402,36 @@ make test                    # 203 tests, including leakage and round-trip check
 `report.json` holds every number above; `manifest.json` holds thresholds,
 calibration, feature list and data seed; `test_scores.parquet` holds the score of
 every test transaction.
+
+## 15. The scam-message classifier (intel `v2`)
+
+A separate model, for text a customer pastes in before paying. Numbers in this
+section come from `backend/artifacts/intel/report.json` (`make intel`) and
+`compare.json` (`make intel-compare`); the full tables, data provenance and limits
+are in [FRAUD_TAXONOMY.md](FRAUD_TAXONOMY.md) §4–§6.
+
+| | |
+| --- | --- |
+| Model | logistic regression, one per output, over character n-grams (2–5, TF-IDF) and 27 cue patterns with their pairwise products |
+| Outputs | scam or not, and the eight fraud categories |
+| Training data | 413 synthetic templates in Bangla, Banglish, English and code-mixed text (5,114 training messages), plus the training split of a public MIT-licensed Bangla SMS smishing corpus (4,903 messages, scam-or-not only) |
+| Thresholds | per source on harmless validation messages, stricter kept: `caution` ≤ 3% flagged, `high` ≤ 0.5% |
+| Cost | about nine seconds to train; 0.72 ms median, 0.86 ms p95 per message on a laptop CPU |
+| Chosen over | cue patterns alone, word TF-IDF, character n-grams alone, multilingual MiniLM embeddings + LR (each with and without the public corpus); best macro-F1 on all three test sets |
+
+| At `caution` | new wording (`test`) | held-out scripts (`unseen`) | public corpus test (`external`) |
+| --- | --- | --- | --- |
+| ROC-AUC | 0.994 | 0.971 | 0.996 |
+| Macro-F1 | 0.977 | 0.811 | 0.972 |
+| Scams flagged | 96.9% | 85.5% | 97.0% |
+| Harmless flagged | 0.36% | 7.2% | 2.5% |
+
+Macro-F1 on `unseen` by language: Bangla 0.717, Banglish 0.738, English 0.833,
+code-mixed 0.995. The previous classifier scored macro-F1 0.659 on `external`.
+The weak point is harmless Banglish on scripts never seen (29% flagged at
+`caution`, none at `high`).
+
+How it reaches the payment: a payment made within 30 minutes of a flagged check, by
+the same wallet, to a number or for an amount the message named, is raised from
+`allow` to `warn` with the reason shown (`decided_by: message_link`). Only the
+numbers and amounts are held, in memory, never the text.
