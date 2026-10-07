@@ -6,6 +6,9 @@ is a fixed template. A language model may be asked for a more readable version,
 but it receives only the masked evidence and its text is used only if every
 number and identifier in it appears in that evidence; otherwise the template
 stands. The model never sees a raw wallet number and never decides anything.
+
+`LLMNarrator` asks Claude; `decision.llm.ProviderChain` asks a list of providers in
+priority order with a bilingual knowledge base. Either is only a `Narrator`.
 """
 
 from __future__ import annotations
@@ -273,22 +276,35 @@ class LLMNarrator:
         return text.strip() or None
 
 
-Narrator = Callable[[Mapping, str], str | None]
+@dataclass(frozen=True)
+class Draft:
+    """What a narrator that knows more than a string returns: the text (None when it
+    has none), which provider wrote it, and why earlier drafts were turned down."""
+
+    text: str | None
+    provider: str | None = None
+    problems: tuple[str, ...] = ()
+
+
+Narrator = Callable[[Mapping, str], str | Draft | None]
 
 
 def narrate(evidence: Mapping, narrator: Narrator | None = None, lang: str = "en") -> dict:
     """A case note for `evidence`: the narrator's if it is grounded, else the template."""
     rejected: tuple[str, ...] = ()
     if narrator is not None:
-        text = narrator(evidence, lang)
+        text, provider, problems = narrator(evidence, lang), None, ()
+        if isinstance(text, Draft):
+            text, provider, problems = text.text, text.provider, text.problems
         if text:
             grounding = check_grounding(text, evidence)
             if grounding.ok:
-                return {"text": text, "source": "llm", "lang": lang, "rejected": []}
+                note = {"text": text, "source": "llm", "lang": lang, "rejected": []}
+                return note | ({"provider": provider} if provider else {})
             rejected = grounding.problems
             log.warning("case note rejected by grounding check: %s", "; ".join(rejected))
         else:
-            rejected = ("no text returned",)
+            rejected = problems or ("no text returned",)
     return {
         "text": template(evidence, lang),
         "source": "template",

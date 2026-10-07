@@ -115,10 +115,12 @@ def test_policy_fallback_and_messages_must_be_complete():
 def test_load_policy_reports_missing_malformed_and_mislabelled_files(tmp_path):
     with pytest.raises(PolicyError, match="no policy file"):
         load_policy("v9", tmp_path)
-    (tmp_path / "bad.yaml").write_text("rules: [unclosed")
+    (tmp_path / "bad.yaml").write_text("rules: [unclosed", encoding="utf-8")
     with pytest.raises(PolicyError, match="invalid policy"):
         load_policy("bad", tmp_path)
-    (tmp_path / "v2.yaml").write_text(yaml.safe_dump(_variant(), allow_unicode=True))
+    (tmp_path / "v2.yaml").write_text(
+        yaml.safe_dump(_variant(), allow_unicode=True), encoding="utf-8"
+    )
     with pytest.raises(PolicyError, match="declares version 'v1'"):
         load_policy("v2", tmp_path)
 

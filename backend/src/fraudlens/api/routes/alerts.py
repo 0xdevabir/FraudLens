@@ -193,6 +193,8 @@ def narrative(
     if p.narrator is None:
         return narrate(evidence, None, lang)
     key = f"fraudlens:note:{txn_id}:{lang}"
+    if tag := getattr(p.narrator, "cache_tag", None):
+        key += f":{tag}"
     try:
         if cached := p.redis.get(key):
             return json.loads(cached)

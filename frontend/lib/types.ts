@@ -217,6 +217,7 @@ export interface Narrative {
   source: "template" | "llm";
   lang: Lang;
   rejected: string[];
+  provider?: string; // which language model wrote it, when source is "llm"
 }
 
 export interface CaseRow {

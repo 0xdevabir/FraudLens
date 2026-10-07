@@ -75,10 +75,14 @@ def build_platform(settings: Settings) -> Platform:
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     scorer = Scorer(settings, sessions, redis)
     narrator = None
-    if settings.llm_notes and os.environ.get("ANTHROPIC_API_KEY"):
-        from ..decision.narrative import LLMNarrator
+    if settings.llm_notes:
+        from ..decision.llm import build_chain
 
-        narrator = LLMNarrator()
+        narrator = build_chain(settings)
+        if narrator is None and os.environ.get("ANTHROPIC_API_KEY"):
+            from ..decision.narrative import LLMNarrator
+
+            narrator = LLMNarrator()
     return Platform(
         settings=settings,
         db=db,
