@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import { Id, useSession } from "@/components/session";
 import { Async, Badge, Button, Card, Chip, Empty, PageHeader, ReasonDialog, StatusBadge, Table, Td } from "@/components/ui";
 import { api, ApiError, useApi } from "@/lib/api";
-import { when, words } from "@/lib/format";
+import { taka, when, words } from "@/lib/format";
 import type { Freeze } from "@/lib/types";
 
 const STATUSES = ["pending", "approved", "rejected"] as const;
@@ -62,9 +62,9 @@ export default function ApprovalsPage() {
 
   return (
     <>
-      <PageHeader
+      <PageHeader tour="approvals-header"
         title="Freeze approvals"
-        sub="Freezing a wallet takes two people: a reviewer asks, and a supervisor who is not that reviewer decides. Nothing here is automatic."
+        sub="Freezing a wallet takes two people: a reviewer asks, and a supervisor who is not that reviewer decides. Once the fraud is confirmed, approving the freeze is also what refunds the victims."
       />
       {outcome && <div role="status" className="mb-3 rounded-xl border border-good/30 bg-good/10 px-3 py-2 text-sm text-good">{outcome}</div>}
       {!canApprove && (
@@ -101,7 +101,7 @@ export default function ApprovalsPage() {
         </Card>
       )}
 
-      <Card flush>
+      <Card flush tour="approvals-queue">
         <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-4 py-3">
           {STATUSES.map((value) => <Chip key={value} on={status === value} onClick={() => setStatus(value)}>{words(value)}</Chip>)}
         </div>
@@ -114,7 +114,16 @@ export default function ApprovalsPage() {
                     <Td>#{request.id}</Td>
                     <Td><Id value={request.wallet_id} caseId={request.case_id} /></Td>
                     <Td><StatusBadge status={request.status} /></Td>
-                    <Td className="max-w-md whitespace-normal text-fg-2">{request.reason}</Td>
+                    <Td className="max-w-md whitespace-normal text-fg-2">
+                      {request.reason}
+                      {request.refunds && (
+                        <p className={`mt-1.5 text-xs font-medium ${request.refunds.paid_on_approval ? "text-good" : "text-warn"}`}>
+                          {request.refunds.paid_on_approval
+                            ? `Approving pays back ${request.refunds.paid_on_approval} victim${request.refunds.paid_on_approval > 1 ? "s" : ""}, ${taka(request.refunds.paid_on_approval_claimed)} claimed`
+                            : `${request.refunds.open} refund claim${request.refunds.open > 1 ? "s" : ""} waiting for a verdict`}
+                        </p>
+                      )}
+                    </Td>
                     <Td className="whitespace-nowrap text-fg-2">
                       {request.requester}
                       <div className="text-xs text-fg-3">{when(request.created_at)}</div>
@@ -129,7 +138,9 @@ export default function ApprovalsPage() {
                         <Badge title="The two-person rule: whoever asked cannot approve">you asked for this</Badge>
                       ) : (
                         <span className="flex gap-2">
-                          <Button small variant="danger" onClick={() => setDialog({ title: `Freeze wallet (request #${request.id})`, requests: [request], approve: true })}>Approve</Button>
+                          <Button small variant="danger" onClick={() => setDialog({ title: `Freeze wallet (request #${request.id})`, requests: [request], approve: true })}>
+                            {request.refunds?.paid_on_approval ? "Approve and refund" : "Approve"}
+                          </Button>
                           <Button small onClick={() => setDialog({ title: `Reject request #${request.id}`, requests: [request], approve: false })}>Reject</Button>
                         </span>
                       )}
@@ -149,7 +160,11 @@ export default function ApprovalsPage() {
           title={dialog.title}
           label="Decision note"
           intro={dialog.approve
-            ? "An approved freeze stops the wallet from sending or receiving until a supervisor lifts it."
+            ? `An approved freeze stops the wallet from sending or receiving until a supervisor lifts it.${
+                dialog.requests.some((request) => request.refunds?.paid_on_approval)
+                  ? " The fraud is already confirmed, so the victims who reported it are refunded from what is left in the wallet in the same step."
+                  : ""
+              }`
             : "The wallet stays as it is. The requester sees your note."}
           confirm={dialog.approve ? "Approve freeze" : "Reject"}
           variant={dialog.approve ? "danger" : "primary"}

@@ -66,6 +66,16 @@ Then follow the held payment into the console:
 13. Back on the case, give the verdict **confirmed fraud** with a reason. The held
     payments are blocked and the wallet is flagged; from now on the hard rule
     stops any payment to it.
+13a. **Getting a victim's money back.** On the phone, pick *Looks like a scam*
+    and press *send anyway*: the money goes. On the done screen press *Scammed?
+    Report it to claim your money back* and pick a reason. The phone shows the
+    refund tracker (reported → receiver frozen → scam confirmed → money back) and
+    reminds the customer that a refund never needs a PIN or a fee. Open the case:
+    the **Victim refunds** card shows the claim and how much is still in the
+    wallet. Give **confirmed fraud**: a freeze request is filed for you. As
+    supervisor1, approve it in **Freeze approvals**; the refund is paid in the
+    same step. Back on the phone, *Check my refund* shows the amount returned.
+    `/refunds` lists every claim.
 14. **Mule rings** (`/rings`): open a ring. Wallets tied by shared handsets and
     transfers; taken-over victims are listed apart from members. **Propose
     freezing the ring** sends one request per member wallet to the same approval

@@ -11,12 +11,12 @@ export default function RingsPage() {
   const rings = useApi<Ring[]>("/v1/rings");
   return (
     <>
-      <PageHeader
+      <PageHeader tour="rings-header"
         title="Rings"
         sub="Wallets that belong together: they share handsets with, or pass money between, wallets already confirmed as fraud. A ring is a lead for a reviewer, not a verdict."
         actions={<Link href="/consortium" className="text-sm text-info hover:underline">Partner mule feeds →</Link>}
       />
-      <Card flush>
+      <Card flush tour="rings-table">
         <Async state={rings}>
           {(data) =>
             data.length ? (

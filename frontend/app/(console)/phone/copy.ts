@@ -169,8 +169,47 @@ export const T = {
   cancelledBody: { bn: "কিছুই পাঠানো হয়নি। টাকা আপনার অ্যাকাউন্টেই আছে।", en: "Nothing was sent. Your money is still in your account." },
   refusedBody: { bn: "এই লেনদেনটি করা যায়নি। টাকা আপনার অ্যাকাউন্টেই আছে।", en: "This payment was refused. Your money is still in your account." },
   newPayment: { bn: "নতুন লেনদেন", en: "New payment" },
+  reportForRefund: { bn: "প্রতারিত হয়েছেন? অভিযোগ করে টাকা ফেরত চান", en: "Scammed? Report it to claim your money back" },
+  refundTitle: { bn: "টাকা ফেরতের অবস্থা", en: "Your refund" },
+  refundBy: { bn: "উত্তর পাবেন সর্বশেষ", en: "We'll tell you by" },
+  refundNoFee: {
+    bn: "টাকা ফেরত পেতে কাউকে পিন, ওটিপি বা কোনো ফি দিতে হয় না। কেউ চাইলে সে প্রতারক।",
+    en: "You never give a PIN, OTP or fee to get a refund. Anyone who asks is a scammer.",
+  },
+  refundPaid: { bn: "টাকা আপনার অ্যাকাউন্টে ফেরত দেওয়া হয়েছে", en: "has been returned to your account" },
+  refundPartOf: { bn: "আপনার হারানো", en: "of the" },
+  refundPartTail: {
+    bn: "টাকার মধ্যে প্রতারকের অ্যাকাউন্টে যা বাকি ছিল, তা থেকে ফেরত দেওয়া হয়েছে।",
+    en: "you lost was returned, from what was left in the scammer's account.",
+  },
+  refundNothingLeft: {
+    bn: "প্রতারণা নিশ্চিত হয়েছে, কিন্তু টাকা আগেই তুলে নেওয়া হয়েছিল। সাহায্যের জন্য ১৬২৬৮ নম্বরে কল করুন।",
+    en: "We confirmed the scam, but the money had already been taken out. Call 16268 for help.",
+  },
+  refundDeclined: {
+    bn: "আমরা প্রতারণা নিশ্চিত করতে পারিনি, তাই টাকা ফেরত দেওয়া যাচ্ছে না। একমত না হলে ১৬২৬৮ নম্বরে কল করুন।",
+    en: "We couldn't confirm a scam, so there's no refund. Call 16268 if you disagree.",
+  },
+  checkRefund: { bn: "টাকা ফেরতের অবস্থা দেখুন", en: "Check my refund" },
   minutes: { bn: "মিনিট", en: "minutes" },
 } satisfies Record<string, Words>;
+
+/** The road to a refund: reported, the receiver frozen, the scam confirmed, money back. */
+export function refundSteps(frozen: boolean, settled: boolean, lang: Lang): { text: string; state: "done" | "now" | "next" }[] {
+  const words: [Words, boolean][] = [
+    [{ bn: "অভিযোগ গ্রহণ করা হয়েছে", en: "We've received your report" }, true],
+    [
+      frozen
+        ? { bn: "প্রাপকের অ্যাকাউন্ট আটকানো হয়েছে — সে আর টাকা তুলতে পারবে না", en: "The receiver's account is frozen: they can't cash out" }
+        : { bn: "প্রাপকের অ্যাকাউন্ট আটকানো হচ্ছে, যাতে সে টাকা তুলতে না পারে", en: "We're freezing the receiver's account so they can't cash out" },
+      frozen,
+    ],
+    [{ bn: "একজন কর্মকর্তা প্রতারণা নিশ্চিত করবেন", en: "A person confirms the scam" }, settled],
+    [{ bn: "তাদের অ্যাকাউন্টে যা আছে, তা থেকে আপনার টাকা ফেরত", en: "Your money comes back from what's left in their account" }, settled],
+  ];
+  const now = words.findIndex(([, done]) => !done);
+  return words.map(([step, done], index) => ({ text: step[lang], state: done ? "done" : index === now ? "now" : "next" }));
+}
 
 /** The steps after each kind of interruption: done, happening now, still to come. */
 export function steps(tier: Exclude<Tier, "allow">, minutes: number | null, lang: Lang): { text: string; state: "done" | "now" | "next" }[] {

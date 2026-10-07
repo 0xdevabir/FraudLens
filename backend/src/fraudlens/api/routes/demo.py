@@ -39,7 +39,8 @@ from ..schemas import (
 )
 from ..views import result_view
 from .appeals import customer_appeal_view, find_appeal
-from .customer import _limit, check_recipient, check_text, verify_payment
+from .customer import _limit, check_recipient, check_text, report_view, verify_payment
+from .refunds import customer_view, find_refund
 
 router = APIRouter(prefix="/demo", tags=["demo"])
 
@@ -208,11 +209,10 @@ def respond(body: DemoResponse, p: Plat, s: Db, ctx: Staff) -> dict:
 def report(body: ScamReport, p: Plat, ctx: Staff) -> dict:
     """The demo customer's 'I think I was scammed'. Limited per wallet, like the real one."""
     _limit(p.report_limit, body.reporter_id)
-    made = workflow.report_scam(
+    return report_view(p, *workflow.report_scam(
         p.scorer, ctx, body.reporter_id, body.reported_wallet_id, body.txn_id,
         body.category, body.description,
-    )  # fmt: skip
-    return {"report_id": made.id, "case_id": made.case_id, "reference": made.reference}
+    ))  # fmt: skip
 
 
 def _sender(s: Session, txn_id: int) -> str:
@@ -237,6 +237,14 @@ def appeal_status(
 ) -> dict:
     """Where the demo customer's appeal stands, as their app would show it."""
     return customer_appeal_view(p, s, find_appeal(s, _sender(s, txn_id), txn_id))
+
+
+@router.get("/refund")
+def refund_status(
+    txn_id: Annotated[int, Query(ge=0, lt=2**62)], p: Plat, s: Db, ctx: Staff
+) -> dict:
+    """Where the demo customer's refund stands, as their app would show it."""
+    return customer_view(p, find_refund(s, _sender(s, txn_id), txn_id))
 
 
 @router.post("/recipient-check")

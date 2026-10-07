@@ -91,12 +91,14 @@ served at `/docs` outside production.
 | | `POST /customer/message-check`, `POST /customer/payment-verify` ([FRAUD_TAXONOMY.md](FRAUD_TAXONOMY.md)) | service |
 | | `POST\|GET /customer/transactions/{txn_id}/appeal` (§6) | service |
 | Appeals | `GET /appeals`, `POST /appeals/{id}/approve\|reject` (§6) | analyst, supervisor |
+| | `GET /customer/transactions/{txn_id}/refund` (§6) | service |
+| Refunds | `GET /refunds`, `POST /refunds/{id}/decline` (§6) | analyst, supervisor |
 | Fraud types | `GET /intel/taxonomy` | analyst, supervisor, admin |
 | Operations | `GET /metrics/summary`, `GET /metrics/daily`, `GET /model`, `GET /model/report`, `GET /policy` | analyst, supervisor, admin |
 | After deployment (§12) | `GET /models`, `GET /model/shadow`, `GET /metrics/drift`, `GET /feedback` | analyst, supervisor, admin |
 | Audit | `GET /audit` | supervisor, admin |
 | | `POST /audit/reveals` (§7) | analyst, supervisor |
-| Demo (§14), absent in production | `GET /demo/scenarios`, `GET /demo/payment-draft`, `GET /demo/payment-claims`, `GET /demo/appeal`, `POST /demo/pay\|respond\|report\|appeal\|recipient-check\|message-check\|payment-verify\|advance-clock` | analyst, supervisor, admin |
+| Demo (§14), absent in production | `GET /demo/scenarios`, `GET /demo/payment-draft`, `GET /demo/payment-claims`, `GET /demo/appeal`, `GET /demo/refund`, `POST /demo/pay\|respond\|report\|appeal\|recipient-check\|message-check\|payment-verify\|advance-clock` | analyst, supervisor, admin |
 | | `GET /health`, `GET /ready` | none |
 
 Errors always have the same shape, with the request id that is also in the
@@ -208,6 +210,30 @@ and each request still needs its own approval by a second person.
   otherwise; a rejected one adds nothing. The customer's view
   (`GET /customer/transactions/{txn_id}/appeal`) shows status and deadline only.
   Everything is audited. Migration `0004_appeals`.
+- **Getting the money back.** A report on a payment that went through
+  (`POST /customer/reports` with its `txn_id`) also opens a refund claim for it,
+  returned as `refund`; one claim per payment, only for completed send-money
+  payments from the reporter to the reported wallet. The case on that wallet
+  settles every claim on it (`platform/refunds.py`):
+  1. The wallet is frozen with the ordinary two-person freeze (§5), so nothing
+     more leaves it. Before that, a confirmed-fraud wallet's own payments are
+     already held by rule R02.
+  2. A `confirmed_fraud` verdict on a frozen wallet pays the claims at once from
+     what is still in it (the balance upay last reported for the wallet, plus
+     what came in since, minus what went out and refunds already paid). If that
+     is less than the claims, each victim gets the same share of their loss. A
+     confirmed verdict on a wallet that is not frozen yet files the freeze
+     request itself, and the second person's approval pays the victims.
+  3. Any other verdict declines the claims; no money moves.
+  A reviewer can take one claim out of an open case (`POST /refunds/{id}/decline`,
+  "not a victim"), so an accomplice cannot report a payment to draw the frozen
+  money back out. Nobody can pay a claim by hand. A paid claim is the
+  instruction to upay's ledger to move the money; FraudLens holds none. The
+  victim's view (`GET /customer/transactions/{txn_id}/refund`) shows status,
+  amounts, whether the receiver is frozen (`protected`) and the date promised:
+  five days on the platform clock, as UK payment providers must refund
+  authorised-push-payment scams. Everything is audited and on the case
+  timeline. Migration `0010_refunds`.
 
 ## 7. Security
 

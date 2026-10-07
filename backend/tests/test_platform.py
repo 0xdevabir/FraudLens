@@ -37,7 +37,7 @@ from fraudlens.features.engine import DISTRICT_COORDS, travel_km
 from fraudlens.mlops import drift, feedback, review
 from fraudlens.mlops import shadow as shadow_mode
 from fraudlens.models.train import FEEDBACK_COLUMNS
-from fraudlens.platform import notify, replay, verify
+from fraudlens.platform import notify, refunds, replay, verify
 from fraudlens.platform.db import make_engine, make_sessions, migrate
 from fraudlens.platform.events import event_adapter, moment, network_of
 from fraudlens.platform.load import load
@@ -52,6 +52,7 @@ from fraudlens.platform.models import (
     Delivery,
     FreezeRequest,
     PendingDecision,
+    Refund,
     ShadowScore,
     Transaction,
     TranslationReview,
@@ -1120,6 +1121,157 @@ def test_a_customer_report_opens_a_case(client, tokens, p, replayed, spare):
         client.post("/v1/customer/reports", headers=service, json=body)
     limited = client.post("/v1/customer/reports", headers=service, json=body)
     assert limited.status_code == 429
+
+
+def _mule_with_victims(p, n: int = 2) -> list[Transaction]:
+    """Completed payments from `n` different senders into one wallet nothing has happened to."""
+    with p.sessions() as s:
+        busy = set(s.scalars(select(Case.subject_id))) | set(s.scalars(select(Refund.wallet_id)))
+        rows = s.scalars(
+            select(Transaction)
+            .where(
+                Transaction.type == "SEND_MONEY",
+                Transaction.status == "completed",
+                Transaction.receiver_type == "wallet",
+            )
+            .order_by(Transaction.ts.desc())
+            .limit(5_000)
+        ).all()
+        by_wallet: dict[str, dict[str, Transaction]] = {}
+        for txn in rows:
+            mule = txn.receiver_id
+            if mule in busy or mule in p.scorer.engine.flagged or mule in p.scorer.frozen:
+                continue
+            by_wallet.setdefault(mule, {}).setdefault(txn.sender_id, txn)
+            if len(by_wallet[mule]) == n:
+                return list(by_wallet[mule].values())
+    pytest.skip(f"no wallet with {n} different senders")
+
+
+def _report_payment(client, service, txn: Transaction) -> dict:
+    made = client.post(
+        "/v1/customer/reports",
+        headers=service,
+        json={
+            "reporter_id": txn.sender_id,
+            "reported_wallet_id": txn.receiver_id,
+            "txn_id": txn.txn_id,
+            "category": "impersonation",
+            "description": "Someone called saying they were from upay and asked for this.",
+        },
+    )
+    assert made.status_code == 201, made.text
+    return made.json()
+
+
+def test_a_confirmed_scam_freezes_the_wallet_and_refunds_the_victim(client, tokens, p, replayed):
+    service, analyst = tokens("upay-core"), tokens("analyst1")
+    victim_txn, other_txn = _mule_with_victims(p)
+    mule = victim_txn.receiver_id
+    with p.sessions() as s:
+        available = refunds.balance(s, mule)
+
+    made = _report_payment(client, service, victim_txn)
+    claim = made["refund"]
+    assert (claim["status"], claim["amount_claimed"]) == ("open", victim_txn.amount)
+    assert claim["protected"] is False  # not frozen yet
+    assert (
+        _report_payment(client, service, victim_txn)["refund"]["id"] == claim["id"]
+    )  # one per payment
+    status = f"/v1/customer/transactions/{victim_txn.txn_id}/refund"
+    assert client.get(status, headers=service, params={"wallet_id": "W0"}).status_code == 404
+    assert client.get(status, headers=analyst, params={"wallet_id": mule}).status_code == 403
+
+    # A second claimant on the same case looks like part of the scheme: a reviewer takes it out.
+    other = _report_payment(client, service, other_txn)["refund"]
+    case_id = made["case_id"]
+    assert _report_payment(client, service, other_txn)["case_id"] == case_id
+    decline = f"/v1/refunds/{other['id']}/decline"
+    assert client.post(decline, headers=service, json={"note": REASON}).status_code == 403
+    out = client.post(decline, headers=analyst, json={"note": REASON})
+    assert (out.json()["status"], out.json()["outcome"]) == ("declined", "not_a_victim")
+    assert client.post(decline, headers=analyst, json={"note": REASON}).status_code == 409
+
+    detail = client.get(f"/v1/cases/{case_id}", headers=analyst).json()
+    assert {c["id"] for c in detail["refunds"]["claims"]} == {claim["id"], other["id"]}
+    assert detail["refunds"]["recoverable"] == available
+    assert detail["refunds"]["wallet_frozen"] is False
+
+    # Confirmed, but not frozen: the verdict asks for the freeze and pays nobody yet.
+    verdict = client.post(
+        f"/v1/cases/{case_id}/verdict",
+        headers=analyst,
+        json={"verdict": "confirmed_fraud", "note": REASON},
+    ).json()
+    assert verdict["refunds_waiting"] == [claim["id"]] and verdict["refunds_paid"] == []
+    request_id = verdict["freeze_request"]
+    assert (
+        client.get(status, headers=service, params={"wallet_id": victim_txn.sender_id}).json()[
+            "status"
+        ]
+        == "open"
+    )
+    own = client.post(
+        f"/v1/freeze-requests/{request_id}/approve",
+        headers=analyst,
+        json={"note": REASON},
+    )
+    assert own.status_code == 403  # an analyst cannot approve, and never their own request
+
+    # The second person's approval freezes the wallet and pays the victim from what is left.
+    approved = client.post(
+        f"/v1/freeze-requests/{request_id}/approve",
+        headers=tokens("supervisor1"),
+        json={"note": REASON},
+    )
+    assert approved.status_code == 200, approved.text
+    assert mule in p.scorer.frozen
+    paid = client.get(status, headers=service, params={"wallet_id": victim_txn.sender_id}).json()
+    expected = min(victim_txn.amount, available)
+    if expected > 0:
+        assert (paid["status"], paid["amount_refunded"]) == ("paid", expected)
+    else:
+        assert (paid["status"], paid["outcome"]) == ("unrecoverable", "nothing_left")
+    assert paid["protected"] is True and "settled_by" not in paid
+
+    with p.sessions() as s:
+        assert refunds.balance(s, mule) == round(available - expected, 2)
+        actions = list(
+            s.scalars(
+                select(AuditLog.action).where(
+                    AuditLog.object_type == "refund", AuditLog.object_id == str(claim["id"])
+                )
+            )
+        )
+    assert actions[0] == "refund.claim" and actions[-1] in ("refund.paid", "refund.unrecoverable")
+    # The mule cannot take out what is left.
+    body = send(p, mule, victim_txn.sender_id, amount=10.0)
+    result = client.post("/v1/score", headers=service, json=body).json()
+    assert result["status_reason"] == "wallet_frozen"
+    queue = client.get("/v1/refunds", headers=analyst, params={"status": paid["status"]}).json()
+    assert claim["id"] in {r["id"] for r in queue["refunds"]}
+
+
+def test_a_scam_that_is_not_confirmed_refunds_nothing(client, tokens, p, replayed):
+    service, analyst = tokens("upay-core"), tokens("analyst2")
+    [txn] = _mule_with_victims(p, 1)
+    made = _report_payment(client, service, txn)
+    verdict = client.post(
+        f"/v1/cases/{made['case_id']}/verdict",
+        headers=analyst,
+        json={"verdict": "legitimate", "note": REASON},
+    ).json()
+    assert verdict["refunds_declined"] == [made["refund"]["id"]]
+    assert verdict["freeze_request"] is None
+    status = client.get(
+        f"/v1/customer/transactions/{txn.txn_id}/refund",
+        headers=service,
+        params={"wallet_id": txn.sender_id},
+    ).json()
+    assert (status["status"], status["outcome"], status["amount_refunded"]) == (
+        "declined", "not_confirmed", 0.0,
+    )  # fmt: skip
+    assert txn.receiver_id not in p.scorer.frozen
 
 
 def test_recipient_check_reveals_nothing_about_ordinary_wallets(client, tokens, p, replayed, spare):
