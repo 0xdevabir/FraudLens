@@ -61,6 +61,8 @@ def pipeline(settings: Settings) -> None:
         step("Building the dashboard tables", "fraudlens.decision.insights")
     if not (settings.artifacts_dir / "intel" / "report.json").is_file():
         step("Training the scam-message classifier", "fraudlens.intel.train")
+    if not (settings.artifacts_dir / "consortium" / "demo_keys.json").is_file():
+        step("Simulating the mule consortium", "fraudlens.consortium.simulate", "--quick")
 
 
 def database(settings: Settings) -> bool:

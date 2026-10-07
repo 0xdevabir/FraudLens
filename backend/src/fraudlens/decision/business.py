@@ -81,10 +81,9 @@ ASSUMPTIONS: dict[str, Spec] = {
         "payments",
         10_000_000,
         40_000_000,
-        "Order of magnitude for a mid-sized provider (upay scale). Bangladesh Bank's monthly "
-        "MFS statistics put the whole industry in the hundreds of millions of transactions a "
-        "month; a bKash-scale provider is roughly 300 million scored payments. Replace with "
-        "the provider's own MIS figure.",
+        "Order of magnitude for upay send-money and cash-out volume. Bangladesh Bank's monthly "
+        "MFS statistics put the whole industry higher; keep this range as an upay planning "
+        "band and replace with upay's own MIS figure when pitching.",
     ),
     "avg_payment_taka": Spec(
         "Average payment",

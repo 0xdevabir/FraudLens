@@ -173,7 +173,7 @@ export default function ImpactPage() {
     <>
       <PageHeader tour="impact-header"
         title="Impact simulator"
-        sub="Move the alert threshold and see what it does to money saved, customers interrupted and reviewer workload, and what that is worth in taka a month."
+        sub="Move the alert threshold and see what it does to money saved, customers interrupted and reviewer workload for upay — and what that is worth in taka a month."
       />
       <Async state={report}>
         {(data) =>

@@ -55,7 +55,7 @@ the validation kit (docs/validation/) is designed to collect.
 | Stakeholder | What they need | What FraudLens gives them |
 | --- | --- | --- |
 | **MFS customers** (239M accounts; 44% women) | Not to lose money; not to be blocked on a normal payment | Warn / step-up / hold before money leaves, in plain language; never a refused payment (DECISION_POLICY.md §2) |
-| **MFS providers** (13; bKash, Nagad, Rocket, upay and others) | Lower fraud loss and complaint volume; regulatory compliance; low friction | Real-time scoring with reasons, analyst queue, mule network view, decision audit trail |
+| **MFS providers** (built for upay; applicable across Bangladesh's 13 licensed MFS) | Lower fraud loss and complaint volume; regulatory compliance; low friction | Real-time scoring with reasons, analyst queue, mule network view, decision audit trail |
 | **Agents** (1.86M; 17% have been fraud victims [S4]) | Protection from being used for cash-out; commission income | Agent risk score separating colluding/farming agents from transit hubs |
 | **Bangladesh Bank** (PSD, FICSD, CIPC) | Providers that monitor patterns and resolve complaints in time | Monitoring that §10.1(ii) of the 2022 regulations asks for; case records kept and exportable |
 | **BFIU** | Better suspicious-transaction reports | Case pages and network evidence that can back an STR |

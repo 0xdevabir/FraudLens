@@ -49,7 +49,7 @@ honest customers look the same whatever the scam rate.
 
 | Assumption | Value | Range tried | Source or reasoning |
 | --- | --- | --- | --- |
-| Send-money and cash-out payments a month | 20 million | 10–40 million | Order of magnitude for a mid-sized provider (upay scale). Bangladesh Bank's monthly MFS statistics put the industry in the hundreds of millions of transactions a month; bKash scale is roughly 300 million scored payments. Replace with the provider's MIS figure |
+| Send-money and cash-out payments a month | 20 million | 10–40 million | Order of magnitude for upay send-money and cash-out volume. Bangladesh Bank's monthly MFS statistics put the industry higher; replace with upay's own MIS figure |
 | Average payment | ৳2,800 | ৳1,500–4,000 | The simulator's scored payments average ৳2,830 (send-money ৳2,247, cash-out ৳3,990) |
 | Scam losses, share of payment value | 2 bp | 0.5–8 bp | Assumed. UK push-payment scam losses are about 1–2 bp of Faster Payments value; MFS in Bangladesh is assumed more exposed. No public Bangladeshi figure exists |
 | Scam money stopped by a warning | 25% | 10–50% | Assumed: a coached victim often clicks through |
@@ -115,7 +115,7 @@ What this says:
   The cost per honest customer is low (most see one warning), but a CRO should
   see the count: about 1 in 200 payments.
 
-### At bKash scale (300 million payments a month)
+### At 15× upay volume (300 million payments a month, sensitivity only)
 
 Same assumptions, volume ×15: ৳16.8 crore at risk, **৳13.3 crore kept**, operating
 cost ৳1.79 crore (175 analysts, ৳1.05 crore; friction ৳69 lakh), **net benefit
@@ -179,7 +179,7 @@ Reading it:
   stop; a live A/B of warning texts would.
 - **Warnings and step-ups cost no analyst time**, as the policy specifies; only
   holds go to a person. A provider that reviewed step-ups would need more people.
-- **The platform cost is flat.** At bKash scale it would be higher, though still
+- **The platform cost is flat.** At much higher upay volume it would be higher, though still
   small next to the review team.
 - **No churn model.** Abandonment is priced per payment; customers who leave
   after a false hold are not counted beyond the reputational line.

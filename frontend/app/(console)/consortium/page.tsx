@@ -32,7 +32,7 @@ export default function ConsortiumPage() {
     <>
       <PageHeader tour="consortium-header"
         title="Mule consortium"
-        sub="Four simulated providers share confirmed and suspected mule wallets as keyed tokens. No wallet number or handset id leaves a provider. Simulation on the FraudLens dataset; provider names are illustrative."
+        sub="upay plus three simulated peer MFS partners share confirmed and suspected mule wallets as keyed tokens. No wallet number or handset id leaves a provider. Built so upay can catch mules listed elsewhere before they receive a victim's money."
       />
       <Async state={overview}>
         {(o) => (
@@ -247,7 +247,7 @@ function AuditTab({ o, reload }: { o: ConsortiumOverview; reload: () => void }) 
     <>
       <Card title="Disputes" hint="A disputed listing stops counting for every member at once. Only the listing member decides; if it does not answer in 5 days the dispute is decided for the customer.">
         <div className="flex flex-wrap gap-2">
-          <input className={inputClass} placeholder="Listing id, e.g. nagad:12" value={listing} onChange={(e) => setListing(e.target.value)} />
+          <input className={inputClass} placeholder="Listing id, e.g. upay:12" value={listing} onChange={(e) => setListing(e.target.value)} />
           <input className={`${inputClass} min-w-64 flex-1`} placeholder="Reason (customer appeal, evidence…)" value={reason} onChange={(e) => setReason(e.target.value)} />
           <Button variant="primary" disabled={!listing.trim() || reason.trim().length < 3} onClick={() => act("/v1/consortium/disputes", { listing_id: listing.trim(), raised_by: raisedBy, reason })}>
             Dispute as {raisedBy}

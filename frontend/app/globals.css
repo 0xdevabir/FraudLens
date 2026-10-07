@@ -42,6 +42,9 @@
   /* The iOS sheet curve: fast out of the gate, long soft landing. */
   --ease-ios: cubic-bezier(0.32, 0.72, 0, 1);
   --animate-rise: rise 0.45s var(--ease-ios) backwards;
+  --animate-phone-in: phone-in 0.38s var(--ease-ios) both;
+  --animate-phone-pulse: phone-pulse 1.8s ease-in-out infinite;
+  --animate-phone-warn: phone-warn 0.5s ease-out;
 
   @keyframes rise {
     from {
@@ -50,46 +53,42 @@
     }
   }
 
-  @keyframes lens-scan {
+  @keyframes phone-in {
+    from {
+      opacity: 0;
+      transform: translateY(12px) scale(0.985);
+    }
+  }
+
+  @keyframes phone-pulse {
     0%,
     100% {
-      opacity: 0.45;
+      box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-upay-blue) 40%, transparent);
     }
-    50% {
-      opacity: 1;
-    }
-  }
-
-  @keyframes fl-intro-in {
-    from {
-      opacity: 0;
-      transform: translateY(14px) scale(0.94);
+    55% {
+      box-shadow: 0 0 0 10px transparent;
     }
   }
 
-  @keyframes fl-intro-tag {
-    from {
-      opacity: 0;
-      transform: translateY(8px);
+  @keyframes phone-warn {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    20% {
+      transform: translateX(-3px);
+    }
+    40% {
+      transform: translateX(3px);
+    }
+    60% {
+      transform: translateX(-2px);
+    }
+    80% {
+      transform: translateX(2px);
     }
   }
 
-  @keyframes fl-intro-glow {
-    from {
-      opacity: 0;
-      transform: scale(0.55);
-    }
-    to {
-      opacity: 1;
-      transform: scale(1);
-    }
-  }
-
-  @keyframes fl-intro-exit {
-    to {
-      transform: translateY(-105%);
-    }
-  }
 }
 
 :root {
@@ -204,48 +203,114 @@ body {
   }
 }
 
-/* Opening curtain: brand holds, then lifts — same beat as WebNest / ShopZen. */
+/* Opening curtain: brand holds, then lifts — same beat as WebNest / ShopZen.
+   Keyframes live here (not in @theme) so custom classes always resolve them.
+   Brand stays fully opaque from the first frame; motion is scale/slide only. */
+@keyframes lens-scan {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes fl-intro-mark {
+  from {
+    transform: scale(0.9);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes fl-intro-word {
+  from {
+    transform: translateY(8px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes fl-intro-glow {
+  from {
+    transform: scale(0.7);
+    opacity: 0.35;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes fl-intro-exit {
+  to {
+    transform: translateY(-105%);
+  }
+}
+
+html.fl-intro-active,
+html.fl-intro-active body {
+  overflow: hidden !important;
+}
+
 .fl-intro {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 9999;
   display: grid;
   place-items: center;
-  background: var(--color-base);
-  pointer-events: none;
+  background: #1b1b1b;
+  pointer-events: auto;
   will-change: transform;
 }
 
 .fl-intro--exit {
-  animation: fl-intro-exit 0.75s var(--ease-ios) forwards;
+  pointer-events: none;
+  animation: fl-intro-exit 0.85s cubic-bezier(0.32, 0.72, 0, 1) forwards;
 }
 
 .fl-intro__glow {
   position: absolute;
-  width: min(28rem, 80vw);
-  height: min(28rem, 80vw);
+  width: min(34rem, 90vw);
+  height: min(34rem, 90vw);
   border-radius: 9999px;
-  background: radial-gradient(circle, rgb(168 188 161 / 0.22) 0%, rgb(150 238 251 / 0.06) 42%, transparent 68%);
-  animation: fl-intro-glow 0.9s var(--ease-ios) both;
+  background: radial-gradient(circle, rgb(168 188 161 / 0.34) 0%, rgb(150 238 251 / 0.12) 38%, transparent 68%);
+  animation: fl-intro-glow 1s cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 
 .fl-intro__brand {
   position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.85rem;
-  animation: fl-intro-in 0.7s var(--ease-ios) both;
+  gap: 1.1rem;
+}
+
+.fl-intro__mark {
+  display: block;
+  animation: fl-intro-mark 0.75s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.fl-intro__word {
+  font-size: clamp(1.85rem, 4.5vw, 2.4rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: #f5f5f5;
+  animation: fl-intro-word 0.7s cubic-bezier(0.32, 0.72, 0, 1) 0.08s both;
 }
 
 .fl-intro__tag {
   margin: 0;
   max-width: 18rem;
   text-align: center;
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
   line-height: 1.45;
-  color: var(--color-fg-3);
-  animation: fl-intro-tag 0.55s var(--ease-ios) 0.28s both;
+  color: #a8a8a8;
 }
 
 @media (prefers-reduced-motion: reduce) {

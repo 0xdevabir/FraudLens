@@ -17,7 +17,7 @@ from collections import defaultdict
 
 CUES = (
     "reported_recipient",  # the receiving wallet is confirmed fraud (rule R01)
-    "impersonation",  # someone posing as upay, bKash, a bank or an official
+    "impersonation",  # someone posing as upay, a bank or an official
     "prize",  # a prize or lottery that needs a fee
     "investment",  # an investment that promises high returns
     "wrong_send",  # "I sent you money by mistake, send it back"

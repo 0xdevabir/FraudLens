@@ -49,11 +49,12 @@ from .hub import Hub, Member
 from .protocol import SUSPECTED_TTL, iso, signal
 
 PROVIDERS: tuple[tuple[str, str, float], ...] = (
-    # Illustrative shares for the simulation, not market data.
-    ("bkash", "bKash (simulated)", 0.55),
-    ("nagad", "Nagad (simulated)", 0.25),
-    ("rocket", "Rocket (simulated)", 0.12),
-    ("upay", "upay (simulated)", 0.08),
+    # Illustrative peer shares for the simulation — not market data.
+    # Internal ids stay stable for saved demo artifacts; displays are upay-hackathon safe.
+    ("upay", "upay (home)", 0.08),
+    ("bkash", "RiverPay (peer, simulated)", 0.55),
+    ("nagad", "CityCash (peer, simulated)", 0.25),
+    ("rocket", "TapWallet (peer, simulated)", 0.12),
 )
 KEY_EPOCH = "2026Q1"
 SEEDS = (11, 12, 13, 14, 15)

@@ -39,7 +39,7 @@ read out a PIN or OTP, stop them.
 **English**
 
 > Hello. We are from FraudLens, a student project working on a way to reduce
-> mobile money (bKash, Nagad, Rocket and others) fraud. We would like to hear
+> upay and other mobile money fraud. We would like to hear
 > about your experience of scams and how some warning screens feel to you. It
 > takes about 8 minutes.
 >

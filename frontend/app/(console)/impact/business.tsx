@@ -8,10 +8,11 @@ import { ApiError, api } from "@/lib/api";
 import { num, pct, taka } from "@/lib/format";
 import type { BusinessAssumptions, BusinessCase, BusinessPoint } from "@/lib/types";
 
-/** Send-money and cash-out payments a month: orders of magnitude, not provider figures. */
+/** Send-money and cash-out payments a month at upay volumes (orders of magnitude). */
 const VOLUMES = [
-  { label: "upay scale", value: 20_000_000 },
-  { label: "bKash scale", value: 300_000_000 },
+  { label: "upay pilot", value: 5_000_000 },
+  { label: "upay today", value: 20_000_000 },
+  { label: "upay growth", value: 40_000_000 },
 ] as const;
 
 /** The assumptions a CFO is most likely to change, as the input shows them. */
@@ -146,7 +147,7 @@ export function BusinessSection({
           label="Net benefit a month"
           tone={point.net_benefit >= 0 ? "good" : "bad"}
           value={taka(point.net_benefit, true)}
-          sub={`${signed(point.net_benefit - today.net_benefit)} · to the provider alone ${taka(point.provider_net_benefit, true)}`}
+          sub={`${signed(point.net_benefit - today.net_benefit)} · to upay alone ${taka(point.provider_net_benefit, true)}`}
         />
         <Stat
           label="Scam money kept from fraudsters"
@@ -226,7 +227,7 @@ export function BusinessSection({
             <p className="text-xs text-fg-3">
               Analyst minutes per hold come from the assumption above. Running the policy in force pays for itself above{" "}
               {breakEven.net_benefit === null ? "–" : `${num(breakEven.net_benefit, 2)} bp`} of scam losses
-              {breakEven.provider_net_benefit === null ? "" : ` (${num(breakEven.provider_net_benefit, 2)} bp counting the provider’s own money only)`}.
+              {breakEven.provider_net_benefit === null ? "" : ` (${num(breakEven.provider_net_benefit, 2)} bp counting upay’s own money only)`}.
             </p>
             <Button variant="ghost" small onClick={() => setEdited(null)} disabled={!edited}>Back to the defaults</Button>
           </div>
@@ -263,7 +264,7 @@ export function BusinessSection({
         Rates come from the back-test of model {data.model_version}. The simulator’s scams take{" "}
         {taka(data.synthetic.scam_loss_per_payment)} per payment, far more than real traffic, so scam money and true alerts are scaled by{" "}
         {num(data.synthetic.scale, 4)} to the assumed rate. These are estimates on synthetic data to show the shape of the
-        trade-off, not a forecast: a provider would replace the assumptions with its own figures first. See docs/BUSINESS_CASE.md.
+        trade-off, not a forecast: replace the assumptions with upay’s own MIS figures first. See docs/BUSINESS_CASE.md.
       </p>
     </>
   );

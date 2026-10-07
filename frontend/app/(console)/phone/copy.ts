@@ -30,71 +30,72 @@ export function clockSpoken(seconds: number, lang: Lang): string {
   return lang === "bn" ? `${digits(m, lang)} মিনিট ${digits(s % 60, lang)} সেকেন্ড` : `${m} minutes ${s % 60} seconds`;
 }
 
-/** The warning itself, by the kind of scam the decision looks like (the API's `cue`). */
+/** The warning itself, by the kind of scam the decision looks like (the API's `cue`).
+ * Short words a busy customer can read in a glance — not policy jargon. */
 export const CUE: Record<Cue, { title: Words; body: Words; check: Words }> = {
   reported_recipient: {
-    title: { bn: "এই নম্বরের বিরুদ্ধে প্রতারণার অভিযোগ আছে", en: "This number has been reported for fraud" },
+    title: { bn: "এই নম্বরে অভিযোগ আছে", en: "People reported this number" },
     body: {
-      bn: "অন্য গ্রাহকেরা এই নম্বরে টাকা পাঠিয়ে প্রতারিত হয়েছেন। যাকে চেনেন না, বা কেউ তাড়া দিচ্ছে বলে পাঠাচ্ছেন — এমন হলে টাকা পাঠাবেন না।",
-      en: "Other customers lost money sending to this number. Don't send if you don't know them, or if someone is rushing you.",
+      bn: "অনেকে এখানে টাকা পাঠিয়ে ঠকেছেন। চেনেন না, বা কেউ তাড়া দিচ্ছে — পাঠাবেন না।",
+      en: "Others lost money sending here. Don't send if you don't know them, or if someone is rushing you.",
     },
-    check: { bn: "প্রাপককে নিজে ফোন করে নিশ্চিত হোন।", en: "Call the person yourself to make sure it's them." },
+    check: { bn: "নিজে ফোন করে জিজ্ঞাসা করুন।", en: "Call them yourself first." },
   },
   impersonation: {
-    title: { bn: "কেউ কি upay, ব্যাংক বা সরকারি অফিসের লোক পরিচয় দিয়েছে?", en: "Did someone say they're from upay, a bank or the government?" },
+    title: { bn: "কেউ কি অফিসের লোক সেজেছে?", en: "Did someone pretend to be staff?" },
     body: {
-      bn: "upay কখনো ফোন করে পিন, ওটিপি বা টাকা চায় না। কেউ চাইলে ফোন কেটে দিন।",
-      en: "upay never calls to ask for your PIN, OTP or money. If someone does, hang up.",
+      bn: "upay কখনো পিন, ওটিপি বা টাকা চায় না। কেউ চাইলে ফোন কেটে দিন।",
+      en: "upay never asks for your PIN, OTP or money. Hang up if they do.",
     },
-    check: { bn: "সন্দেহ হলে নিজে ১৬২৬৮ নম্বরে কল করুন।", en: "If in doubt, call 16268 yourself." },
+    check: { bn: "সন্দেহ হলে ১৬২৬৮-এ কল করুন।", en: "If unsure, call 16268." },
   },
   prize: {
-    title: { bn: "পুরস্কার পেতে টাকা লাগে না", en: "Real prizes don't cost money" },
+    title: { bn: "পুরস্কার পেতে টাকা লাগে না", en: "Prizes never need a fee" },
     body: {
-      bn: "লটারি, পুরস্কার বা উপহার পাওয়ার আগে ফি, ট্যাক্স বা চার্জ পাঠাতে বললে সেটা প্রতারণা।",
-      en: "If you're asked to pay a fee, tax or charge before you get a prize or gift, it's a scam.",
+      bn: "লটারি বা উপহারের আগে ফি পাঠাতে বললে সেটা প্রতারণা।",
+      en: "If they ask for a fee before a prize or gift, it's a scam.",
     },
-    check: { bn: "আপনি কি সত্যিই কোনো প্রতিযোগিতায় অংশ নিয়েছিলেন?", en: "Did you actually enter any contest?" },
+    check: { bn: "আপনি কি সত্যি কোনো প্রতিযোগিতায় ছিলেন?", en: "Did you really enter a contest?" },
   },
   investment: {
-    title: { bn: "নিশ্চিত লাভের প্রতিশ্রুতি? সাবধান", en: "Guaranteed profit? Be careful" },
+    title: { bn: "দ্রুত লাভ? সাবধান", en: "Quick profit? Be careful" },
     body: {
-      bn: "অল্প দিনে টাকা দ্বিগুণ বা নিশ্চিত মুনাফার কথা বলে টাকা নেওয়া একটি পরিচিত প্রতারণা।",
-      en: "Promises to double your money quickly, or of guaranteed profit, are a well-known scam.",
+      bn: "টাকা দ্বিগুণ বা নিশ্চিত লাভের কথা বলে নেওয়া — পরিচিত প্রতারণা।",
+      en: "Promises to double your money or guarantee profit are a common scam.",
     },
-    check: { bn: "পাঠানোর আগে পরিবারের কারো সাথে কথা বলুন।", en: "Talk to someone in your family before you send." },
+    check: { bn: "আগে পরিবারের কারো সাথে কথা বলুন।", en: "Talk to family before you send." },
   },
   wrong_send: {
-    title: { bn: "কেউ কি 'ভুল করে পাঠিয়েছি' বলে টাকা ফেরত চাইছে?", en: "Is someone asking for money back they 'sent by mistake'?" },
+    title: { bn: "'ভুল পাঠিয়েছি' বলে টাকা চাইছে?", en: "Asking you to return a 'wrong send'?" },
     body: {
-      bn: "আগে নিজের ব্যালেন্স আর লেনদেনের তালিকা দেখুন। টাকা সত্যিই এসেছে কি না না দেখে কিছু ফেরত পাঠাবেন না।",
-      en: "Check your balance and your transaction list first. Don't send anything back until you've seen the money arrive.",
+      bn: "আগে অ্যাপে ব্যালেন্স আর লেনদেন দেখুন। টাকা না এলে কিছু ফেরত পাঠাবেন না।",
+      en: "Check your balance and history in the app first. Don't send anything back until the money is there.",
     },
-    check: { bn: "এসএমএস নয়, অ্যাপের লেনদেন তালিকা দেখুন — এসএমএস নকল হতে পারে।", en: "Check the app's history, not an SMS: an SMS can be faked." },
+    check: { bn: "এসএমএস নয় — অ্যাপের তালিকা দেখুন।", en: "Trust the app history, not an SMS." },
   },
   not_you: {
-    title: { bn: "লেনদেনটি কি আপনি নিজেই করছেন?", en: "Is this really you?" },
+    title: { bn: "এটা কি আপনিই করছেন?", en: "Is this really you?" },
     body: {
-      bn: "এটি আপনার স্বাভাবিক লেনদেনের সাথে মিলছে না — নতুন ফোন, নতুন জায়গা, বা অস্বাভাবিক অঙ্ক।",
-      en: "This doesn't look like how you usually pay: a new phone, a new place or an unusual amount.",
+      bn: "নতুন ফোন, নতুন জায়গা বা অস্বাভাবিক অঙ্ক — আপনার স্বাভাবিক লেনদেনের মতো নয়।",
+      en: "New phone, new place or an odd amount — not how you usually pay.",
     },
-    check: { bn: "আপনি না করে থাকলে বাতিল করে ১৬২৬৮ নম্বরে কল করুন।", en: "If it isn't you, cancel and call 16268." },
+    check: { bn: "আপনি না হলে বাতিল করে ১৬২৬৮-এ কল করুন।", en: "If it isn't you, cancel and call 16268." },
   },
   generic: {
-    title: { bn: "পাঠানোর আগে একটু ভাবুন", en: "Take a moment before you send" },
+    title: { bn: "পাঠানোর আগে একটু থামুন", en: "Stop a second before you send" },
     body: {
-      bn: "এই লেনদেনটি পরিচিত প্রতারণার ধরনের সাথে মিলে যাচ্ছে।",
-      en: "This payment looks like a known scam pattern.",
+      bn: "এই টাকা পাঠানো প্রতারণার মতো দেখাচ্ছে।",
+      en: "This payment looks like a scam.",
     },
-    check: { bn: "প্রাপককে চেনেন তো? কেউ তাড়া দিচ্ছে না তো?", en: "Do you know the person? Is anyone rushing you?" },
+    check: { bn: "প্রাপককে চেনেন? কেউ তাড়া দিচ্ছে?", en: "Do you know them? Is anyone rushing you?" },
   },
 };
 
 /** The strip under the bar: what kind of interruption this is. */
 export const STRIP_TEXT: Record<Exclude<Tier, "allow">, Words> = {
-  warn: { bn: "একটু থামুন", en: "Pause a moment" },
-  step_up: { bn: "আপনাকে আবার যাচাই করতে হবে", en: "Verify it's you" },
-  hold: { bn: "লেনদেন সাময়িকভাবে স্থগিত", en: "Payment paused for review" },
+  warn: { bn: "থামুন — ঝুঁকি আছে", en: "Stop — this looks risky" },
+  step_up: { bn: "আবার চেক করুন", en: "Check again" },
+  hold: { bn: "টাকা আটকে আছে", en: "Money on hold" },
 };
 
 export const RELATIONS: [AppealRelation, Words][] = [
@@ -119,79 +120,91 @@ export const T = {
   balance: { bn: "বর্তমান ব্যালেন্স", en: "Balance" },
   from: { bn: "যে অ্যাকাউন্ট থেকে", en: "From" },
   chooseLeft: { bn: "শুরু করতে বাঁ দিক থেকে একটি লেনদেন বেছে নিন।", en: "Choose a payment on the left to begin." },
+  tapSend: { bn: "সেন্ড মানি চাপুন", en: "Tap Send money" },
+  demoOnly: { bn: "ডেমোতে শুধু সেন্ড মানি কাজ করে", en: "In this demo, only Send money works" },
   helpline: { bn: "হেল্পলাইন ১৬২৬৮", en: "Helpline 16268" },
-  beforeYouSend: { bn: "পাঠানোর আগে দেখুন", en: "Before you send" },
+  beforeYouSend: { bn: "পাঠানোর আগে", en: "Before you send" },
   send: { bn: "সেন্ড মানি করুন", en: "Send" },
   sending: { bn: "পাঠানো হচ্ছে…", en: "Sending…" },
   cancel: { bn: "বাতিল করুন", en: "Cancel the payment" },
-  sendAnyway: { bn: "বুঝেছি, তবুও পাঠাব", en: "I understand, send anyway" },
+  sendAnyway: { bn: "তবুও পাঠাব", en: "Send anyway" },
+  sendConfirm: { bn: "নিশ্চিত? টাকা ফেরত আনা কঠিন", en: "Sure? Money is hard to get back" },
+  sendConfirmYes: { bn: "হ্যাঁ, পাঠান", en: "Yes, send it" },
+  neverMind: { bn: "না, ফিরে যাই", en: "No, go back" },
   pin: { bn: "পিন দিন", en: "Enter your PIN" },
+  pinClear: { bn: "মুছুন", en: "Clear" },
   verifySend: { bn: "যাচাই করে পাঠান", en: "Verify and send" },
   availableIn: { bn: "পাঠানো যাবে আর", en: "You can send in" },
   coolingOff: {
-    bn: "নিরাপত্তার জন্য এই অপেক্ষা। এই সময়ে ভেবে দেখুন কে আপনাকে টাকা পাঠাতে বলেছে। চাইলে এখনই বাতিল করতে পারেন।",
-    en: "This wait is for your safety. Use it to think about who asked you to pay. You can cancel at any time.",
+    bn: "এই অপেক্ষা আপনার সুরক্ষার জন্য। কে টাকা চাইছে ভেবে দেখুন। যেকোনো সময় বাতিল করতে পারেন।",
+    en: "This wait is for your safety. Think about who asked you to pay. You can cancel anytime.",
   },
-  waitOver: { bn: "অপেক্ষার সময় শেষ। পিন দিয়ে পাঠাতে পারেন।", en: "The wait is over. Enter your PIN to send." },
-  heldMoney: { bn: "আপনার টাকা আপনার অ্যাকাউন্টেই আছে।", en: "Your money is still in your account." },
-  reviewIn: { bn: "একজন কর্মকর্তা দেখবেন, বাকি সময়", en: "A person will review it within" },
+  waitOver: { bn: "অপেক্ষা শেষ। পিন দিয়ে পাঠান।", en: "Wait over. Enter your PIN to send." },
+  heldMoney: { bn: "টাকা এখনো আপনার অ্যাকাউন্টেই আছে।", en: "Your money is still in your account." },
+  reviewIn: { bn: "কর্মকর্তা দেখবেন, বাকি", en: "Someone will check within" },
   reviewLate: {
-    bn: "পর্যালোচনায় নির্ধারিত সময়ের চেয়ে বেশি লাগছে। আমরা দুঃখিত — দরকার হলে ১৬২৬৮ নম্বরে কল করুন।",
-    en: "The review is taking longer than promised. We're sorry; call 16268 if you need to.",
+    bn: "চেক করতে একটু বেশি লাগছে। দরকার হলে ১৬২৬৮-এ কল করুন।",
+    en: "The check is taking longer. Call 16268 if you need help.",
   },
   whatNext: { bn: "এরপর কী হবে", en: "What happens next" },
-  report: { bn: "প্রতারণার অভিযোগ করুন", en: "Report a scam" },
+  tipTap: { bn: "টিপস — চাপলে টিক হবে", en: "Tips — tap to check off" },
+  tipKnow: { bn: "প্রাপককে চিনি", en: "I know who this is" },
+  tipRush: { bn: "কেউ তাড়া দিচ্ছে না", en: "Nobody is rushing me" },
+  report: { bn: "প্রতারণা জানান", en: "Report a scam" },
   whatHappened: { bn: "কী হয়েছিল?", en: "What happened?" },
-  reportDone: { bn: "অভিযোগ গ্রহণ করা হয়েছে।", en: "Report received." },
-  appeal: { bn: "এটা আসল লেনদেন — আপিল করুন", en: "This payment is genuine: appeal" },
+  reportDone: { bn: "অভিযোগ নেওয়া হয়েছে।", en: "Report received." },
+  appeal: { bn: "এটা সঠিক — আপিল করুন", en: "This is fine — appeal" },
   appealTitle: { bn: "আপিল করুন", en: "Appeal" },
   appealIntro: {
-    bn: "আপনার মনে হলে লেনদেনটি সঠিক, আমাদের জানান। একজন কর্মকর্তা দেখে সিদ্ধান্ত নেবেন।",
-    en: "If you think this payment is fine, tell us. A person will look at it and decide.",
+    bn: "লেনদেন ঠিক মনে হলে জানান। একজন কর্মকর্তা দেখে সিদ্ধান্ত নেবেন।",
+    en: "If this payment looks fine, tell us. A person will decide.",
   },
-  relation: { bn: "প্রাপক আপনার কে হন?", en: "How do you know the person?" },
-  reason: { bn: "কেন পাঠাচ্ছেন? (সংক্ষেপে)", en: "What is the payment for? (briefly)" },
-  reasonHint: { bn: "পিন বা ওটিপি এখানে লিখবেন না।", en: "Never write your PIN or OTP here." },
+  relation: { bn: "প্রাপক আপনার কে?", en: "Who is this person to you?" },
+  reason: { bn: "কেন পাঠাচ্ছেন?", en: "Why are you sending?" },
+  reasonHint: { bn: "পিন বা ওটিপি এখানে লিখবেন না।", en: "Don't write your PIN or OTP here." },
   submitAppeal: { bn: "আপিল জমা দিন", en: "Send the appeal" },
-  appealSent: { bn: "আপিল জমা হয়েছে", en: "Appeal received" },
-  appealBy: { bn: "উত্তর পাবেন যত দেরিতে হলেও", en: "You'll get an answer by" },
+  appealSent: { bn: "আপিল নেওয়া হয়েছে", en: "Appeal received" },
+  appealBy: { bn: "উত্তর পাবেন", en: "Answer by" },
   appealNoMoney: {
-    bn: "এই আপিলে অপেক্ষার সময় কমবে না; এটি আমাদের সতর্কবার্তা আরও ভালো করতে সাহায্য করবে।",
-    en: "An appeal doesn't shorten the wait; it helps us make our warnings better.",
+    bn: "আপিলে অপেক্ষা কমবে না — শুধু আমাদের সতর্কতা ভালো করতে সাহায্য করে।",
+    en: "An appeal won't shorten the wait — it helps us improve warnings.",
   },
-  appealApproved: { bn: "আপিল গ্রহণ করা হয়েছে", en: "Your appeal was accepted" },
-  appealRejected: { bn: "আপিল গ্রহণ করা হয়নি — কর্মকর্তা তদন্ত চালিয়ে যাচ্ছেন", en: "Your appeal wasn't accepted; the review continues" },
-  checkStatus: { bn: "অবস্থা দেখুন", en: "Check the status" },
+  appealApproved: { bn: "আপিল মঞ্জুর", en: "Appeal accepted" },
+  appealRejected: { bn: "আপিল মঞ্জুর হয়নি — চেক চলছে", en: "Appeal not accepted — review continues" },
+  checkStatus: { bn: "অবস্থা দেখুন", en: "Check status" },
   sent: { bn: "টাকা পাঠানো হয়েছে", en: "Sent" },
   cancelled: { bn: "বাতিল হয়েছে", en: "Cancelled" },
-  notSent: { bn: "লেনদেন হয়নি", en: "Not sent" },
-  sentBody: { bn: "লেনদেন সফল হয়েছে।", en: "The payment went through." },
-  cancelledBody: { bn: "কিছুই পাঠানো হয়নি। টাকা আপনার অ্যাকাউন্টেই আছে।", en: "Nothing was sent. Your money is still in your account." },
-  refusedBody: { bn: "এই লেনদেনটি করা যায়নি। টাকা আপনার অ্যাকাউন্টেই আছে।", en: "This payment was refused. Your money is still in your account." },
+  notSent: { bn: "পাঠানো হয়নি", en: "Not sent" },
+  sentBody: { bn: "টাকা চলে গেছে।", en: "The money went through." },
+  cancelledBody: { bn: "কিছু যায়নি। টাকা আপনার কাছেই আছে।", en: "Nothing left. Your money is still yours." },
+  refusedBody: { bn: "লেনদেন হয়নি। টাকা আপনার কাছেই আছে।", en: "Payment refused. Your money is still yours." },
   newPayment: { bn: "নতুন লেনদেন", en: "New payment" },
-  reportForRefund: { bn: "প্রতারিত হয়েছেন? অভিযোগ করে টাকা ফেরত চান", en: "Scammed? Report it to claim your money back" },
-  refundTitle: { bn: "টাকা ফেরতের অবস্থা", en: "Your refund" },
-  refundBy: { bn: "উত্তর পাবেন সর্বশেষ", en: "We'll tell you by" },
+  reportForRefund: { bn: "ঠকেছেন? জানিয়ে টাকা ফেরত চান", en: "Scammed? Report to get money back" },
+  refundTitle: { bn: "টাকা ফেরত", en: "Your refund" },
+  refundBy: { bn: "খবর পাবেন", en: "We'll tell you by" },
   refundNoFee: {
-    bn: "টাকা ফেরত পেতে কাউকে পিন, ওটিপি বা কোনো ফি দিতে হয় না। কেউ চাইলে সে প্রতারক।",
-    en: "You never give a PIN, OTP or fee to get a refund. Anyone who asks is a scammer.",
+    bn: "ফেরত পেতে পিন, ওটিপি বা ফি দিতে হয় না। কেউ চাইলে সে প্রতারক।",
+    en: "Never give a PIN, OTP or fee for a refund. Anyone who asks is a scammer.",
   },
-  refundPaid: { bn: "টাকা আপনার অ্যাকাউন্টে ফেরত দেওয়া হয়েছে", en: "has been returned to your account" },
-  refundPartOf: { bn: "আপনার হারানো", en: "of the" },
+  refundPaid: { bn: "টাকা আপনার অ্যাকাউন্টে ফেরত এসেছে", en: "returned to your account" },
+  refundPartOf: { bn: "হারানো", en: "of the" },
   refundPartTail: {
-    bn: "টাকার মধ্যে প্রতারকের অ্যাকাউন্টে যা বাকি ছিল, তা থেকে ফেরত দেওয়া হয়েছে।",
-    en: "you lost was returned, from what was left in the scammer's account.",
+    bn: "টাকার মধ্যে যা বাকি ছিল, তা ফেরত দেওয়া হয়েছে।",
+    en: "you lost came back from what was left.",
   },
   refundNothingLeft: {
-    bn: "প্রতারণা নিশ্চিত হয়েছে, কিন্তু টাকা আগেই তুলে নেওয়া হয়েছিল। সাহায্যের জন্য ১৬২৬৮ নম্বরে কল করুন।",
-    en: "We confirmed the scam, but the money had already been taken out. Call 16268 for help.",
+    bn: "প্রতারণা নিশ্চিত, কিন্তু টাকা আগেই তুলে নেওয়া। সাহায্যে ১৬২৬৮।",
+    en: "Scam confirmed, but the money was already gone. Call 16268.",
   },
   refundDeclined: {
-    bn: "আমরা প্রতারণা নিশ্চিত করতে পারিনি, তাই টাকা ফেরত দেওয়া যাচ্ছে না। একমত না হলে ১৬২৬৮ নম্বরে কল করুন।",
-    en: "We couldn't confirm a scam, so there's no refund. Call 16268 if you disagree.",
+    bn: "প্রতারণা নিশ্চিত হয়নি, তাই ফেরত নেই। একমত না হলে ১৬২৬৮।",
+    en: "We couldn't confirm a scam, so no refund. Call 16268 if you disagree.",
   },
-  checkRefund: { bn: "টাকা ফেরতের অবস্থা দেখুন", en: "Check my refund" },
+  checkRefund: { bn: "ফেরতের অবস্থা দেখুন", en: "Check my refund" },
   minutes: { bn: "মিনিট", en: "minutes" },
+  homeTab: { bn: "হোম", en: "Home" },
+  historyTab: { bn: "ইতিহাস", en: "History" },
+  moreTab: { bn: "আরও", en: "More" },
 } satisfies Record<string, Words>;
 
 /** The road to a refund: reported, the receiver frozen, the scam confirmed, money back. */
@@ -216,20 +229,24 @@ export function steps(tier: Exclude<Tier, "allow">, minutes: number | null, lang
   const n = digits(minutes ?? 30, lang);
   const words = {
     warn: [
-      { bn: "আমরা আপনাকে সতর্ক করেছি", en: "We've warned you" },
-      { bn: "আপনি ঠিক করুন: বাতিল, নাকি তবুও পাঠাবেন", en: "You decide: cancel, or send anyway" },
-      { bn: "পাঠালে টাকা সাথে সাথে চলে যাবে, আর ফেরত আনা কঠিন", en: "If you send, the money goes at once and is hard to get back" },
+      { bn: "আমরা সতর্ক করেছি", en: "We've warned you" },
+      { bn: "আপনি ঠিক করুন: বাতিল বা তবুও পাঠান", en: "You choose: cancel or send anyway" },
+      { bn: "পাঠালে টাকা চলে যায় — ফেরত কঠিন", en: "If you send, money leaves at once — hard to get back" },
     ],
     step_up: [
-      { bn: "আমরা লেনদেনটি থামিয়েছি", en: "We've paused the payment" },
-      { bn: `${n} মিনিট অপেক্ষা — এর মধ্যে যেকোনো সময় বাতিল করা যায়`, en: `A ${n}-minute wait; you can cancel at any time` },
-      { bn: "এরপর পিন দিয়ে পাঠাতে পারবেন", en: "Then you can send it with your PIN" },
+      { bn: "লেনদেন থামানো হয়েছে", en: "Payment paused" },
+      { bn: `${n} মিনিট অপেক্ষা — যেকোনো সময় বাতিল করতে পারেন`, en: `${n}-minute wait — cancel anytime` },
+      { bn: "তারপর পিন দিয়ে পাঠান", en: "Then send with your PIN" },
     ],
     hold: [
-      { bn: "টাকা আপনার অ্যাকাউন্টেই আছে, কোথাও যায়নি", en: "Your money hasn't left your account" },
-      { bn: `একজন কর্মকর্তা ${n} মিনিটের মধ্যে দেখবেন`, en: `A person reviews it within ${n} minutes` },
-      { bn: "ঠিক থাকলে টাকা পৌঁছে যাবে; না হলে আপনার কাছেই থাকবে", en: "If it's fine, it's delivered; if not, it stays with you" },
+      { bn: "টাকা আপনার কাছেই আছে", en: "Money still in your account" },
+      { bn: `কর্মকর্তা ${n} মিনিটের মধ্যে দেখবেন`, en: `A person checks within ${n} minutes` },
+      { bn: "ঠিক হলে যাবে; না হলে আপনার কাছেই থাকবে", en: "If fine, it goes; if not, it stays with you" },
     ],
   }[tier];
   return words.map((step, index) => ({ text: step[lang], state: index === 0 ? "done" : index === 1 ? "now" : "next" }));
 }
+
+
+
+

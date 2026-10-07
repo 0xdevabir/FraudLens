@@ -9,6 +9,14 @@ export const metadata: Metadata = {
   title: { default: "FraudLens", template: "%s · FraudLens" },
   description: "Real-time fraud decisions, investigation and model oversight for mobile money.",
   robots: { index: false, follow: false },
+  // File-based icons live beside this layout: icon.svg, favicon.ico, apple-icon.png.
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "48x48" },
+      { url: "/icon.svg", type: "image/svg+xml" },
+    ],
+    apple: [{ url: "/apple-icon.png", sizes: "180x180" }],
+  },
   // Added to an iPhone's home screen, the console opens full screen like an app.
   appleWebApp: { capable: true, title: "FraudLens", statusBarStyle: "black-translucent" },
 };

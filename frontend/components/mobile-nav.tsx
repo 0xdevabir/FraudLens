@@ -7,6 +7,7 @@ import { words } from "@/lib/format";
 import { current, isActive, NAV, type NavItem, slug, tabsFor } from "@/lib/nav";
 import type { Me } from "@/lib/types";
 
+import { BrandMarkLink } from "./brand";
 import { TourButton } from "./tour/tour";
 import { cx } from "./ui";
 
@@ -26,10 +27,7 @@ export function TopBar({ pathname }: { pathname: string }) {
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-base/75 pt-[env(safe-area-inset-top)] backdrop-blur-2xl backdrop-saturate-150 lg:hidden">
       <div className="relative flex h-11 items-center px-4">
-        <span className="flex items-center gap-1.5 text-[0.8125rem] font-bold tracking-tight text-fg">
-          <span aria-hidden="true" className="size-2 rounded-full bg-accent" />
-          FraudLens
-        </span>
+        <BrandMarkLink />
         <span className="pointer-events-none absolute inset-x-24 truncate text-center text-[1.0625rem] font-semibold text-fg">{page?.short ?? ""}</span>
         <TourButton compact className="ml-auto" />
       </div>

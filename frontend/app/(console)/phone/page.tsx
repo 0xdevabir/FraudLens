@@ -94,6 +94,16 @@ function savedLang(): Lang {
   }
 }
 
+
+/** Soft haptic when the device allows it — makes taps feel like a real phone. */
+function buzz(ms = 14) {
+  try {
+    navigator.vibrate?.(ms);
+  } catch {
+    /* ignored: desktop demos have no vibrator */
+  }
+}
+
 function Icon({ d, className }: { d: string; className?: string }) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -103,15 +113,34 @@ function Icon({ d, className }: { d: string; className?: string }) {
 }
 
 function StatusBar() {
+  const [clock, setClock] = useState("9:41");
+  useEffect(() => {
+    const tick = () => {
+      setClock(new Date().toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: false, timeZone: "Asia/Dhaka" }));
+    };
+    tick();
+    const id = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(id);
+  }, []);
   return (
-    <div aria-hidden="true" className="flex items-center justify-between bg-upay-yellow px-6 pt-3 text-[13px] font-semibold text-black">
-      <span>9:41</span>
-      <svg viewBox="0 0 42 12" fill="currentColor" className="h-3">
-        <path d="M0 8h3v4H0zM5 5.5h3V12H5zM10 3h3v9h-3zM15 0h3v12h-3z" />
-        <rect x="24.5" y="1" width="15" height="10" rx="2.5" fill="none" stroke="currentColor" />
-        <rect x="26.5" y="3" width="11" height="6" rx="1" />
-        <path d="M40.5 4.5h1.5v3h-1.5z" />
-      </svg>
+    <div aria-hidden="true" className="relative bg-upay-yellow pt-2 text-black">
+      <div className="mx-auto mb-1 h-6 w-28 rounded-full bg-black/90 shadow-inner" />
+      <div className="flex items-center justify-between px-6 pb-1 text-[12px] font-semibold">
+        <span className="tabular-nums">{clock}</span>
+        <span className="flex items-center gap-1.5">
+          <svg viewBox="0 0 18 12" fill="currentColor" className="h-2.5 w-4">
+            <rect x="0" y="7" width="3" height="5" rx="0.5" className="opacity-40" />
+            <rect x="5" y="5" width="3" height="7" rx="0.5" className="opacity-60" />
+            <rect x="10" y="2.5" width="3" height="9.5" rx="0.5" />
+            <rect x="15" y="0" width="3" height="12" rx="0.5" />
+          </svg>
+          <svg viewBox="0 0 28 12" fill="currentColor" className="h-3 w-7">
+            <rect x="0.5" y="1" width="22" height="10" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+            <rect x="2.5" y="3" width="16" height="6" rx="1" />
+            <path d="M24 4h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2z" />
+          </svg>
+        </span>
+      </div>
     </div>
   );
 }
@@ -121,10 +150,10 @@ function LangSwitch({ lang, onSwitch }: { lang: Lang; onSwitch: () => void }) {
   return (
     <button
       type="button"
-      onClick={onSwitch}
+      onClick={() => { buzz(8); onSwitch(); }}
       aria-label={T.switchLabel[lang]}
       data-testid="phone-lang"
-      className="min-h-11 min-w-11 rounded-full px-2 text-xs font-bold text-black underline-offset-2 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-black"
+      className="min-h-11 min-w-11 rounded-full px-2 text-xs font-bold text-black underline-offset-2 transition active:scale-95 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-black"
     >
       <span lang={other}>{T.switchTo[lang]}</span>
     </button>
@@ -132,7 +161,7 @@ function LangSwitch({ lang, onSwitch }: { lang: Lang; onSwitch: () => void }) {
 }
 
 // The buttons stay at the bottom of the screen while a long message scrolls behind them.
-const FOOT = "sticky -bottom-4 -mx-4 -mb-4 mt-auto space-y-2 border-t border-neutral-200 bg-white p-4";
+const FOOT = "sticky -bottom-4 -mx-4 -mb-4 mt-auto space-y-2 border-t border-neutral-200/90 bg-white/95 p-4 backdrop-blur-sm";
 
 /** One screen of the app. Its title takes focus when it appears, so a screen reader
  * announces the new screen and keyboard users start from the top of it. */
@@ -145,11 +174,11 @@ function Screen({
   const titleRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => titleRef.current?.focus(), []);
   return (
-    <div className="flex h-full flex-col bg-white text-neutral-900">
+    <div className="flex h-full flex-col bg-white text-neutral-900 animate-phone-in">
       <StatusBar />
       <div className="relative flex min-h-12 items-center justify-center bg-upay-yellow px-12 pb-1 text-center text-black">
         {onBack && (
-          <button type="button" aria-label={T.back[lang]} onClick={onBack} className="absolute top-0 left-1 grid size-11 place-items-center rounded-full hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-black">
+          <button type="button" aria-label={T.back[lang]} onClick={() => { buzz(8); onBack(); }} className="absolute top-0 left-1 grid size-11 place-items-center rounded-full transition active:scale-90 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-black">
             <Icon d="M15 5l-7 7 7 7" className="size-5" />
           </button>
         )}
@@ -157,38 +186,86 @@ function Screen({
         <span className="absolute top-0 right-1"><LangSwitch lang={lang} onSwitch={onLang} /></span>
       </div>
       {tone !== "plain" && heading && (
-        <div role="status" className={cx("border-b px-4 py-2 text-sm font-semibold", STRIP[tone])}>{heading}</div>
+        <div role="status" className={cx("border-b px-4 py-2 text-sm font-semibold animate-phone-warn", STRIP[tone])}>{heading}</div>
       )}
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4 text-sm">{children}</div>
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4 text-sm pb-2">{children}</div>
+      <div aria-hidden="true" className="mx-auto mb-2 h-1 w-28 shrink-0 rounded-full bg-neutral-300" />
     </div>
   );
 }
 
 function Home({ lang, onLang }: { lang: Lang; onLang: () => void }) {
+  const [toast, setToast] = useState<string | null>(null);
+  const [pulse, setPulse] = useState(false);
+  useEffect(() => {
+    if (!toast) return;
+    const id = window.setTimeout(() => setToast(null), 2200);
+    return () => window.clearTimeout(id);
+  }, [toast]);
   return (
-    <div className="flex h-full flex-col bg-white text-neutral-900">
+    <div className="flex h-full flex-col bg-gradient-to-b from-upay-yellow/40 via-white to-neutral-50 text-neutral-900 animate-phone-in">
       <StatusBar />
-      <div className="flex items-center gap-3 bg-upay-yellow px-4 pt-2 pb-4 text-black">
-        <Image src={upayLogo} alt="upay" unoptimized className="size-11 rounded-full bg-white" />
+      <div className="flex items-center gap-3 bg-upay-yellow px-4 pt-1 pb-4 text-black">
+        <Image src={upayLogo} alt="upay" unoptimized className="size-11 rounded-full bg-white shadow-sm ring-2 ring-white/80" />
         <div className="min-w-0 flex-1 leading-tight">
           <div className="text-sm font-semibold">{lang === "bn" ? "ডেমো গ্রাহক" : "Demo customer"}</div>
-          <div className="text-xs text-black/80">01XXXXXXXXX</div>
+          <div className="text-xs text-black/80 tabular-nums">01XXXXXXXXX</div>
         </div>
         <LangSwitch lang={lang} onSwitch={onLang} />
       </div>
+      <div className="mx-4 -mt-2 rounded-2xl bg-upay-blue px-4 py-3 text-white shadow-lg shadow-upay-blue/25">
+        <div className="text-[11px] font-medium text-white/80">{T.balance[lang]}</div>
+        <div className="mt-0.5 text-2xl font-bold tabular-nums tracking-tight">{digits("12,450.00", lang)}</div>
+        <div className="mt-1 text-[11px] text-white/70">{T.helpline[lang]}</div>
+      </div>
       <ul className="grid grid-cols-4 gap-x-1 gap-y-4 px-2 py-5 text-center">
         {SERVICES.map(([bn, en, d], index) => (
-          <li key={en} className={cx("flex flex-col items-center gap-1.5", index > 0 && "opacity-60")}>
-            <span className="grid size-11 place-items-center rounded-2xl bg-upay-blue/10 text-upay-blue"><Icon d={d} className="size-6" /></span>
-            <span className="text-[11px] leading-tight font-medium">{lang === "bn" ? bn : en}</span>
+          <li key={en}>
+            <button
+              type="button"
+              onClick={() => {
+                buzz(10);
+                if (index === 0) setPulse(true);
+                else setToast(T.demoOnly[lang]);
+              }}
+              className={cx(
+                "flex w-full flex-col items-center gap-1.5 rounded-2xl py-1 transition active:scale-95",
+                index === 0 && pulse && "animate-phone-pulse",
+                index > 0 && "opacity-70",
+              )}
+            >
+              <span className={cx("grid size-12 place-items-center rounded-2xl shadow-sm", index === 0 ? "bg-upay-blue text-white" : "bg-upay-blue/10 text-upay-blue")}>
+                <Icon d={d} className="size-6" />
+              </span>
+              <span className="text-[11px] leading-tight font-medium">{lang === "bn" ? bn : en}</span>
+            </button>
           </li>
         ))}
       </ul>
-      <div className="mx-4 rounded-2xl border border-upay-blue/20 bg-upay-blue/5 px-3 py-3 text-sm text-neutral-700">
+      <div className={cx("mx-4 rounded-2xl border px-3 py-3 text-sm transition", pulse ? "border-upay-blue bg-upay-blue/10 animate-phone-pulse" : "border-upay-blue/20 bg-white")}>
         <div className="font-semibold text-upay-blue">{T.appName[lang]}</div>
-        {T.chooseLeft[lang]}
+        <p className="mt-0.5 text-neutral-700">{pulse ? T.chooseLeft[lang] : T.tapSend[lang]}</p>
       </div>
-      <p className="mt-auto px-4 pb-4 text-center text-[11px] text-neutral-600">{T.helpline[lang]}</p>
+      {toast && (
+        <p role="status" className="mx-4 mt-3 rounded-xl bg-neutral-900/90 px-3 py-2 text-center text-[12px] text-white shadow-lg animate-phone-in">
+          {toast}
+        </p>
+      )}
+      <nav aria-label="app" className="mt-auto grid grid-cols-3 border-t border-neutral-200 bg-white/95 px-2 pt-2 pb-3 text-center text-[11px] font-medium text-neutral-600">
+        <span className="flex flex-col items-center gap-0.5 text-upay-blue">
+          <Icon d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z" className="size-5" />
+          {T.homeTab[lang]}
+        </span>
+        <button type="button" onClick={() => { buzz(8); setToast(T.demoOnly[lang]); }} className="flex flex-col items-center gap-0.5 transition active:scale-95">
+          <Icon d="M4 6h16M4 12h16M4 18h10" className="size-5" />
+          {T.historyTab[lang]}
+        </button>
+        <button type="button" onClick={() => { buzz(8); setToast(T.demoOnly[lang]); }} className="flex flex-col items-center gap-0.5 transition active:scale-95">
+          <Icon d="M5 7h14M5 12h14M5 17h8" className="size-5" />
+          {T.moreTab[lang]}
+        </button>
+      </nav>
+      <div aria-hidden="true" className="mx-auto mb-2 h-1 w-28 shrink-0 rounded-full bg-neutral-300" />
     </div>
   );
 }
@@ -203,24 +280,110 @@ function PhoneButton({ tone = "dark", ...rest }: React.ButtonHTMLAttributes<HTML
     <button
       type="button"
       {...rest}
-      className={cx("min-h-11 w-full rounded-full px-3 py-2.5 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-upay-blue disabled:cursor-not-allowed", look)}
+      onClick={(event) => {
+        if (!rest.disabled) buzz(tone === "red" ? 20 : 12);
+        rest.onClick?.(event);
+      }}
+      className={cx("min-h-11 w-full rounded-full px-3 py-2.5 text-sm transition active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-upay-blue disabled:cursor-not-allowed disabled:active:scale-100", look)}
     />
   );
 }
 
+/** Number pad for the second check — feels like a real wallet PIN entry. */
+function PinPad({ value, onChange, lang }: { value: string; onChange: (next: string) => void; lang: Lang }) {
+  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"] as const;
+  return (
+    <div data-testid="phone-pin-pad" className="rounded-2xl border border-neutral-200 bg-neutral-50/80 px-3 py-3">
+      <div className="mb-2 flex items-center justify-between text-xs font-semibold text-neutral-700">
+        <span>{T.pin[lang]}</span>
+        <span aria-live="polite" className="tracking-[0.45em] text-lg text-upay-blue tabular-nums">
+          {"•".repeat(value.length)}{"○".repeat(Math.max(0, 4 - value.length))}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-1.5">
+        {keys.map((key, index) => (
+          <button
+            key={`${key}-${index}`}
+            type="button"
+            disabled={!key}
+            aria-label={key === "⌫" ? T.pinClear[lang] : key || undefined}
+            onClick={() => {
+              buzz(8);
+              if (key === "⌫") onChange(value.slice(0, -1));
+              else if (value.length < 4) onChange(value + key);
+            }}
+            className={cx(
+              "min-h-11 rounded-xl text-lg font-semibold transition active:scale-95 focus-visible:outline-2 focus-visible:outline-upay-blue disabled:invisible",
+              key === "⌫" ? "bg-white text-neutral-700 border border-neutral-200 text-base" : "bg-white text-neutral-900 border border-neutral-200 shadow-sm",
+            )}
+          >
+            {key === "⌫" ? "⌫" : digits(key, lang)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** The warning, worded for the kind of scam the decision looks like. Without a cue
- * (an older API), the policy's own message is shown instead. */
+ * (an older API), the policy's own message is shown instead. Interactive tips make
+ * the customer pause and tap — closer to a real friction screen. */
 function Warning({ decision, lang }: { decision: NonNullable<PayResult["decision"]>; lang: Lang }) {
   const copy = decision.cue ? CUE[decision.cue] : null;
-  if (!copy) return decision.customer_message ? <p className="text-[15px] leading-relaxed">{decision.customer_message[lang]}</p> : null;
+  const [done, setDone] = useState([false, false, false]);
+  useEffect(() => { setDone([false, false, false]); }, [decision.cue, lang]);
+  if (!copy) {
+    return decision.customer_message ? <p className="text-[15px] leading-relaxed">{decision.customer_message[lang]}</p> : null;
+  }
+  const tips = [copy.check[lang], T.tipKnow[lang], T.tipRush[lang]];
   return (
-    <div data-testid="phone-warning" data-cue={decision.cue}>
-      <h3 className="text-base leading-snug font-bold">{copy.title[lang]}</h3>
-      <p className="mt-1.5 text-[15px] leading-relaxed text-neutral-800">{copy.body[lang]}</p>
-      <p className="mt-2 flex gap-2 rounded-xl bg-neutral-100 px-3 py-2 text-[13px] text-neutral-800">
-        <Icon d="M12 8v5M12 16.5v.5M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z" className="mt-0.5 size-4 shrink-0" />
-        {copy.check[lang]}
-      </p>
+    <div data-testid="phone-warning" data-cue={decision.cue} className="animate-phone-warn space-y-2">
+      <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50/60 px-3 py-3 shadow-sm">
+        <div className="flex gap-2">
+          <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full bg-amber-500 text-white shadow">
+            <Icon d="M12 8v5M12 16.5v.5M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z" className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-base leading-snug font-bold text-amber-950">{copy.title[lang]}</h3>
+            <p className="mt-1 text-[15px] leading-relaxed text-neutral-800">{copy.body[lang]}</p>
+          </div>
+        </div>
+      </div>
+      <div className="rounded-2xl border border-neutral-200 bg-white px-3 py-2">
+        <div className="mb-1.5 text-[11px] font-semibold tracking-wide text-neutral-600 uppercase">{T.tipTap[lang]}</div>
+        <ul className="space-y-1.5">
+          {tips.map((tip, index) => {
+            const on = done[index];
+            return (
+              <li key={tip}>
+                <button
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => {
+                    buzz(on ? 6 : 14);
+                    setDone((prev) => prev.map((v, i) => (i === index ? !v : v)));
+                  }}
+                  className={cx(
+                    "flex w-full min-h-11 items-start gap-2 rounded-xl border px-2.5 py-2 text-left text-[13px] leading-snug transition active:scale-[0.99]",
+                    on ? "border-green-400 bg-green-50 text-green-950" : "border-neutral-200 bg-neutral-50 text-neutral-800 hover:border-upay-blue/40",
+                  )}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={cx(
+                      "mt-0.5 grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-bold",
+                      on ? "bg-green-700 text-white" : "border border-neutral-400 text-transparent",
+                    )}
+                  >
+                    ✓
+                  </span>
+                  {tip}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
     </div>
   );
 }
@@ -238,7 +401,7 @@ function Timeline({ tier, minutes, lang }: { tier: Exclude<Tier, "allow">; minut
               aria-hidden="true"
               className={cx(
                 "mt-0.5 grid size-5 shrink-0 place-items-center rounded-full text-[11px] font-bold",
-                step.state === "done" ? "bg-green-700 text-white" : step.state === "now" ? "bg-upay-blue text-white" : "border border-neutral-400 text-neutral-600",
+                step.state === "done" ? "bg-green-700 text-white" : step.state === "now" ? "bg-upay-blue text-white animate-phone-pulse" : "border border-neutral-400 text-neutral-600",
               )}
             >
               {step.state === "done" ? "✓" : digits(index + 1, lang)}
@@ -314,7 +477,7 @@ function Countdown({ seconds, total, label, lang, tone }: { seconds: number; tot
         </span>
       </div>
       <div aria-hidden="true" className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white">
-        <div className={cx("h-full rounded-full", tone === "orange" ? "bg-orange-600" : "bg-red-700")} style={{ width: `${done * 100}%` }} />
+        <div className={cx("h-full rounded-full transition-[width] duration-1000 ease-linear", tone === "orange" ? "bg-orange-600" : "bg-red-700")} style={{ width: `${done * 100}%` }} />
       </div>
     </div>
   );
@@ -336,6 +499,7 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
   const [relation, setRelation] = useState<AppealRelation | null>(null);
   const [reason, setReason] = useState("");
   const [pin, setPin] = useState("");
+  const [confirmSend, setConfirmSend] = useState(false);
   // Seconds left of a cooling-off wait, and until a hold's review deadline.
   const [wait, setWait] = useState<number | null>(null);
   const [review, setReview] = useState<number | null>(null);
@@ -388,6 +552,7 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
     setRelation(null);
     setReason("");
     setPin("");
+    setConfirmSend(false);
     setWait(null);
     setReview(null);
     setError(null);
@@ -569,7 +734,7 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
   ));
   const sendMoney = w(T.appName);
   // Back to the home screen. Not offered while a warning waits for the customer's answer.
-  const home = busy ? undefined : () => { setPayment(null); setPicked(null); setResult(null); setOutcome(null); setReported(null); setAppeal(null); setAppealing(false); setError(null); setWait(null); setReview(null); };
+  const home = busy ? undefined : () => { setPayment(null); setPicked(null); setResult(null); setOutcome(null); setReported(null); setAppeal(null); setAppealing(false); setError(null); setWait(null); setReview(null); setConfirmSend(false); setPin(""); };
   const screenProps = { lang, onLang: switchLang };
 
   let screen: ReactNode;
@@ -681,18 +846,7 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
         <div className={FOOT}>
           {/* Cancelling is the first choice and is always open. */}
           <PhoneButton onClick={() => respond("cancel")} disabled={busy}>{w(T.cancel)}</PhoneButton>
-          <label className="flex items-center justify-between gap-3 text-xs font-semibold text-neutral-700">
-            <span>{w(T.pin)}</span>
-            <input
-              inputMode="numeric"
-              autoComplete="off"
-              maxLength={4}
-              value={pin}
-              onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
-              className="min-h-11 w-32 rounded-xl border border-neutral-400 bg-white px-3 py-1.5 text-center text-lg tracking-[0.5em] text-neutral-900 outline-none focus:border-upay-blue focus:ring-2 focus:ring-upay-blue/30"
-              type="password"
-            />
-          </label>
+          <PinPad value={pin} onChange={setPin} lang={lang} />
           <PhoneButton tone="light" onClick={() => respond("proceed", true)} disabled={busy || pin.length !== 4}>
             {waiting ? `${w(T.verifySend)} · ${clockText(wait, lang)}` : w(T.verifySend)}
           </PhoneButton>
@@ -710,9 +864,19 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
         <Timeline tier="warn" minutes={null} lang={lang} />
         {appealNote}
         <div className={FOOT}>
-          <PhoneButton onClick={() => respond("cancel")} disabled={busy}>{w(T.cancel)}</PhoneButton>
-          {/* A warning is advice: the customer may always go ahead. */}
-          <PhoneButton tone="light" onClick={() => respond("proceed")} disabled={busy}>{w(T.sendAnyway)}</PhoneButton>
+          {/* A warning is advice: the customer may always go ahead — but ask once more. */}
+          {confirmSend ? (
+            <>
+              <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] text-amber-950">{w(T.sendConfirm)}</p>
+              <PhoneButton tone="light" onClick={() => respond("proceed")} disabled={busy}>{w(T.sendConfirmYes)}</PhoneButton>
+              <PhoneButton onClick={() => setConfirmSend(false)} disabled={busy}>{w(T.neverMind)}</PhoneButton>
+            </>
+          ) : (
+            <>
+              <PhoneButton onClick={() => respond("cancel")} disabled={busy}>{w(T.cancel)}</PhoneButton>
+              <PhoneButton tone="light" onClick={() => setConfirmSend(true)} disabled={busy}>{w(T.sendAnyway)}</PhoneButton>
+            </>
+          )}
           {appealButton}
           {reportButton}
         </div>
@@ -837,7 +1001,7 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
           lang={lang}
           data-testid="phone"
           data-tour="phone-device"
-          className="mx-auto h-[40rem] w-full max-w-[22rem] overflow-hidden rounded-[2.75rem] border-[10px] border-black bg-white shadow-2xl shadow-black/60 ring-1 ring-white/15 [color-scheme:light]"
+          className="relative mx-auto h-[42rem] w-full max-w-[22rem] overflow-hidden rounded-[2.75rem] border-[11px] border-neutral-950 bg-white shadow-[0_25px_60px_-12px_rgba(0,0,0,0.65)] ring-1 ring-white/20 [color-scheme:light] before:pointer-events-none before:absolute before:inset-y-16 before:left-0 before:w-[2px] before:bg-neutral-800 after:pointer-events-none after:absolute after:top-28 after:right-0 after:h-16 after:w-[2px] after:rounded-l after:bg-neutral-800"
         >
           <div key={screenKey} className="h-full">{screen}</div>
         </div>
@@ -935,7 +1099,7 @@ export default function PhonePage() {
     <>
       <PageHeader tour="phone-header"
         title="Customer phone demo"
-        sub="What a customer sees when FraudLens interrupts a payment, in Bangla or English: a warning that names the scam, a second check with a cooling-off countdown, or a pause for review with its deadline, what happens next, and a way to appeal or report."
+        sub="What a customer sees when FraudLens interrupts a payment — plain-language warnings, a PIN pad and cooling-off wait, or a hold with a deadline, plus appeal and report."
       />
       <Async state={scenarios}>{(data) => <Demo scenarios={data.scenarios} startedAt={data.now} />}</Async>
     </>

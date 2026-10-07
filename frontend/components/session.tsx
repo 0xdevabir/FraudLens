@@ -110,7 +110,7 @@ export function Console({ children }: { children: ReactNode }) {
         {/* A sidebar from a laptop up; on a phone or a tablet, the title bar and the tab bar below. */}
         <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col border-r border-line bg-base/80 text-fg-2 backdrop-blur-2xl backdrop-saturate-150 lg:flex">
           <div data-tour="brand" className="px-5 pt-6 pb-2">
-            <Brand size={28} className="text-lg" />
+            <Brand href="/" size={28} className="text-lg" />
             <div className="mt-1.5 text-xs text-fg-4">Real-time fraud decisions for mobile money</div>
           </div>
           <div data-tour="tour-button" className="px-3 pt-2">
