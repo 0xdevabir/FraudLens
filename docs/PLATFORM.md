@@ -233,7 +233,7 @@ and each request still needs its own approval by a second person.
   amounts, whether the receiver is frozen (`protected`) and the date promised:
   five days on the platform clock, as UK payment providers must refund
   authorised-push-payment scams. Everything is audited and on the case
-  timeline. Migration `0006_refunds`.
+  timeline. Migration `0010_refunds`.
 
 ## 7. Security
 
