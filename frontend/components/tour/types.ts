@@ -13,6 +13,9 @@ export interface TourStep {
   mobileTarget?: string;
   title: string;
   body: string;
+  /** Bangla title and body, in plain everyday words. */
+  titleBn: string;
+  bodyBn: string;
   placement?: "top" | "bottom" | "left" | "right" | "auto";
   /** What the animated cursor does on the target: glide + click ripple, glide + hover, or nothing. */
   action?: "click" | "hover" | "none";
@@ -22,9 +25,15 @@ export interface TourStep {
 
 export interface TourApi {
   active: boolean;
-  start: (fromStepId?: string) => void;
+  /** Starts the tour; "auto" (the default) plays it by itself, "manual" waits for Next. */
+  start: (fromStepId?: string, mode?: "auto" | "manual") => void;
   stop: () => void;
 }
+
+export type TourLang = "en" | "bn";
+
+/** localStorage key for the tour's language. */
+export const TOUR_LANG_KEY = "fraudlens.tour.lang.v1";
 
 /** localStorage key that records the tour was seen or dismissed. */
 export const TOUR_SEEN_KEY = "fraudlens.tour.seen.v1";
