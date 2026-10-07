@@ -268,7 +268,8 @@ has not been done yet.
   thresholds must be re-fitted on real data.
 - **Labels.** Training uses ground-truth labels. In production only reported
   cases are labelled (about half), which biases what the model learns.
-- **No adaptation.** Simulated scammers do not react to the controls.
+- **No adaptation.** The scammers behind every number above do not react to the
+  controls. §14 adds scammers that do, and measures the decay.
 - **Young wallets and fast cash-out are risk signals.** New customers and
   remittance receivers legitimately show both. The data contains such customers
   as hard negatives. This is the main fairness risk, and the fairness report
@@ -391,11 +392,112 @@ more wallets sit within three hops of one as time passes. A deployment that
 keeps this feature should expire or age old flags. The live endpoint measures
 the same on the latest decisions actually served.
 
-## 14. Reproduce
+## 14. Adaptive adversaries
+
+The scammers in §2 to §13 follow fixed scripts. Real scammers learn which
+scripts get through. This section deploys scammers that do, against the served
+model (v4), and asks three questions: how fast recall decays, whether weekly
+retraining keeps up, and whether the drift monitor notices.
+
+**Set-up** (`make adversary`, about five minutes; writes
+`artifacts/reports/adversary.json`). The default world is re-simulated to day 120
+(it reproduces the stored dataset exactly, which the script checks). Then 8 new
+fraud cells open and run 6 one-week rounds after an 8-day warm-up. Every scam
+draws one of six tactics:
+
+| Tactic | What changes |
+| --- | --- |
+| none | the usual script for the typology |
+| split_amounts | each payment split into 2 to 6 parts below ৳1,000 to ৳2,500, 5 to 30 minutes apart |
+| seasoned_mule | the money goes to an existing customer's wallet over 180 days old, not a young one |
+| delayed_cashout | the mule waits 6 to 48 hours before forwarding or cashing out (past a 30-minute hold) |
+| fan_out | each payment goes to the least-used of up to 11 mules |
+| mimic_hours | the scam runs at the victim's own usual hour |
+
+Round 0 runs half the scams on the usual script and spreads the rest evenly.
+After each round the cells see which scams had no victim transfer alerted at the
+warn tier. They then shift their mix by multiplicative weights on that success
+rate (step 3.0, floor 3% per tactic, tactics run fewer than 5 times keep their
+weight). Each round is scored in full with no subsampling: 34,000 to 46,000
+transactions and 84 to 117 scams. There are four arms, all on the same world and
+seed:
+
+- **control**: the mix never changes. This is natural decay.
+- **frozen**: the scammers adapt and v4 stays deployed.
+- **retrain**: after every round the model is refitted with the `make train`
+  recipe. It uses the training fold plus what an operator would know by then:
+  the verdict on every alerted transaction, and the complaints of reported scams.
+  Thresholds are re-chosen on val_b.
+- **drift_gated**: retrain only when the live drift monitor
+  (`mlops/drift.py`: score PSI against training, or the alert rate) leaves "stable".
+
+**Scams caught (case recall) at the warn tier, by round:**
+
+| Arm | 0 | 1 | 2 | 3 | 4 | 5 | Pooled PR-AUC |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| control | 96.7% | 94.6% | 90.9% | 93.1% | 89.5% | 94.8% | 0.977 |
+| frozen | 96.7% | 94.0% | 90.0% | 87.2% | 87.0% | **79.6%** | 0.961 |
+| retrain | 96.7% | 97.0% | 90.5% | 92.6% | 97.8% | 98.0% | 0.960 |
+| drift_gated | identical to frozen: the monitor never fired | | | | | | 0.961 |
+
+What the numbers say:
+
+- **The scammers found the weak spot, and it is seasoned mules.** Against the
+  frozen model, seasoned_mule's share grew from 10% to 48% of scams. Pooled over
+  the six rounds, the model caught 74.4% of seasoned-mule scams (191 scams),
+  against 92% to 100% for every other tactic. The other tactics barely hurt:
+  splitting, delaying, fan-out and hour-mimicking were each caught at 92% or
+  more. The model's two largest signals are the receiver's fast-exit share and
+  its age. Delaying cash-out does not hide the first signal on a mule that has
+  other victims, and only an old wallet hides the second.
+- **Frozen decays, control does not.** By round 5 the frozen model caught 79.6%
+  of scams against 94.8% for the same model facing non-adaptive scammers. That is
+  15 points lost to adaptation alone. Money is more robust: with holds on the
+  mule's exit transactions, 98.3% of the taka is still covered in round 5. The
+  scams that get through are caught at cash-out.
+- **Weekly retraining keeps recall, at a price in alerts.** The retrained arm
+  catches 98.0% of scams in round 5 and 90.1% of seasoned-mule scams pooled. But
+  the first retrain raised alerts from 76 to 234 a day and cut precision from
+  72% to 22%. By round 5 it was still at 118 alerts a day and 46% precision,
+  against 66 and 79% for the frozen model. The feedback rows are mostly alerted
+  rows and complaints, so they are far richer in fraud than real traffic, and
+  thresholds re-chosen on val_b do not correct for it. Retraining on verdicts
+  needs its alert budget re-checked before promotion. That is exactly what
+  shadow mode (§13) is for.
+- **The drift monitor did not notice.** In the frozen arm the population score
+  PSI stayed between 0.0007 and 0.0044 and the alert rate between 1.29% and
+  1.39% (1.24% on validation). So `drift_gated` never retrained and matched the
+  frozen arm round for round. Fraud is about 1% of traffic, and a tactic shift inside that 1%
+  barely moves the whole score distribution. Pointed at confirmed fraud only
+  (val_b fraud as the score reference), the same measure rose from 0.40 in round
+  0 to 0.85 in round 5. But the control arm already reads 0.24 to 0.44, so the
+  standard 0.25 threshold does not separate the two. A fraud-segment monitor
+  needs its own baseline. The signals that did move are per-tactic catch rates
+  on confirmed cases, which only labels give. Drift on unlabelled traffic is no
+  substitute for them.
+- **What carries detection after adaptation** (mean |SHAP| share on victim
+  transfers, round 0, then round 5). The frozen model keeps leaning on the same
+  features: receiver fast-exit share 14.8% then 12.9%, receiver age 10.8% then
+  8.5%. The retrained model moves away from receiver age (to 7.8%) and fast exit
+  (to 9.5%). It moves toward the sender's handset age (7.7% to 13.2%, now the
+  largest), the receiver's 7-day fan-in (3.3% to 6.6%), its number of recipients
+  (3.4% to 6.4%) and prior payments between the pair (3.8%, new in the top 8).
+  These are the signals an old wallet does not fake: a victim on a new handset,
+  and many unrelated senders converging on one receiver.
+
+**Caveats.** One seed and one world. Each round has 84 to 117 scams and each
+tactic 4 to 53, so a single round's number moves by a few points on a few scams.
+Read the trend, not a single cell. The adversary sees ground truth on what was
+alerted, which is more feedback than real scammers get. The tactic set and its
+parameters are assumptions (DATA_ASSUMPTIONS.md). The retrained models are
+experiment-only and are not registered.
+
+## 15. Reproduce
 
 ```
 make data features train     # about one minute; writes backend/artifacts/models/<version>/
 make policy insights         # policy_report.json and insights.json (fairness, drift, threshold sweep)
+make adversary               # §14: adaptive scammers vs frozen, retrained and drift-gated models
 make test                    # 203 tests, including leakage and round-trip checks
 ```
 

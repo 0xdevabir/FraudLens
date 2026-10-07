@@ -39,21 +39,23 @@ def _when(cfg: SimConfig, seconds) -> pd.Series:
     return pd.Timestamp(cfg.start) + pd.to_timedelta(s.round(), unit="s")
 
 
-def build_tables(sim: Simulation) -> dict[str, pd.DataFrame]:
-    cfg, w, c = sim.cfg, sim.w, sim.cols
+def transaction_table(sim: Simulation, start: int = 0) -> pd.DataFrame:
+    """The transactions emitted so far, from the `start`-th one on (txn_id = position)."""
+    cfg = sim.cfg
+    c = {k: v[start:] for k, v in sim.cols.items()}
     ts = np.asarray(c["ts"], dtype=np.int64)
     day = ts // DAY
-    typ = np.asarray(c["type"])
+    typ = np.asarray(c["type"], dtype=np.int64)
     app = np.asarray(c["app"])
-    device = np.asarray(c["device"])
+    device = np.asarray(c["device"], dtype=np.int64)
 
     channel = np.where(app == 1, "app", "ussd").astype(object)
     channel[typ == CASH_IN] = "agent"
     channel[typ == ADD_MONEY] = "bank"
 
-    txns = pd.DataFrame(
+    return pd.DataFrame(
         {
-            "txn_id": np.arange(len(ts), dtype=np.int64),
+            "txn_id": np.arange(start, start + len(ts), dtype=np.int64),
             "ts": _when(cfg, ts),
             "day": day,
             "split": np.select(
@@ -76,6 +78,11 @@ def build_tables(sim: Simulation) -> dict[str, pd.DataFrame]:
             "cell_id": c["cell"],
         }
     )
+
+
+def build_tables(sim: Simulation) -> dict[str, pd.DataFrame]:
+    cfg, w = sim.cfg, sim.w
+    txns = transaction_table(sim)
 
     nw = w.n_wallets
     mules = sim.fraud.mules

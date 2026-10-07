@@ -214,8 +214,11 @@ behaviour that was missing. But the test period is no longer strictly
   are what we claim.
 - Fraud prevalence is likely higher than in real traffic, to give enough positives
   to evaluate each typology.
-- Fraud scripts are stylised. Real scammers adapt to controls; the simulator's do
-  not react to the model's decisions.
+- Fraud scripts are stylised. Real scammers adapt to controls; the default
+  simulator's do not react to the model's decisions. The opt-in adversary mode
+  (`simulator/adversary.py`, MODEL_CARD §14) adds cells that shift between five
+  evasion tactics according to what got through. Its tactics, their parameters
+  and its learning rule are assumptions too.
 - No merchant fraud, no loan or credit fraud, no SIM-swap telemetry, no customer
   demographics beyond segment and district.
 - Reports are the only source of confirmed labels and arrive for about half of

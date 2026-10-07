@@ -125,7 +125,12 @@ class Simulation:
         heapq.heappush(self._heap, (int(ts), self._seq, item))
 
     def run(self) -> None:
-        for day in range(self.cfg.days):
+        self.run_days(0, self.cfg.days)
+
+    def run_days(self, start: int, stop: int) -> None:
+        """Simulate days [start, stop). Called in order, it continues where it stopped,
+        which is how the adversary experiment steps the world a round at a time."""
+        for day in range(start, stop):
             self._schedule_day(day)
             self.fraud.schedule_day(day)
             end = (day + 1) * DAY
