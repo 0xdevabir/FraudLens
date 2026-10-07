@@ -1831,3 +1831,15 @@ def test_the_schema_matches_the_models(settings):
     config = Config(str(BACKEND_DIR / "alembic.ini"))
     config.attributes["url"] = settings.database_url
     command.check(config)  # raises if a migration is missing
+
+
+def test_consortium_routes_are_reviewer_only_and_optional(client, tokens):
+    assert client.get("/v1/consortium").status_code == 401
+    response = client.get("/v1/consortium", headers=tokens("analyst1"))
+    # The demo state is built by `python -m fraudlens.consortium.simulate`; without it
+    # the routes say so and nothing else changes.
+    assert response.status_code in (200, 404), response.text
+    if response.status_code == 404:
+        assert response.json()["error"]["code"] == "consortium_not_built"
+    else:
+        assert {"feeds", "guarantees", "audit", "results"} <= response.json().keys()

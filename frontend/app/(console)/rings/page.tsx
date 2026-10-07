@@ -14,6 +14,7 @@ export default function RingsPage() {
       <PageHeader
         title="Rings"
         sub="Wallets that belong together: they share handsets with, or pass money between, wallets already confirmed as fraud. A ring is a lead for a reviewer, not a verdict."
+        actions={<Link href="/consortium" className="text-sm text-info hover:underline">Partner mule feeds →</Link>}
       />
       <Card flush>
         <Async state={rings}>

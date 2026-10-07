@@ -33,6 +33,7 @@ from .routes import (
     appeals,
     auth,
     cases,
+    consortium,
     customer,
     demo,
     ingest,
@@ -207,6 +208,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         intel,
         ops,
         mlops,
+        consortium,
     ):
         app.include_router(module.router, prefix="/v1")
     if not settings.production:  # stand-ins for the customer app; see routes/demo.py
