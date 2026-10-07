@@ -81,5 +81,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Validate Compose file
+        run: docker compose --profile demo config --quiet
       - name: Build the demo images
         run: docker compose --profile demo build

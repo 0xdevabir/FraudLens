@@ -29,7 +29,7 @@ setup: ## Install backend and console dependencies
 	cd frontend && pnpm install --frozen-lockfile
 
 up: ## Start Postgres and Redis
-	docker compose up -d --wait
+	@./scripts/up.sh
 
 redis: ## Start Redis only, for a Postgres that runs on the host (set FRAUDLENS_DATABASE_URL)
 	docker compose up -d --wait redis
@@ -113,3 +113,4 @@ lint: ## Lint and format check
 
 fmt: ## Auto-format
 	cd backend && uv run ruff check --fix src tests && uv run ruff format src tests
+

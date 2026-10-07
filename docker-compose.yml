@@ -1,5 +1,14 @@
-# `make up` starts Postgres and Redis for development on the host.
-# `make demo` adds the `demo` profile: the API and the console in containers.
+# Cross-platform demo stack (macOS, Windows Docker Desktop/WSL2, Linux).
+# Images are multi-arch (amd64 + arm64) via official Postgres, Redis, Python, and Node bases.
+#
+#   Mac / Linux:  make demo   or  ./scripts/demo.sh
+#   Windows:      .\scripts\demo.ps1
+#   Infra only:   make up     or  ./scripts/up.sh
+#
+# Give Docker Desktop at least 4 GB RAM (Settings → Resources).
+
+name: fraudlens
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -19,11 +28,20 @@ services:
 
   redis:
     image: redis:7-alpine
-    # REDIS_PASSWORD (from the shell or a .env next to this file) turns on
-    # authentication. Unset, Redis has none and relies on the loopback-only port.
-    command: ["redis-server", "--appendonly", "no", "--save", "", "--requirepass", "${REDIS_PASSWORD:-}"]
+    # Empty REDIS_PASSWORD → no auth (loopback-only port). Set REDIS_PASSWORD in
+    # a .env next to this file (see .env.example) to require a password.
     environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDISCLI_AUTH: ${REDIS_PASSWORD:-}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          exec redis-server --appendonly no --save "" --requirepass "$$REDIS_PASSWORD"
+        else
+          exec redis-server --appendonly no --save ""
+        fi
     ports:
       - "127.0.0.1:6380:6379"
     healthcheck:
@@ -39,7 +57,7 @@ services:
     build: ./backend
     init: true
     env_file:
-      - path: backend/.env # written by `make demo` if it is missing
+      - path: backend/.env
         required: false
     environment:
       FRAUDLENS_DATABASE_URL: postgresql+psycopg://fraudlens:${POSTGRES_PASSWORD:-fraudlens_dev}@postgres:5432/fraudlens

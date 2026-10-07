@@ -1,0 +1,17 @@
+# Keep Docker/Make/shell files on LF so images and scripts work the same on
+# Windows checkouts as on macOS and Linux.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.pptx binary
+*.woff binary
+*.woff2 binary
+
+# PowerShell accepts LF; keep it LF so Git does not rewrite on clone.
+*.ps1 text eol=lf

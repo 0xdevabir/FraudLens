@@ -321,7 +321,7 @@ flowchart TB
 | Models | Python 3.12, LightGBM, scikit-learn, SHAP |
 | API | FastAPI, SQLAlchemy, Alembic, PostgreSQL, Redis Streams and pub/sub, server-sent events |
 | Console | Next.js 16, React 19, Tailwind CSS v4, d3-force |
-| Ops | Make, Docker Compose, uv, pnpm, Playwright smoke test, GitHub Actions |
+| Ops | Docker Compose (Mac / Windows / Linux), Make or `scripts/demo.*`, uv, pnpm, Playwright, GitHub Actions |
 
 ```
 FraudLens/
@@ -338,7 +338,8 @@ FraudLens/
 ├── frontend/            # the analyst console
 ├── docs/                # architecture, model card, policy, platform, demo script
 ├── docker-compose.yml
-└── Makefile
+├── Makefile
+└── scripts/             # demo.sh / demo.ps1 (and up / demo-reset) for Mac, Windows, Linux
 ```
 
 </details>
@@ -347,14 +348,29 @@ FraudLens/
 
 ## ⚡ Run it in one command
 
-**Requirements:** Docker with Compose v2 (give Docker at least 4 GB of memory) and `make`.
+**Requirements:** [Docker](https://docs.docker.com/get-docker/) with Compose v2. Give Docker at least **4 GB of memory** (Docker Desktop → Settings → Resources on Mac and Windows). Images are multi-arch (`linux/amd64` and `linux/arm64`), including Apple Silicon.
+
+| Platform | How to run the demo |
+|---|---|
+| **macOS / Linux** | `make demo` or `./scripts/demo.sh` |
+| **Windows** (PowerShell) | `.\scripts\demo.ps1` — Docker Desktop with the **WSL2** backend |
+| **Windows** (WSL2 / Git Bash) | `./scripts/demo.sh` or `make demo` |
 
 ```bash
 git clone https://github.com/0xdevabir/FraudLens.git && cd FraudLens
-make demo      # build, generate data, train, replay, serve
 ```
 
-Then open **http://localhost:3100** and sign in as `analyst1`, `supervisor1` or `admin`. The password is generated on the first `make demo` and written to `backend/.env` as `FRAUDLENS_SEED_PASSWORD`.
+```bash
+# macOS / Linux / WSL
+./scripts/demo.sh          # or: make demo
+```
+
+```powershell
+# Windows PowerShell (Docker Desktop running)
+.\scripts\demo.ps1
+```
+
+Then open **http://localhost:3100** and sign in as `analyst1`, `supervisor1` or `admin`. The password is generated on the first run and written to `backend/.env` as `FRAUDLENS_SEED_PASSWORD`.
 
 The first start generates the dataset, trains the models, replays 25 days of traffic through the running service and retrains a challenger on the analysts' verdicts. That takes **about ten minutes** on a recent laptop, plus a few minutes to build the images, and progress is printed step by step. Later starts skip everything that already exists and are ready in under a minute.
 
@@ -365,11 +381,18 @@ The first start generates the dataset, trains the models, replays 25 days of tra
 | `admin` | dashboards and the audit log, no customer data |
 
 ```bash
-make down          # stop, keep the data            (Ctrl-C in the first terminal also stops it)
-make demo-reset    # stop and delete the database, dataset and models
+# macOS / Linux / WSL
+make down                  # stop, keep the data (Ctrl-C in the demo terminal also stops it)
+./scripts/demo-reset.sh    # or: make demo-reset — delete database, dataset and models
 ```
 
-The demo uses ports 3100 (console), 8010 (API), 5433 (Postgres) and 6380 (Redis), all bound to 127.0.0.1.
+```powershell
+# Windows PowerShell
+docker compose --profile demo down
+.\scripts\demo-reset.ps1
+```
+
+The demo uses ports 3100 (console), 8010 (API), 5433 (Postgres) and 6380 (Redis), all bound to `127.0.0.1` (reachable as `localhost` on Mac, Windows, and Linux). Optional Compose variables are listed in [`.env.example`](.env.example).
 
 <details>
 <summary><b>Develop on the host</b></summary>
