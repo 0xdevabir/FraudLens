@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..config import Settings
 from ..decision import Decision as EngineDecision
 from ..decision import DecisionEngine, SimilarCases, context_from_engine, load_policy
+from ..decision.customer import cue as customer_cue
 from ..decision.policy import RANK
 from ..features import SCORED_TYPES, FeatureEngine, Txn
 from ..mlops.shadow import Shadow
@@ -468,6 +469,9 @@ class Scorer:
             "review_sla_minutes": spec.review_sla_minutes,
             "case_id": get("case_id"),
             "latency_ms": round(get("latency_ms"), 2),
+            # Which scam pattern the app's warning should ask about; see decision/customer.py.
+            "scenario": get("scenario"),
+            "cue": customer_cue(get("tier"), get("scenario"), get("detail")),
         }
 
     def _recorded(self, s: Session, result: Result) -> None:

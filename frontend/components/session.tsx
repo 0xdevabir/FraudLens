@@ -45,6 +45,7 @@ const NAV: { heading: string; items: { href: string; label: string; roles: Role[
       { href: "/alerts", label: "Alert queue", roles: ["analyst", "supervisor"] },
       { href: "/cases", label: "Cases", roles: ["analyst", "supervisor"] },
       { href: "/approvals", label: "Freeze approvals", roles: ["analyst", "supervisor"] },
+      { href: "/appeals", label: "Customer appeals", roles: ["analyst", "supervisor"] },
     ],
   },
   {

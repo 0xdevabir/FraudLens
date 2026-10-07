@@ -6,7 +6,8 @@ from datetime import datetime
 
 from ..intel.attribute import categorise
 from ..intel.taxonomy import load_taxonomy
-from ..platform.models import Case, CaseEvent, Decision, FreezeRequest, Transaction, User
+from ..platform.models import Appeal, Case, CaseEvent, Decision, FreezeRequest, Transaction, User
+from ..platform.pii import redact
 from ..platform.scoring import Result
 
 
@@ -71,6 +72,28 @@ def freeze_view(r: FreezeRequest, names: dict[int, str] | None = None) -> dict:
         "decision_note": r.decision_note,
         "decided_at": r.decided_at,
         "created_at": r.created_at,
+    }
+
+
+def appeal_view(a: Appeal, now: datetime, names: dict[int, str] | None = None) -> dict:
+    names = names or {}
+    return {
+        "id": a.id,
+        "txn_id": a.txn_id,
+        "wallet_id": a.wallet_id,
+        "case_id": a.case_id,
+        "tier": a.tier,
+        "relation": a.relation,
+        # Typed by a customer: numbers and addresses in it are masked.
+        "reason": redact(a.reason),
+        "status": a.status,
+        "filed_at": a.filed_at,
+        "sla_due_at": a.sla_due_at,
+        "overdue": a.status == "pending" and a.sla_due_at < now,
+        "decided_by": a.decided_by,
+        "decider": names.get(a.decided_by),
+        "decision_note": a.decision_note,
+        "decided_at": a.decided_at,
     }
 
 

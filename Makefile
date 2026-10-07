@@ -1,6 +1,6 @@
 .PHONY: help setup up redis down data features train policy insights intel pipeline test lint fmt \
 	migrate seed load api replay replay-live verify platform \
-	review retrain shadow models promote console console-build smoke \
+	review retrain shadow models promote console console-build smoke e2e-phone \
 	demo demo-reset
 
 API_PORT ?= 8010
@@ -103,6 +103,9 @@ console-build: ## Production build of the console
 
 smoke: ## Open every console page in a headless browser as each role (needs the API and the console)
 	cd frontend && pnpm exec playwright install chromium-headless-shell && node scripts/smoke.cjs
+
+e2e-phone: ## The customer phone in Bangla and English, and an appeal round trip (needs the API and the console)
+	cd frontend && pnpm exec playwright install chromium-headless-shell && node scripts/phone-e2e.cjs
 
 test: ## Run backend tests (the platform tests need `make up`)
 	cd backend && uv run pytest -q

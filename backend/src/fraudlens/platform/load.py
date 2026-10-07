@@ -33,7 +33,7 @@ from .stream import DEAD_SUFFIX
 SYSTEM = Ctx(None, "system", None)
 # Everything the platform writes at run time. Never users, never the audit log.
 RUNTIME_TABLES = (
-    "shadow_scores", "decisions", "case_events", "freeze_requests", "customer_reports",
+    "appeals", "shadow_scores", "decisions", "case_events", "freeze_requests", "customer_reports",
     "wallet_flags", "cases", "transactions", "past_cases", "wallets", "agents",
 )  # fmt: skip
 TXN_COLUMNS = (

@@ -12,6 +12,7 @@ import ipaddress
 import itertools
 import json
 import shutil
+from datetime import datetime
 
 import numpy as np
 import pytest
@@ -828,8 +829,12 @@ def test_a_freeze_needs_two_people(client, tokens, p, replayed, spare):
 # --------------------------------------------------------------- customers
 
 
-def _pending(client, tokens, p, tier: str) -> dict:
-    """A live payment the policy answers with `tier`, found by asking what-if first."""
+_scored: dict[int, dict] = {}  # what `_pending` was answered, by txn_id
+
+
+def _pending(client, tokens, p, tier: str, by_model: bool = False) -> dict:
+    """A live payment the policy answers with `tier`, found by asking what-if first.
+    `by_model` skips payments into confirmed-fraud wallets, which a rule holds."""
     with p.sessions() as s:
         candidates = s.execute(
             select(Transaction)
@@ -843,6 +848,8 @@ def _pending(client, tokens, p, tier: str) -> dict:
         ]
     service = tokens("upay-core")
     for sender, receiver, amount, device in candidates:
+        if by_model and receiver in p.scorer.engine.flagged:
+            continue
         for scale in (1.0, 0.5, 2.0, 0.25):
             body = send(p, sender, receiver, round(amount * scale, 2), device_id=device)
             probe = client.post("/v1/score/what-if", headers=service, json=body).json()
@@ -850,6 +857,7 @@ def _pending(client, tokens, p, tier: str) -> dict:
                 continue
             result = client.post("/v1/score", headers=service, json=body).json()
             assert result["decision"]["tier"] == tier  # what-if and scoring agree
+            _scored[body["txn_id"]] = result
             return body
     pytest.fail(f"no live payment produced a {tier} decision")
 
@@ -895,6 +903,144 @@ def test_a_step_up_needs_verification_and_the_cooling_off(client, tokens, p, rep
     with p.sessions() as s:
         txn, decision = s.get(Transaction, txn_id), s.get(Decision, txn_id)
         assert txn.applied_at > txn.ts and decision.customer_response == "proceed"
+
+
+# ----------------------------------------------------------------- appeals
+
+
+def _at(iso: str) -> datetime:
+    return datetime.fromisoformat(iso.replace("Z", "+00:00"))
+
+
+def _appeal(client, service, body: dict, **over) -> object:
+    answer = {"wallet_id": body["sender_id"], "relation": "family", "reason": "My brother's rent"}
+    return client.post(
+        f"/v1/customer/transactions/{body['txn_id']}/appeal", headers=service, json=answer | over
+    )
+
+
+def test_a_customer_appeal_releases_a_held_payment_once_a_person_agrees(
+    client, tokens, p, replayed
+):
+    service, analyst = tokens("upay-core"), tokens("analyst1")
+    body = _pending(client, tokens, p, "hold", by_model=True)
+    txn_id, sender = body["txn_id"], body["sender_id"]
+    assert _scored[txn_id]["decision"]["cue"] != "reported_recipient"
+    record = client.get(f"/v1/decisions/{txn_id}", headers=analyst).json()
+    initiated = p.scorer.engine.wallets[sender].n_init
+
+    assert _appeal(client, service, body, wallet_id="W0").status_code == 404  # not theirs
+    assert _appeal(client, analyst, body).status_code == 403  # only the app files one
+    assert _appeal(client, service, body, relation="cousin").status_code == 422
+    filed = _appeal(client, service, body, reason="Rent for 01711000000, my brother")
+    assert filed.status_code == 201, filed.text
+    appeal = filed.json()
+    assert (appeal["status"], appeal["tier"], appeal["txn_status"]) == ("pending", "hold", "held")
+    assert "reason" not in appeal and "decided_by" not in appeal  # the app sees where, not who
+    waited = _at(appeal["sla_due_at"]) - _at(appeal["filed_at"])
+    assert waited.total_seconds() == 30 * 60  # the hold's own review deadline
+    again = _appeal(client, service, body)
+    assert again.status_code == 409 and again.json()["error"]["code"] == "appeal_exists"
+    status = f"/v1/customer/transactions/{txn_id}/appeal"
+    assert client.get(status, headers=service, params={"wallet_id": "W0"}).status_code == 404
+    assert (
+        client.get(status, headers=service, params={"wallet_id": sender}).json()["id"]
+        == (appeal["id"])
+    )
+
+    assert client.get("/v1/appeals", headers=service).status_code == 403
+    queue = client.get("/v1/appeals", headers=analyst).json()
+    [row] = [a for a in queue["appeals"] if a["id"] == appeal["id"]]
+    assert row["txn_status"] == "held" and row["relation"] == "family"
+    assert "01711000000" not in row["reason"]  # what a customer typed is masked
+    assert queue["counts"]["pending"] >= 1
+
+    path = f"/v1/appeals/{appeal['id']}/approve"
+    assert client.post(path, headers=analyst, json={"note": "ok"}).status_code == 422
+    done = client.post(path, headers=analyst, json={"note": REASON})
+    assert done.status_code == 200, done.text
+    assert done.json()["released"] is True and done.json()["txn_status"] == "completed"
+    assert done.json()["appeal"]["status"] == "approved"
+    assert done.json()["appeal"]["decided_by"] is not None
+    assert p.scorer.engine.wallets[sender].n_init == initiated + 1
+    twice = client.post(path, headers=analyst, json={"note": REASON})
+    assert twice.status_code == 409 and twice.json()["error"]["code"] == "already_decided"
+
+    with p.sessions() as s:
+        actions = set(
+            s.scalars(
+                select(AuditLog.action).where(
+                    AuditLog.object_type == "appeal", AuditLog.object_id == str(appeal["id"])
+                )
+            )
+        )
+        labels = feedback.labels(s).set_index("txn_id")
+    assert actions == {"appeal.file", "appeal.approve"}
+    # A person agreed the payment was genuine: it becomes a `legitimate` label.
+    assert (labels.loc[txn_id, "y"], labels.loc[txn_id, "source"]) == (0, "appeal")
+    if record["case_id"] is not None:
+        timeline = client.get(f"/v1/cases/{record['case_id']}", headers=analyst).json()
+        kinds = [e["kind"] for e in timeline["timeline"]]
+        assert "appeal_filed" in kinds and "appeal_approved" in kinds
+
+
+def test_an_appeal_never_releases_money_to_confirmed_fraud(client, tokens, p, replayed, spare):
+    service, analyst, supervisor = tokens("upay-core"), tokens("analyst1"), tokens("supervisor1")
+    body, result = held_payment(client, tokens, p, spare)
+    assert result["decision"]["cue"] == "reported_recipient"
+    appeal = _appeal(client, service, body, relation="friend").json()
+    case_id = result["decision"]["case_id"]
+    client.post(f"/v1/cases/{case_id}/escalate", headers=analyst, json={"reason": REASON})
+    path = f"/v1/appeals/{appeal['id']}"
+    refused = client.post(f"{path}/reject", headers=analyst, json={"note": REASON})
+    assert refused.status_code == 403 and refused.json()["error"]["code"] == "needs_supervisor"
+    blocked = client.post(f"{path}/approve", headers=supervisor, json={"note": REASON})
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "recipient_confirmed_fraud"
+    rejected = client.post(f"{path}/reject", headers=supervisor, json={"note": REASON})
+    assert rejected.status_code == 200, rejected.text
+    assert (rejected.json()["released"], rejected.json()["txn_status"]) == (False, "held")
+    with p.sessions() as s:
+        assert s.get(Transaction, body["txn_id"]).status == "held"  # the case still decides
+        assert body["txn_id"] not in set(feedback.labels(s)["txn_id"])  # no label from a rejection
+
+
+def test_an_appeal_against_a_warning_is_feedback_and_moves_no_money(client, tokens, p, replayed):
+    staff = tokens("analyst2")
+    body = _pending(client, tokens, p, "warn")
+    txn_id = body["txn_id"]
+    # The warning names the scam it looks like, for the app to explain in words.
+    assert _scored[txn_id]["decision"]["cue"] in {
+        "impersonation", "prize", "investment", "wrong_send", "not_you", "generic",
+        "reported_recipient",
+    }  # fmt: skip
+    # The demo phone files it as the app would.
+    filed = client.post(
+        "/v1/demo/appeal",
+        headers=staff,
+        json={"txn_id": txn_id, "relation": "seller", "reason": "I buy from this shop every week"},
+    )
+    assert filed.status_code == 201, filed.text
+    appeal = filed.json()
+    assert appeal["tier"] == "warn" and appeal["txn_status"] == "pending_customer"
+    waited = _at(appeal["sla_due_at"]) - _at(appeal["filed_at"])
+    assert waited.total_seconds() == 24 * 3600  # nothing waits on it
+    shown = client.get("/v1/demo/appeal", headers=staff, params={"txn_id": txn_id}).json()
+    assert shown["id"] == appeal["id"]
+    done = client.post(
+        f"/v1/appeals/{appeal['id']}/approve", headers=tokens("analyst1"), json={"note": REASON}
+    )
+    assert done.status_code == 200
+    # The customer still decides a warning; an appeal never answers for them.
+    assert (done.json()["released"], done.json()["txn_status"]) == (False, "pending_customer")
+
+    allowed = _pending(client, tokens, p, "allow")
+    nothing = client.post(
+        "/v1/demo/appeal",
+        headers=staff,
+        json={"txn_id": allowed["txn_id"], "relation": "none", "reason": "just checking"},
+    )
+    assert nothing.status_code == 409 and nothing.json()["error"]["code"] == "not_appealable"
 
 
 def test_a_customer_report_opens_a_case(client, tokens, p, replayed, spare):

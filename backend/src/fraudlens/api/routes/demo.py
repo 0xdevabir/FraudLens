@@ -21,12 +21,14 @@ from sqlalchemy.orm import Session
 
 from ...decision.policy import TIERS
 from ...features.engine import DISTRICT_COORDS, MIN_NETWORK_HISTORY
+from ...platform import appeals as appeal_flow
 from ...platform import cases as workflow
 from ...platform.audit import WorkflowError, audit
 from ...platform.events import Identifier, TxnIn
 from ...platform.models import Decision, Transaction
 from ..deps import Db, Plat, Platform, Staff
 from ..schemas import (
+    DemoAppeal,
     DemoClock,
     DemoPayment,
     DemoResponse,
@@ -36,6 +38,7 @@ from ..schemas import (
     ScamReport,
 )
 from ..views import result_view
+from .appeals import customer_appeal_view, find_appeal
 from .customer import _limit, check_recipient, check_text, verify_payment
 
 router = APIRouter(prefix="/demo", tags=["demo"])
@@ -210,6 +213,30 @@ def report(body: ScamReport, p: Plat, ctx: Staff) -> dict:
         body.category, body.description,
     )  # fmt: skip
     return {"report_id": made.id, "case_id": made.case_id}
+
+
+def _sender(s: Session, txn_id: int) -> str:
+    sender = s.scalar(select(Transaction.sender_id).where(Transaction.txn_id == txn_id))
+    if sender is None:
+        raise WorkflowError(404, "txn_not_found", "no such transaction")
+    return sender
+
+
+@router.post("/appeal", status_code=201)
+def appeal(body: DemoAppeal, p: Plat, s: Db, ctx: Staff) -> dict:
+    """The demo customer's 'this is a genuine payment'. A reviewer answers it on /appeals."""
+    sender = _sender(s, body.txn_id)
+    _limit(p.report_limit, f"appeal:{sender}")
+    made = appeal_flow.file_appeal(p.scorer, ctx, sender, body.txn_id, body.relation, body.reason)
+    return customer_appeal_view(p, s, made)
+
+
+@router.get("/appeal")
+def appeal_status(
+    txn_id: Annotated[int, Query(ge=0, lt=2**62)], p: Plat, s: Db, ctx: Staff
+) -> dict:
+    """Where the demo customer's appeal stands, as their app would show it."""
+    return customer_appeal_view(p, s, find_appeal(s, _sender(s, txn_id), txn_id))
 
 
 @router.post("/recipient-check")

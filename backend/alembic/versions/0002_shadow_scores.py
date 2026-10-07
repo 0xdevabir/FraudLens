@@ -28,7 +28,10 @@ def upgrade() -> None:
         sa.Column("tier", sa.String(length=8), nullable=False),
         sa.Column("latency_ms", sa.Float(), nullable=True),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.CheckConstraint(
             "tier IN ('allow', 'warn', 'step_up', 'hold')", name=op.f("ck_shadow_scores_tier")

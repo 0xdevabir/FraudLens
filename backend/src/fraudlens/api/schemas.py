@@ -121,6 +121,32 @@ class ScamReport(Body):
     ]
 
 
+AppealReason = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=3, max_length=500)
+]
+Relation = Literal[
+    "family", "friend", "business", "seller", "landlord", "employer", "other", "none"
+]
+
+
+class AppealIn(Body):
+    """'This is a genuine payment.' Typed by the customer: shown masked, never read to decide."""
+
+    wallet_id: Identifier
+    relation: Relation
+    reason: AppealReason
+
+
+class DemoAppeal(Body):
+    txn_id: int = Field(ge=0, lt=2**62)
+    relation: Relation
+    reason: AppealReason
+
+
+class AppealDecision(Body):
+    note: Reason
+
+
 class MessageCheck(Body):
     """A message the customer received and wants checked. It is read, never stored."""
 
