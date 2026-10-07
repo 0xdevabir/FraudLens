@@ -23,6 +23,7 @@ from ..platform.audit import WorkflowError
 from ..platform.callbacks import Dispatcher
 from ..platform.db import make_engine, make_sessions
 from ..platform.graph import Graph
+from ..platform.notify import Dispatcher as Notifier
 from ..platform.scoring import Scorer
 from ..platform.security import RateLimiter, check_production
 from ..platform.stream import Worker
@@ -30,8 +31,10 @@ from .deps import Platform
 from .middleware import RequestContext, error_body
 from .routes import (
     alerts,
+    apikeys,
     appeals,
     auth,
+    blocklist,
     cases,
     consortium,
     customer,
@@ -41,7 +44,9 @@ from .routes import (
     mlops,
     network,
     ops,
+    public,
     scoring,
+    webhooks,
 )
 
 log = logging.getLogger(__name__)
@@ -96,6 +101,10 @@ def build_platform(settings: Settings) -> Platform:
         # Tighter: each call is a question about the ledger.
         proof_limit=RateLimiter(redis, "payment-verify", 10, 60),
         callbacks=Dispatcher(settings, sessions, redis) if settings.ingest_keyring else None,
+        dispatcher=Notifier(sessions, settings),
+        # Following a report needs no account, so it is limited hard: per address and per report.
+        public_ip_limit=RateLimiter(redis, "public-ip", 30, 3600),
+        public_ref_limit=RateLimiter(redis, "public-ref", 5, 3600),
     )
 
 
@@ -124,6 +133,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 name="fraudlens-follower",
                 daemon=True,
             ).start()
+        if settings.run_dispatcher:
+            platform.dispatcher.start()
         log.info("fraudlens api ready: scoring in %s mode", platform.scorer.mode)
         try:
             yield
@@ -132,8 +143,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 platform.callbacks.stop()
             following.set()
             platform.worker.stop()
-            if platform.worker.is_alive():
-                platform.worker.join(timeout=5.0)
+            platform.dispatcher.stop()
+            for thread in (platform.worker, platform.dispatcher):
+                if thread.is_alive():
+                    thread.join(timeout=5.0)
             await app.state.aredis.aclose()
             platform.redis.close()
             platform.db.dispose()
@@ -209,6 +222,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ops,
         mlops,
         consortium,
+        blocklist,
+        webhooks,
+        apikeys,
+        public,
     ):
         app.include_router(module.router, prefix="/v1")
     if not settings.production:  # stand-ins for the customer app; see routes/demo.py

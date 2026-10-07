@@ -37,6 +37,9 @@ TXN_STATUS = ("completed", "pending_customer", "held", "cancelled", "blocked", "
 TXN_SOURCE = ("history", "replay", "live")
 CASE_STATUS = ("open", "in_review", "escalated", "closed")
 VERDICTS = ("confirmed_fraud", "legitimate", "inconclusive")
+# Why a reviewer called an alert legitimate. For analysis and policy review only:
+# nothing trains on a reason code (see mlops/feedback.py).
+REASON_CODES = ("known_recipient", "family_transfer", "merchant", "new_phone", "other")
 CASE_SOURCE = ("alert", "customer_report", "manual")
 FREEZE_STATUS = ("pending", "approved", "rejected")
 APPEAL_STATUS = ("pending", "approved", "rejected")
@@ -51,6 +54,11 @@ APPEAL_RELATIONS = (
     "other",
     "none",
 )
+BLOCK_KINDS = ("wallet", "phone", "url")
+BLOCK_SOURCES = ("manual", "verdict", "import")
+REVIEW_STATUS = ("approved", "changes_requested")
+DELIVERY_KINDS = ("webhook", "sms")
+DELIVERY_STATUS = ("pending", "delivered", "dead")
 
 
 def _one_of(column: str, values: tuple[str, ...]) -> str:
@@ -155,6 +163,9 @@ class Case(Base):
         CheckConstraint(_one_of("source", CASE_SOURCE), name="source"),
         CheckConstraint(f"verdict IS NULL OR {_one_of('verdict', VERDICTS)}", name="verdict"),
         CheckConstraint("(status = 'closed') = (verdict IS NOT NULL)", name="closed_has_verdict"),
+        CheckConstraint(
+            f"reason_code IS NULL OR {_one_of('reason_code', REASON_CODES)}", name="reason_code"
+        ),
         # One open investigation per wallet: new alerts on it join the same case.
         Index(
             "uq_cases_open_subject",
@@ -174,6 +185,7 @@ class Case(Base):
     opened_at: Mapped[datetime] = mapped_column(Timestamp)
     sla_due_at: Mapped[datetime | None] = mapped_column(Timestamp)
     verdict: Mapped[str | None] = mapped_column(String(20))
+    reason_code: Mapped[str | None] = mapped_column(String(24))
     closed_at: Mapped[datetime | None] = mapped_column(Timestamp)
     closed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
@@ -328,6 +340,8 @@ class CustomerReport(Base):
     reporter_id: Mapped[str] = mapped_column(String(32), index=True)
     reported_wallet_id: Mapped[str] = mapped_column(String(32), index=True)
     txn_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("transactions.txn_id"))
+    # What the customer is given to follow the report (`FL-XXXX-XXXX`); see platform/tracking.py.
+    reference: Mapped[str | None] = mapped_column(String(16), unique=True)
     category: Mapped[str] = mapped_column(String(24))
     # Free text typed by a customer: shown to analysts, never used to decide anything.
     description: Mapped[str] = mapped_column(Text)
@@ -399,3 +413,131 @@ class AuditLog(Base):
     detail: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     request_id: Mapped[str | None] = mapped_column(String(64))
     ip: Mapped[str | None] = mapped_column(String(64))
+
+
+class BlocklistEntry(Base):
+    """A wallet, phone number or web domain known to be used for fraud.
+
+    A match can raise the tier of a payment (policy rule R08) and flag a message;
+    it never blocks money by itself. Entries are removed, not deleted, so the
+    list's history stays readable.
+    """
+
+    __tablename__ = "blocklist"
+    __table_args__ = (
+        CheckConstraint(_one_of("kind", BLOCK_KINDS), name="kind"),
+        CheckConstraint(_one_of("source", BLOCK_SOURCES), name="source"),
+        # One live entry per value: a re-add after a removal is a new row.
+        Index(
+            "uq_blocklist_active",
+            "kind",
+            "value",
+            unique=True,
+            postgresql_where=text("removed_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(8))
+    value: Mapped[str] = mapped_column(String(255))  # normalised, see platform/blocklist.py
+    reason: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(12))
+    case_id: Mapped[int | None] = mapped_column(ForeignKey("cases.id"))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))  # NULL: the system
+    expires_at: Mapped[datetime | None] = mapped_column(Timestamp)
+    removed_at: Mapped[datetime | None] = mapped_column(Timestamp)
+    removed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    remove_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
+
+
+class TranslationReview(Base):
+    """A person's sign-off on one Bangla text. `text_hash` ties it to the exact wording:
+    when the text changes, the sign-off no longer applies."""
+
+    __tablename__ = "translation_reviews"
+    __table_args__ = (
+        CheckConstraint(_one_of("status", REVIEW_STATUS), name="status"),
+        Index("ix_translation_reviews_key", "key", text("id DESC")),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(120))
+    text_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20))
+    reviewer_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    reviewer_name: Mapped[str] = mapped_column(String(120))  # who the translator is, as signed
+    note: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
+
+
+class WebhookEndpoint(Base):
+    """Where the platform tells another system what happened. The secret signs each
+    delivery; it is shown once when set and never returned afterwards."""
+
+    __tablename__ = "webhook_endpoints"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    url: Mapped[str] = mapped_column(String(500))
+    description: Mapped[str] = mapped_column(String(200), server_default="")
+    secret: Mapped[str] = mapped_column(String(128))
+    events: Mapped[list[str]] = mapped_column(ARRAY(String(40)))
+    active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    consecutive_failures: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
+
+
+class Delivery(Base):
+    """One message to send: a webhook call or a customer SMS. Written in the same
+    transaction as the change it reports, so it exists exactly when the change does;
+    a dispatcher sends it later, retrying with backoff. `dead` is the dead-letter state."""
+
+    __tablename__ = "deliveries"
+    __table_args__ = (
+        CheckConstraint(_one_of("kind", DELIVERY_KINDS), name="kind"),
+        CheckConstraint(_one_of("status", DELIVERY_STATUS), name="status"),
+        Index(
+            "ix_deliveries_due",
+            "next_attempt_at",
+            postgresql_where=text("status = 'pending'"),
+        ),
+        Index("ix_deliveries_endpoint", "endpoint_id", text("id DESC")),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(8))
+    endpoint_id: Mapped[int | None] = mapped_column(
+        ForeignKey("webhook_endpoints.id", ondelete="CASCADE")
+    )
+    event_type: Mapped[str] = mapped_column(String(40))
+    event_id: Mapped[str] = mapped_column(String(40))  # the receiver's idempotency key
+    payload: Mapped[dict] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(10), server_default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    next_attempt_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
+    last_status_code: Mapped[int | None] = mapped_column(Integer)
+    last_error: Mapped[str | None] = mapped_column(String(300))
+    delivered_at: Mapped[datetime | None] = mapped_column(Timestamp)
+    created_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
+
+
+class ApiKey(Base):
+    """A partner's credential for the scoring endpoints. Only a hash is kept; the key
+    itself is shown once, when it is made."""
+
+    __tablename__ = "api_keys"
+    __table_args__ = (CheckConstraint("rate_per_minute > 0", name="rate_positive"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(80))
+    prefix: Mapped[str] = mapped_column(String(12), unique=True)  # the visible start of the key
+    key_hash: Mapped[str] = mapped_column(String(64))
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(String(16)))
+    sandbox: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    rate_per_minute: Mapped[int] = mapped_column(Integer, server_default=text("600"))
+    daily_quota: Mapped[int | None] = mapped_column(Integer)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(Timestamp, server_default=func.now())
+    last_used_at: Mapped[datetime | None] = mapped_column(Timestamp)
+    revoked_at: Mapped[datetime | None] = mapped_column(Timestamp)

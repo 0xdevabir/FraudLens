@@ -53,7 +53,9 @@ from ..features import SCORED_TYPES, FeatureEngine, Txn
 from ..intel.memory import MessageMemory, escalate
 from ..mlops.shadow import Shadow
 from ..models import registry
+from . import notify
 from .audit import WorkflowError
+from .blocklist import wallets as blocklist_wallets
 from .events import FlagEvent, TxnEvent, moment
 from .models import (
     Agent,
@@ -218,6 +220,7 @@ class Scorer:
         self.engine = FeatureEngine()
         self.clock = Clock(0.0)
         self.frozen: set[str] = set()
+        self.blocklist: dict[str, float | None] = {}  # listed wallets -> expiry (epoch) or None
         self.messages = MessageMemory()  # flagged messages a payment may follow
         self.mule_scores: dict[str, float] = {}  # wallets the mule model has alerted on
         self.seq = 0  # last position of the log applied to this replica
@@ -279,6 +282,7 @@ class Scorer:
                 engine.register_agent(a.agent_id, a.district)
             seq, applied, flagged = self._replay(s, engine, 0)
             frozen = set(s.scalars(select(Wallet.wallet_id).where(Wallet.status == "frozen")))
+            blocklist = blocklist_wallets(s)
             mule_scores: dict[str, float] = {}
             if self.decision.mule_threshold is not None:
                 top = func.max(Decision.scores["mule"].as_float())
@@ -292,6 +296,7 @@ class Scorer:
                 )
         with self.lock:
             self.engine, self.frozen, self.mule_scores = engine, frozen, mule_scores
+            self.blocklist = blocklist
             self.seq, self._frozen_seen = seq, version
             self.ready = True
             self.clock = Clock(engine.last_ts)
@@ -366,6 +371,7 @@ class Scorer:
         version = self._frozen_version()
         if version is None or version != self._frozen_seen:
             self.frozen = set(s.scalars(select(Wallet.wallet_id).where(Wallet.status == "frozen")))
+            self.blocklist = blocklist_wallets(s)
             self._frozen_seen = version
         seq, applied, flagged = self._replay(s, self.engine, self.seq)
         if applied or flagged:
@@ -632,6 +638,8 @@ class Scorer:
             case_id = self._attach_to_case(s, item.txn, item.decision.tier)
             item.row["case_id"] = item.result.decision["case_id"] = case_id
             item.result.alert["case_id"] = case_id
+            if item.source == "live":  # a replay or a history load tells nobody
+                self._announce(s, item.txn, item.decision, item.result, case_id)
         s.flush()
         s.execute(insert(Decision), [item.row for item in scored])
         shadow_rows = [item.shadow for item in scored if item.shadow is not None]
@@ -705,7 +713,7 @@ class Scorer:
 
         t0 = time.perf_counter()
         features = self.engine.features(t)
-        context = context_from_engine(self.engine, t)
+        context = context_from_engine(self.engine, t, self.blocklist)
         result = Result(t.txn_id, "completed", scored=True)
         item = Scored(result, t, event.source, features, context, when)
         # Paid what a flagged message asked: read here, under the lock, with the clock.
@@ -816,6 +824,22 @@ class Scorer:
         s.add(CaseEvent(case_id=case.id, kind=kind, data={"txn_id": t.txn_id, "tier": tier}))
         return case.id
 
+    def _announce(
+        self, s: Session, t: Txn, decision: EngineDecision, result: Result, case_id: int | None
+    ) -> None:
+        """Queue the webhook and SMS for a live alert, inside the same transaction."""
+        event = f"decision.{decision.tier}"
+        sms = None
+        message = decision.customer_message
+        if self.settings.notify_adapter != "off" and decision.tier in notify.SMS_TIERS and message:
+            sms = {"wallet_id": t.sender_id, "text_bn": message["bn"], "text_en": message["en"]}
+        notify.enqueue(
+            s, event,
+            {"txn_id": t.txn_id, "tier": decision.tier, "status": result.status,
+             "case_id": case_id, "sender_id": t.sender_id},
+            sms=sms,
+        )  # fmt: skip
+
     def _publish(self, alerts: list[dict]) -> None:
         if not alerts or self.redis is None:
             return
@@ -844,10 +868,11 @@ class Scorer:
                     s.execute(SEQUENCE_LOCK)
                     s.execute(CASES_LOCK)
                     self.refresh(s)
-                    frozen = set(self.frozen)
+                    frozen, listed = set(self.frozen), dict(self.blocklist)
                     yield s
-                    if self.frozen != frozen and self.redis is not None:
-                        # Other replicas re-read the frozen set before they score again.
+                    changed = self.frozen != frozen or self.blocklist != listed
+                    if changed and self.redis is not None:
+                        # Other replicas re-read the frozen and listed wallets before scoring.
                         self._frozen_seen = int(self.redis.incr(self._frozen_key))
                     s.commit()
                 except WorkflowError:
@@ -861,6 +886,11 @@ class Scorer:
 
     def now(self) -> datetime:
         return moment(self.clock.now())
+
+    def load_blocklist(self, s: Session) -> None:
+        """Re-read the listed wallets, inside the change that altered them."""
+        with self.lock:
+            self.blocklist = blocklist_wallets(s)
 
     # The methods below are called inside `transaction()`.
 
@@ -913,4 +943,6 @@ class Scorer:
                 if party not in known[kind]:
                     raise KeyError(party)  # scoring it would create state for it
             features = self.engine.features(t)
-            return self.decision.decide(t, features, context_from_engine(self.engine, t))
+            return self.decision.decide(
+                t, features, context_from_engine(self.engine, t, self.blocklist)
+            )

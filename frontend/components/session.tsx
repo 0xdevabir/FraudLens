@@ -46,6 +46,7 @@ const NAV: { heading: string; items: { href: string; label: string; roles: Role[
       { href: "/cases", label: "Cases", roles: ["analyst", "supervisor"] },
       { href: "/approvals", label: "Freeze approvals", roles: ["analyst", "supervisor"] },
       { href: "/appeals", label: "Customer appeals", roles: ["analyst", "supervisor"] },
+      { href: "/blocklist", label: "Blocklist", roles: ["analyst", "supervisor"] },
     ],
   },
   {
@@ -65,6 +66,8 @@ const NAV: { heading: string; items: { href: string; label: string; roles: Role[
       { href: "/policy", label: "Decision policy", roles: ["analyst", "supervisor", "admin"] },
       { href: "/fraud-types", label: "Fraud types", roles: ["analyst", "supervisor", "admin"] },
       { href: "/audit", label: "Audit log", roles: ["supervisor", "admin"] },
+      { href: "/webhooks", label: "Webhooks", roles: ["supervisor", "admin"] },
+      { href: "/api-keys", label: "Partner API keys", roles: ["supervisor", "admin"] },
     ],
   },
   {

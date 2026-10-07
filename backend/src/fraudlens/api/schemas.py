@@ -13,7 +13,10 @@ from pydantic import (
     model_validator,
 )
 
+from ..platform.apikeys import SCOPES
 from ..platform.events import EventIn, Identifier
+from ..platform.models import BLOCK_KINDS, REASON_CODES, REVIEW_STATUS
+from ..platform.notify import EVENTS
 
 Reason = Annotated[str, StringConstraints(strip_whitespace=True, min_length=10, max_length=2000)]
 
@@ -57,6 +60,9 @@ class Escalate(Body):
 class Verdict(Body):
     verdict: Literal["confirmed_fraud", "legitimate", "inconclusive"]
     note: Reason
+    reason_code: Literal[REASON_CODES] | None = Field(
+        default=None, description="why a legitimate alert was a false alarm"
+    )
 
 
 class FreezeRequestIn(Body):
@@ -167,3 +173,56 @@ class PaymentVerify(Body):
         if self.txn_id is None and self.amount is None and not self.message.strip():
             raise ValueError("give a transaction ID, an amount or the message you were shown")
         return self
+
+
+class BlocklistAdd(Body):
+    kind: Literal[BLOCK_KINDS]
+    value: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+    reason: Reason
+    expires_in_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class BlocklistRow(Body):
+    kind: Literal[BLOCK_KINDS]
+    value: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+
+
+class BlocklistImport(Body):
+    reason: Reason
+    entries: list[BlocklistRow] = Field(min_length=1, max_length=500)
+
+
+class BlocklistRemove(Body):
+    reason: Reason
+
+
+class TranslationSignoff(Body):
+    status: Literal[REVIEW_STATUS]
+    reviewer_name: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=2, max_length=120)
+    ]
+    note: Annotated[str, StringConstraints(strip_whitespace=True, max_length=1000)] | None = None
+
+
+class WebhookCreate(Body):
+    url: Annotated[str, StringConstraints(strip_whitespace=True, min_length=8, max_length=500)]
+    description: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] = ""
+    events: list[Literal[tuple(e for e in EVENTS if e != "test.ping")]] = Field(
+        min_length=1, max_length=8
+    )
+
+
+class ApiKeyCreate(Body):
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=80)]
+    scopes: list[Literal[SCOPES]] = Field(min_length=1, max_length=len(SCOPES))
+    sandbox: bool = False
+    rate_per_minute: int = Field(default=600, ge=1, le=100_000)
+    daily_quota: int | None = Field(default=None, ge=1, le=100_000_000)
+
+
+class ReportOtpRequest(Body):
+    reference: Annotated[str, StringConstraints(strip_whitespace=True, min_length=6, max_length=20)]
+
+
+class ReportStatusRequest(ReportOtpRequest):
+    code: Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^[0-9]{6}$")]

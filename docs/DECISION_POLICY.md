@@ -11,10 +11,15 @@ records the validation measurements made when the rules were chosen, on the
 previous model, and was not repeated for v4. The data is synthetic
 ([DATA_ASSUMPTIONS.md](DATA_ASSUMPTIONS.md)).
 
-Code: `backend/src/fraudlens/decision/`. Policy file:
+Code: `backend/src/fraudlens/decision/`. Policy file served by default:
 `backend/src/fraudlens/decision/policies/v2.yaml`, which is v1 plus the three
 behaviour rules of §3 (R05–R07). `v1.yaml` is kept unchanged, so decisions recorded
-under it can still be reproduced.
+under it can still be reproduced. `v3.yaml` adds segment cut-offs (§11). `v4.yaml` is
+v3 plus **R08**, which raises a payment to a blocklisted wallet to *step-up* (the
+sender verifies and waits; it never holds or blocks money by itself). R08 only
+applies under v4 (`FRAUDLENS_POLICY_VERSION=v4`). The blocklist is live state that the
+offline evaluation does not have, so R08 never fires there and the measurements below
+are the same under v4 as under v3.
 
 ## 1. What a decision answers
 

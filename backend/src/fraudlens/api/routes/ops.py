@@ -47,7 +47,11 @@ def ready(p: Plat, response: Response) -> dict:
     ok = all(checks.values())
     if not ok:
         response.status_code = 503
-    return {"status": "ready" if ok else "not_ready", "checks": checks, "mode": p.scorer.mode}
+    return {
+        "status": "ready" if ok else "not_ready",
+        "checks": checks,
+        "mode": p.scorer.mode,
+    }
 
 
 @router.get("/audit")

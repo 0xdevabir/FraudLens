@@ -1,6 +1,7 @@
 """Paths and runtime settings shared by every layer."""
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
@@ -40,6 +41,22 @@ class Settings(BaseSettings):
     worker_port: int = 8081  # /health, /ready, /metrics
     claim_idle_ms: int = 30_000  # a pending entry idle this long is taken from its consumer
     follow_interval_s: float = 0.5  # how often the API's replica catches up with the log
+
+    # How often the worker records cases past their review deadline (0: never). A breach
+    # is always written to the timeline; with `sla_auto_escalate` the case also goes to
+    # the supervisors. The held money stays held either way.
+    sla_sweep_seconds: int = 60
+    sla_auto_escalate: bool = False
+
+    # Outbound messages: webhooks to other systems and SMS/push to customers. Both go
+    # through the `deliveries` outbox and are retried; see platform/notify.py.
+    run_dispatcher: bool = True  # send them from inside the API process
+    delivery_max_attempts: int = 6  # then the delivery is dead-lettered
+    # Webhook URLs must be public https by default. Private addresses are for local tests.
+    webhook_allow_private: bool = False
+    notify_adapter: Literal["off", "console", "http"] = "off"
+    sms_gateway_url: str | None = None
+    sms_gateway_token: SecretStr | None = None
 
     # Signing key for access tokens. The default is for local development only;
     # the API refuses to start with it when environment == "production".

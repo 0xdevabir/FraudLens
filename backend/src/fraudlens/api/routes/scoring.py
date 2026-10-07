@@ -5,13 +5,14 @@ from __future__ import annotations
 import time
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 
+from ...platform import sandbox
 from ...platform.audit import Ctx, WorkflowError, audit
 from ...platform.events import FlagIn, TxnIn
 from ...platform.scoring import clean
 from ...platform.stream import MAX_BACKLOG, enqueue
-from ..deps import REVIEWERS, Plat, Service, require
+from ..deps import REVIEWERS, EventsCaller, Plat, ScoreCaller, Service, require
 from ..schemas import Events
 from ..views import result_view
 
@@ -19,9 +20,15 @@ router = APIRouter(tags=["scoring"])
 
 
 @router.post("/score")
-def score(body: TxnIn, p: Plat, ctx: Service) -> dict:
+def score(body: TxnIn, request: Request, p: Plat, ctx: ScoreCaller) -> dict:
     """Decide on one transaction, synchronously. Safe to retry: the same `txn_id`
-    returns the recorded outcome with `duplicate: true`."""
+    returns the recorded outcome with `duplicate: true`.
+
+    Authenticate with the service account's token or a partner API key (`X-API-Key`).
+    A sandbox key gets a canned decision chosen by the cents of the amount (.01 allow,
+    .02 warn, .03 step_up, .04 hold) and changes nothing."""
+    if request.state.sandbox:
+        return sandbox.score(body, p.scorer.policy)
     [result] = p.scorer.process([body.event()])
     if result.status == "stale":
         raise WorkflowError(
@@ -66,8 +73,11 @@ def what_if(
 
 
 @router.post("/events", status_code=202)
-def events(body: Events, p: Plat, ctx: Service) -> dict:
-    """Queue events for asynchronous scoring, in order. Alerts appear on the live feed."""
+def events(body: Events, request: Request, p: Plat, ctx: EventsCaller) -> dict:
+    """Queue events for asynchronous scoring, in order. Alerts appear on the live feed.
+    A sandbox key is told the events were accepted and nothing is queued."""
+    if request.state.sandbox:
+        return {"accepted": len(body.events), "sandbox": True}
     backlog = p.worker.backlog()
     if backlog > MAX_BACKLOG:
         raise WorkflowError(

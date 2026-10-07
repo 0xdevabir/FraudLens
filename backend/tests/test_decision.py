@@ -713,8 +713,14 @@ def test_context_comes_from_the_confirmed_fraud_flags(world):
     engine = FeatureEngine()
     txn = next(iter_txns(world.txns[world.txns["type"] == "SEND_MONEY"].iloc[[0]].reset_index()))
     context = context_from_engine(engine, txn)
-    assert set(context) == set(policy_eval.CONTEXT_COLUMNS)
+    # The blocklist is live state: the offline frames have no column for it.
+    assert set(context) - {"recipient_blocklisted"} == set(policy_eval.CONTEXT_COLUMNS)
     assert context["sender_flagged"] == 0 and context["recipient_flagged"] == 0
+    assert context["recipient_blocklisted"] == 0
+    listed = {txn.receiver_id: None, "W-other": 1.0}
+    assert context_from_engine(engine, txn, listed)["recipient_blocklisted"] == 1
+    expired = {txn.receiver_id: txn.ts - 1}
+    assert context_from_engine(engine, txn, expired)["recipient_blocklisted"] == 0
     # A wallet with no history has no habits to compare against.
     assert math.isnan(context["s_place_share"]) and math.isnan(context["s_network_share"])
     engine.flagged[txn.receiver_id] = txn.ts - 60
@@ -784,3 +790,30 @@ def test_policy_evaluation_runs_end_to_end(trained):
     assert single["case_notes_failing_grounding"] == 0, single["grounding_failures"]
     assert single["alerts_without_a_raising_reason"] == 0
     assert not math.isnan(single["decide_ms"]["p95"])
+
+
+# ------------------------------------------- v4: the blocklist
+
+
+def test_v4_keeps_v3_and_adds_only_the_blocklist_rule():
+    v3, v4 = load_policy("v3"), load_policy("v4")
+    assert v4.rules[: len(v3.rules)] == v3.rules
+    assert [r.id for r in v4.rules[len(v3.rules) :]] == ["R08_RECIPIENT_ON_BLOCKLIST"]
+    assert v4.tiers == v3.tiers and v4.messages == v3.messages and v4.fallback == v3.fallback
+    assert v4.segments == v3.segments
+    assert not any(rule.hard for rule in v4.rules[len(v3.rules) :])
+
+
+def test_a_listed_receiver_asks_for_verification_and_never_holds_on_its_own():
+    v4 = load_policy("v4")
+    listed = {"recipient_blocklisted": 1.0}
+    outcome = apply_policy(v4, "SEND_MONEY", listed, LOW, THRESHOLDS)
+    assert (outcome.tier, outcome.decided_by) == ("step_up", "rule:R08_RECIPIENT_ON_BLOCKLIST")
+    # A cash-out is not a payment to the listed wallet, and a model hold is left alone.
+    assert apply_policy(v4, "CASH_OUT", listed, LOW, THRESHOLDS).tier == "allow"
+    assert apply_policy(v4, "SEND_MONEY", listed, HIGH, THRESHOLDS).tier == "hold"
+    # Without the fact (an offline frame, an unlisted wallet) the rule says nothing.
+    assert apply_policy(v4, "SEND_MONEY", {}, LOW, THRESHOLDS).tier == "allow"
+    assert apply_policy(v4, "SEND_MONEY", {"recipient_blocklisted": 0.0}, LOW, THRESHOLDS).tier == (
+        "allow"
+    )

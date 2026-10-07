@@ -32,6 +32,7 @@ ALERT_TIERS = TIERS[1:]
 CONTEXT_FIELDS = (
     "sender_flagged",
     "recipient_flagged",
+    "recipient_blocklisted",
     "recipient_mule_alert",
     *BEHAVIOUR_FIELDS,
 )

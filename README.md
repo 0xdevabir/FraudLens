@@ -16,7 +16,7 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
 ![Redis Streams](https://img.shields.io/badge/Redis-Streams-DC382D?logo=redis&logoColor=white)
 ![Tailwind](https://img.shields.io/badge/Tailwind-v4-06B6D4?logo=tailwindcss&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-203-success)
+![Tests](https://img.shields.io/badge/tests-435-success)
 ![Served = evaluated](https://img.shields.io/badge/served%20vs%20offline-0%20differences-success)
 
 [Quick start](#-run-it-in-one-command) · [How it works](#-how-it-works) · [Results](#-results) · [Console tour](#%EF%B8%8F-console-tour) · [Three-minute demo](#-three-minute-demo) · [Limits](#%EF%B8%8F-what-this-is-not)
@@ -151,7 +151,10 @@ The warning a customer reads before sending to a suspected mule:
 | **Executive summary** | Money stopped, customers interrupted, reviewer backlog and decision latency, from the live service |
 | **Impact simulator** | The trade-off between fraud stopped and customers interrupted, at any threshold |
 | **Alert queue → Payment** | Reasons, rule trace, similar past cases, the customer's message and recommended next steps |
-| **Cases** | One case per wallet with a review deadline: assign, note, escalate, give a verdict |
+| **Cases** | One case per wallet with a review deadline (on time, due soon, overdue), a workload board per reviewer, filters, saved views and CSV export; a false-alarm verdict can say why |
+| **Blocklist** | Wallets, phone numbers and domains known to be used for fraud. A listed wallet asks the sender to verify and wait; it never blocks money by itself |
+| **Webhooks · Partner API keys** | Signed, retried webhooks and customer SMS; scoped, rate-limited partner keys with a sandbox that returns every outcome on demand ([PARTNER_API.md](docs/PARTNER_API.md)) |
+| **Follow a report** (`/track`) | A customer enters the reference they were given, gets a code on their phone, and sees where the report stands, in Bangla or English |
 | **Freeze approvals** | The second person of the two-person rule |
 | **Network explorer · Mule rings · Agent risk** | Follow the money, see shared handsets, rank agents against their peers |
 | **Model monitoring** | Performance by tier and scam type, drift, the model registry, shadow mode, the feedback loop |
@@ -334,7 +337,7 @@ FraudLens/
 │   │   ├── platform/    # scorer, cases, freezes, stream worker, audit
 │   │   ├── mlops/       # verdicts as labels, retraining, shadow, drift
 │   │   └── api/         # HTTP routes, schemas, middleware
-│   └── tests/           # 203 tests
+│   └── tests/           # 435 tests
 ├── frontend/            # the analyst console
 ├── docs/                # architecture, model card, policy, platform, demo script
 ├── docker-compose.yml
@@ -477,7 +480,7 @@ Keep two browser windows open: one as `analyst1`, one private window as `supervi
 - **It is a prototype, not a deployment.** Stream workers scale out, but every one holds the whole feature state and events enter it one at a time, so throughput stops growing at a few workers ([SCALING.md](docs/SCALING.md)). TLS ends at a Caddy proxy, secrets come from files with no vault client, and keys rotate by command, not on a schedule ([SECURITY.md](docs/SECURITY.md)).
 - **The demo scaffolding is not the product.** The demo accounts, the phone demo endpoints and the review simulator exist only outside production mode.
 - **No model output moves or blocks money on its own.** A hold waits for an analyst and a freeze needs two people.
-- **The Bangla texts were written by the developers** and have not been reviewed by a professional translator.
+- **The Bangla texts were written by the developers** and have not been reviewed by a professional translator. The console has a sign-off per text for a translator to use; until it is filled in, they are shown as unreviewed.
 
 The limits of each part are listed in its document under "Limits, stated plainly".
 

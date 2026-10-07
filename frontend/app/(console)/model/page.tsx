@@ -459,6 +459,24 @@ function FeedbackView({ feedback, registry }: { feedback: Feedback; registry?: R
         <Stat label="Inconclusive" value={num(feedback.cases.inconclusive ?? 0)} sub="label nothing: the model learns only from firm verdicts" />
         <Stat label="Latest verdict" value={when(feedback.last_verdict_at)} sub="platform clock, Dhaka time" />
       </div>
+      {feedback.false_alarm_reasons?.length > 0 && (
+        <Card
+          title="Why alerts were false alarms"
+          hint="The reason a reviewer gave when closing a case as legitimate. These are for reading and for the next policy review: the model does not train on them."
+          flush
+        >
+          <Table head={["Reason", "Cases", "Alerts", "Share"]}>
+            {feedback.false_alarm_reasons.map((row) => (
+              <tr key={row.reason_code}>
+                <Td className="font-medium">{words(row.reason_code)}</Td>
+                <Td right>{num(row.cases)}</Td>
+                <Td right>{num(row.alerts)}</Td>
+                <Td right>{pct(row.share)}</Td>
+              </tr>
+            ))}
+          </Table>
+        </Card>
+      )}
       <div className="mt-4 space-y-4">
         {retrained.length ? (
           retrained.map((version) => {

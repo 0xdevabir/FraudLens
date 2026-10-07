@@ -2,15 +2,19 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { ExportButton, SavedViewsBar } from "@/components/filterbar";
+import { useSession } from "@/components/session";
 import { AlertTable } from "@/components/tables";
-import { Async, Badge, Button, Card, Chip, PageHeader } from "@/components/ui";
+import { Async, Badge, Button, Card, Chip, inputClass, PageHeader } from "@/components/ui";
 import { API_URL, authHeaders, qs, useApi } from "@/lib/api";
+import { type Filters, one, toggled, useSavedViews, useUrlFilters } from "@/lib/filters";
 import { num, TIER_LABEL, words } from "@/lib/format";
 import type { Alert, Tier } from "@/lib/types";
 
 const TIERS: Tier[] = ["hold", "step_up", "warn"];
 const STATUSES = ["held", "pending_customer", "blocked", "cancelled", "completed", "rejected"];
 const PAGE = 50;
+const KEYS = ["tier", "status", "q", "amount_min", "amount_max", "district", "since", "until"];
 
 /**
  * The alert stream is server-sent events behind a bearer token, which EventSource cannot send,
@@ -60,20 +64,44 @@ function useAlertStream(onAlert: () => void): boolean {
 }
 
 export default function AlertsPage() {
-  const [tiers, setTiers] = useState<Tier[]>([]);
-  const [statuses, setStatuses] = useState<string[]>([]);
+  const { canApprove } = useSession();
+  const [filters, setFilters, ready] = useUrlFilters(KEYS);
+  const [views, saveView, removeView] = useSavedViews("alerts");
   const [page, setPage] = useState(0);
   const [fresh, setFresh] = useState(0);
+  const [draft, setDraft] = useState<Partial<Record<"q" | "amount_min" | "amount_max" | "district", string>>>({});
+  const query = {
+    tier: filters.tier ?? [],
+    status: filters.status ?? [],
+    q: one(filters, "q"),
+    amount_min: one(filters, "amount_min"),
+    amount_max: one(filters, "amount_max"),
+    district: one(filters, "district"),
+    since: one(filters, "since"),
+    until: one(filters, "until"),
+  };
   const alerts = useApi<{ total: number; alerts: Alert[] }>(
-    `/v1/alerts${qs({ tier: tiers, status: statuses, limit: PAGE, offset: page * PAGE })}`,
+    ready ? `/v1/alerts${qs({ ...query, limit: PAGE, offset: page * PAGE })}` : null,
   );
   const live = useAlertStream(() => {
     setFresh((n) => n + 1);
     if (page === 0) alerts.reload();
   });
 
-  function toggle<T>(list: T[], value: T): T[] {
-    return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
+  function change(next: Filters) {
+    setFilters(next);
+    setPage(0);
+  }
+  const text = (key: "q" | "amount_min" | "amount_max" | "district") => draft[key] ?? one(filters, key);
+  function apply(event: React.FormEvent) {
+    event.preventDefault();
+    const next = { ...filters };
+    for (const key of ["q", "amount_min", "amount_max", "district"] as const) {
+      const value = text(key).trim();
+      next[key] = value ? [value] : [];
+    }
+    change(next);
+    setDraft({});
   }
   const total = alerts.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE));
@@ -87,28 +115,50 @@ export default function AlertsPage() {
           <>
             {fresh > 0 && <Badge tone="blue">{fresh} new since you opened this page</Badge>}
             <Badge tone={live ? "green" : "slate"} title="Server-sent events from the scoring service">{live ? "● Live" : "○ Reconnecting"}</Badge>
+            <ExportButton path={`/v1/alerts.csv${qs(query)}`} name="fraudlens-alerts" canReveal={canApprove} />
           </>
         }
       />
       <Card flush>
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-line px-4 py-3">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-xs font-medium text-fg-3">Tier</span>
-            {TIERS.map((tier) => (
-              <Chip key={tier} on={tiers.includes(tier)} onClick={() => { setTiers(toggle(tiers, tier)); setPage(0); }}>
-                {TIER_LABEL[tier]}
-              </Chip>
-            ))}
+        <div className="space-y-2 border-b border-line px-4 py-3">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-xs font-medium text-fg-3">Tier</span>
+              {TIERS.map((tier) => (
+                <Chip key={tier} on={(filters.tier ?? []).includes(tier)} onClick={() => change(toggled(filters, "tier", tier))}>
+                  {TIER_LABEL[tier]}
+                </Chip>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-xs font-medium text-fg-3">Outcome</span>
+              {STATUSES.map((status) => (
+                <Chip key={status} on={(filters.status ?? []).includes(status)} onClick={() => change(toggled(filters, "status", status))}>
+                  {words(status)}
+                </Chip>
+              ))}
+            </div>
+            <span className="ml-auto text-xs text-fg-3">{alerts.data ? `${num(total)} alerts` : ""}</span>
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-xs font-medium text-fg-3">Outcome</span>
-            {STATUSES.map((status) => (
-              <Chip key={status} on={statuses.includes(status)} onClick={() => { setStatuses(toggle(statuses, status)); setPage(0); }}>
-                {words(status)}
-              </Chip>
-            ))}
-          </div>
-          <span className="ml-auto text-xs text-fg-3">{alerts.data ? `${num(total)} alerts` : ""}</span>
+          <form onSubmit={apply} className="flex flex-wrap items-center gap-2">
+            <input aria-label="Search by payment number or wallet" placeholder="Payment no. or wallet" maxLength={32} pattern="[A-Za-z0-9_\-]*"
+              value={text("q")} onChange={(e) => setDraft({ ...draft, q: e.target.value })} className={`${inputClass} w-48 py-1 text-xs`} />
+            <input aria-label="Smallest amount" placeholder="Min ৳" inputMode="decimal" pattern="[0-9.]*"
+              value={text("amount_min")} onChange={(e) => setDraft({ ...draft, amount_min: e.target.value })} className={`${inputClass} w-24 py-1 text-xs`} />
+            <input aria-label="Largest amount" placeholder="Max ৳" inputMode="decimal" pattern="[0-9.]*"
+              value={text("amount_max")} onChange={(e) => setDraft({ ...draft, amount_max: e.target.value })} className={`${inputClass} w-24 py-1 text-xs`} />
+            <input aria-label="District" placeholder="District" maxLength={40}
+              value={text("district")} onChange={(e) => setDraft({ ...draft, district: e.target.value })} className={`${inputClass} w-32 py-1 text-xs`} />
+            <label className="flex items-center gap-1 text-xs text-fg-3">From
+              <input type="date" value={one(filters, "since").slice(0, 10)} onChange={(e) => change({ ...filters, since: e.target.value ? [`${e.target.value}T00:00:00+06:00`] : [] })} className={`${inputClass} py-1 text-xs`} />
+            </label>
+            <label className="flex items-center gap-1 text-xs text-fg-3">To
+              <input type="date" value={one(filters, "until").slice(0, 10)} onChange={(e) => change({ ...filters, until: e.target.value ? [`${e.target.value}T23:59:59+06:00`] : [] })} className={`${inputClass} py-1 text-xs`} />
+            </label>
+            <Button small type="submit">Apply</Button>
+            <Button small onClick={() => { change({}); setDraft({}); }}>Reset</Button>
+          </form>
+          <SavedViewsBar views={views} current={filters} onApply={change} onSave={saveView} onRemove={removeView} />
         </div>
         <Async state={alerts}>{(data) => <AlertTable alerts={data.alerts} />}</Async>
         <div className="flex items-center justify-between border-t border-line px-4 py-2 text-xs text-fg-3">
