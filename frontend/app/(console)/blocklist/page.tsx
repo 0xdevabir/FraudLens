@@ -129,7 +129,7 @@ export default function BlocklistPage() {
 
   return (
     <>
-      <PageHeader
+      <PageHeader tour="blocklist-header"
         title="Blocklist"
         sub="Wallets, phone numbers and domains known to be used for fraud. A listed wallet asks the sender to verify and wait; nothing here blocks money by itself."
         actions={
@@ -141,7 +141,7 @@ export default function BlocklistPage() {
           )
         }
       />
-      <Card flush>
+      <Card flush tour="blocklist-list">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-line px-4 py-3">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="mr-1 text-xs font-medium text-fg-3">Type</span>

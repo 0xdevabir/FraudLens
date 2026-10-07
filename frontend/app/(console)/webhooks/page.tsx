@@ -101,14 +101,14 @@ export default function WebhooksPage() {
   const pages = Math.max(1, Math.ceil(total / 25));
   return (
     <>
-      <PageHeader
+      <PageHeader tour="webhooks-header"
         title="Webhooks"
         sub="Tell other systems when a payment is warned, stepped up or held, when a case gets a verdict, and when a wallet is frozen. Customers are texted the fixed policy wording when SMS is configured."
         actions={<Button small variant="primary" onClick={() => setCreating(true)}>Add endpoint</Button>}
       />
       {error && <div className="mb-3"><ErrorNote error={error} /></div>}
       {note && <p className="mb-3 text-sm text-fg-2">{note}</p>}
-      <Card title="Endpoints" hint="An endpoint that fails 30 times in a row is switched off." flush>
+      <Card tour="webhooks-endpoints" title="Endpoints" hint="An endpoint that fails 30 times in a row is switched off." flush>
         <Async state={endpoints}>
           {(rows) =>
             rows.length ? (
