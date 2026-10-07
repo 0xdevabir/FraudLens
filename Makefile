@@ -1,7 +1,7 @@
 .PHONY: help setup up redis down data features train policy insights intel pipeline test lint fmt \
 	migrate seed load api replay replay-live verify platform \
 	review retrain shadow models promote console console-build smoke \
-	demo demo-reset
+	demo demo-reset external
 
 API_PORT ?= 8010
 API_URL ?= http://127.0.0.1:$(API_PORT)
@@ -56,6 +56,12 @@ intel: ## Train and evaluate the scam-message classifier (docs/FRAUD_TAXONOMY.md
 	cd backend && uv run python -m fraudlens.intel.train
 
 pipeline: data features train policy insights intel ## Data, features, models and policy end to end
+
+external: ## Public datasets (PaySim, BAF) and bootstrap intervals; downloads ~560 MB once (docs/MODEL_CARD.md)
+	cd backend && uv run python -m fraudlens.external.download
+	cd backend && uv run python -m fraudlens.external.paysim
+	cd backend && uv run python -m fraudlens.external.baf
+	cd backend && uv run python -m fraudlens.models.bootstrap
 
 migrate: ## Bring the database schema up to date
 	cd backend && uv run alembic upgrade head
