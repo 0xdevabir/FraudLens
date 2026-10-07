@@ -1,0 +1,37 @@
+# The demo with the event stream consumed by separate workers (docs/SCALING.md):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.scale.yml \
+#     --profile demo up -d --scale worker=4
+#
+# The API keeps scoring requests and follows what the workers change; the
+# workers share the stream in one consumer group.
+services:
+  api:
+    environment:
+      FRAUDLENS_RUN_WORKER: "false"
+
+  worker:
+    profiles: [demo]
+    build: ./backend
+    init: true
+    command: ["python", "-m", "fraudlens.platform.worker"]
+    env_file:
+      - path: backend/.env
+        required: false
+    environment:
+      FRAUDLENS_DATABASE_URL: postgresql+psycopg://fraudlens:${POSTGRES_PASSWORD:-fraudlens_dev}@postgres:5432/fraudlens
+      FRAUDLENS_REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/0
+    # The API builds the dataset, models and database on its first start.
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - data:/app/data:ro
+      - artifacts:/app/artifacts:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8081/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5m
+    stop_grace_period: 45s

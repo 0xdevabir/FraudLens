@@ -442,6 +442,7 @@ Keep two browser windows open: one as `analyst1`, one private window as `supervi
 | [DECISION_POLICY.md](docs/DECISION_POLICY.md) | Tiers, rules, thresholds, explanations, the language model's role |
 | [BUSINESS_CASE.md](docs/BUSINESS_CASE.md) | The threshold sweep as a monthly P&L in taka, assumptions and sensitivity |
 | [PLATFORM.md](docs/PLATFORM.md) | API, workflow, security, stream, measured latency |
+| [SCALING.md](docs/SCALING.md) | Several stream workers in one consumer group, measured; Kubernetes manifests in `deploy/` |
 | [FRAUD_TAXONOMY.md](docs/FRAUD_TAXONOMY.md) | Eight kinds of fraud in the Bangladesh context, what detects each, the scam-message classifier and its limits |
 | [DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | The walk-through |
 | [INGEST.md](docs/INGEST.md) | The signed webhook for core banking: ISO 20022 pacs.008 mapping, HMAC signing, replay protection, decision callbacks, a partner SDK |
@@ -450,7 +451,7 @@ Keep two browser windows open: one as `analyst1`, one private window as `supervi
 ## ⚠️ What this is not
 
 - **Everything runs on synthetic data,** so absolute numbers will not transfer to real traffic. Fraud is more common and more scripted here than in real life, and thresholds must be re-fitted on real data.
-- **It is a prototype, not a deployment.** One scorer process holds the feature state, and there is no horizontal scaling. TLS ends at a Caddy proxy, secrets come from files with no vault client, and keys rotate by command, not on a schedule ([SECURITY.md](docs/SECURITY.md)).
+- **It is a prototype, not a deployment.** Stream workers scale out, but every one holds the whole feature state and events enter it one at a time, so throughput stops growing at a few workers ([SCALING.md](docs/SCALING.md)). TLS ends at a Caddy proxy, secrets come from files with no vault client, and keys rotate by command, not on a schedule ([SECURITY.md](docs/SECURITY.md)).
 - **The demo scaffolding is not the product.** The demo accounts, the phone demo endpoints and the review simulator exist only outside production mode.
 - **No model output moves or blocks money on its own.** A hold waits for an analyst and a freeze needs two people.
 - **The Bangla texts were written by the developers** and have not been reviewed by a professional translator.

@@ -87,6 +87,12 @@ load: ## Load the historical period into the database (replaces what is there)
 api: ## Run the API and its stream worker
 	cd backend && uv run uvicorn fraudlens.api:create_app --factory --host 127.0.0.1 --port $(API_PORT)
 
+worker: ## Run one more stream worker next to the API; start as many as needed (docs/SCALING.md)
+	cd backend && uv run python -m fraudlens.platform.worker --port $${PORT:-8081}
+
+loadtest: ## Throughput and latency for 1, 2 and 4 workers; RESETS the database (docs/SCALING.md)
+	cd backend && uv run python -m fraudlens.platform.loadtest --workers 1 2 4
+
 replay: ## Replay the test period, except its last day, through the event stream (needs `make api`)
 	cd backend && uv run python -m fraudlens.platform.replay --via stream --to-day 118
 

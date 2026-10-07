@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: fraudlens
+resources:
+  - base.yaml
+  - keda.yaml # or hpa-external.yaml, without KEDA
+images:
+  - name: fraudlens-backend
+    newName: fraudlens-backend # your registry
+    newTag: latest

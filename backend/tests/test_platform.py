@@ -12,6 +12,7 @@ import ipaddress
 import itertools
 import json
 import shutil
+import threading
 from datetime import datetime
 
 import numpy as np
@@ -34,7 +35,7 @@ from fraudlens.mlops import shadow as shadow_mode
 from fraudlens.models.train import FEEDBACK_COLUMNS
 from fraudlens.platform import replay, verify
 from fraudlens.platform.db import make_engine, make_sessions, migrate
-from fraudlens.platform.events import moment, network_of
+from fraudlens.platform.events import event_adapter, moment, network_of
 from fraudlens.platform.load import load
 from fraudlens.platform.models import (
     AuditLog,
@@ -42,15 +43,17 @@ from fraudlens.platform.models import (
     CustomerReport,
     Decision,
     FreezeRequest,
+    PendingDecision,
     ShadowScore,
     Transaction,
     User,
     Wallet,
     WalletFlag,
 )
+from fraudlens.platform.scoring import SEQUENCE_LOCK, Scorer
 from fraudlens.platform.security import check_production
 from fraudlens.platform.seed import seed_users
-from fraudlens.platform.stream import DEAD_SUFFIX, alert_feed
+from fraudlens.platform.stream import DEAD_SUFFIX, GROUP, Worker, alert_feed
 
 pytestmark = pytest.mark.integration
 
@@ -138,12 +141,33 @@ def tokens(client):
 
 
 @pytest.fixture(scope="module")
-def replayed(client, p, settings):
-    """The whole test period sent through the event stream and scored."""
+def replica(client, p, settings):
+    """A second scorer on the same database: what a stream worker process holds."""
+    return Scorer(settings, p.sessions, p.redis)
+
+
+def catch_up(scorer: Scorer) -> None:
+    with scorer.lock, scorer.sessions() as s:
+        s.execute(SEQUENCE_LOCK)
+        scorer.refresh(s)
+        s.commit()
+
+
+@pytest.fixture(scope="module")
+def replayed(client, p, settings, replica):
+    """The whole test period sent through the event stream and scored by two workers
+    in one consumer group, each with its own copy of the state."""
     events = replay.test_events(settings.dataset_dir)
     sent = replay.via_stream(p.redis, settings.events_stream, events, wait=False)
-    handled = p.worker.drain()
-    return {"sent": sent, "handled": handled}
+    other = Worker(replica, p.redis, settings, consumer="test-worker-b")
+    p.worker.ensure_group()
+    handled = {}
+    thread = threading.Thread(target=lambda: handled.update(b=other.drain()))
+    thread.start()
+    handled["a"] = p.worker.drain()
+    thread.join()
+    catch_up(p.scorer)  # the tests below read the API's state directly
+    return {"sent": sent, "handled": handled["a"] + handled["b"], "workers": handled}
 
 
 _ids = itertools.count(9_000_000_000)
@@ -218,6 +242,9 @@ def held_payment(client, tokens, p, spare) -> tuple[dict, dict]:
 
 def test_replay_through_the_stream_matches_the_offline_evaluation(p, settings, replayed):
     assert replayed["handled"] == replayed["sent"]["events"] > 0
+    assert min(replayed["workers"].values()) > 0, replayed["workers"]  # both took a share
+    with p.sessions() as s:
+        assert s.scalar(select(func.count()).select_from(PendingDecision)) == 0
     assert p.worker.dead_lettered == 0 and p.worker.failures == 0
     assert p.worker.backlog() == 0
     report = verify.verify(p.db, settings)
@@ -1473,6 +1500,78 @@ def test_events_endpoint_queues_for_the_worker(client, tokens, p, settings, spar
     assert p.worker.drain() == 1
     with p.sessions() as s:
         assert s.get(Transaction, event["txn_id"]) is not None
+
+
+def _event(body: dict):
+    return event_adapter.validate_python(body | {"kind": "txn"}).event()
+
+
+def test_two_workers_holding_one_entry_record_one_decision(p, replica, spare):
+    """Redelivery to a second worker after the first applied the event: the state
+    changes once, the second worker finishes the decision, the first one's late
+    commit finds it done."""
+    event = _event(send(p, spare(), spare(), amount=60.0, source="replay"))
+    results, scored = p.scorer.sequence([event])
+    assert results[0].status == "completed" and len(scored) == 1
+    seq = p.scorer.seq
+    again, resumed = replica.sequence([event])  # the entry, delivered to another worker
+    assert again[0].duplicate and [item.resumed for item in resumed] == [True]
+    assert replica.seq == seq  # caught up, applied nothing new
+    assert len(replica.finish(resumed)) == 1
+    assert p.scorer.finish(scored) == []  # the pending row was claimed already
+    with p.sessions() as s:
+        decisions = s.scalars(select(Decision).where(Decision.txn_id == event.txn.txn_id)).all()
+        assert len(decisions) == 1
+        assert s.get(PendingDecision, event.txn.txn_id) is None
+    # Same features, so the same decision as the worker that applied it would have made.
+    assert decisions[0].features == pytest.approx(
+        [float(v) for v in scored[0].features], nan_ok=True
+    )
+
+
+def test_a_stopped_workers_entries_are_taken_over_in_order(p, settings, spare):
+    """A consumer read an entry and died. The next entry waits for it; it is taken
+    over once idle and both are scored, first one first."""
+    stream = settings.events_stream
+    sender = spare()
+    first = send(p, sender, spare(), amount=70.0) | {"kind": "txn"}
+    second = send(p, sender, spare(), amount=80.0) | {"kind": "txn"}
+    p.redis.xadd(stream, {"data": json.dumps(first)})
+    p.redis.xreadgroup(GROUP, "test-dead-worker", {stream: ">"}, count=1)  # and never acks
+    p.redis.xadd(stream, {"data": json.dumps(second)})
+    worker = Worker(
+        p.scorer, p.redis, settings.model_copy(update={"claim_idle_ms": 200}), consumer="test-c"
+    )
+    assert worker.drain() == 2
+    assert worker.reclaimed == 1 and p.redis.xlen(stream) == 0
+    assert p.redis.xpending(stream, GROUP)["pending"] == 0
+    with p.sessions() as s:
+        a, b = s.get(Transaction, first["txn_id"]), s.get(Transaction, second["txn_id"])
+        assert a.created_at <= b.created_at
+        if a.applied_seq and b.applied_seq:
+            assert a.applied_seq < b.applied_seq
+    p.redis.xgroup_delconsumer(stream, GROUP, "test-dead-worker")
+
+
+def test_a_replica_follows_what_another_process_changed(client, tokens, p, replica, spare):
+    """Flags, freezes and payments made through the API reach a worker's copy of the
+    state before it scores again."""
+    wallet, sender = spare(), spare()
+    flag(client, tokens, p, wallet)
+    body = send(p, sender, spare(), amount=45.0)
+    assert client.post("/v1/score", headers=tokens("upay-core"), json=body).status_code == 200
+    catch_up(replica)
+    assert replica.seq == p.scorer.seq and wallet in replica.engine.flagged
+    probe = Txn(10**12, p.scorer.engine.last_ts + 60, "SEND_MONEY", sender, "wallet", wallet,
+                "wallet", 500.0, 10_000.0, "", "app", body["district"])  # fmt: skip
+    mine, theirs = p.scorer.engine.features(probe), replica.engine.features(probe)
+    assert np.allclose(mine, theirs, equal_nan=True)
+    for status, change in (("frozen", p.scorer.frozen.add), ("active", p.scorer.frozen.discard)):
+        with p.scorer.transaction() as s:  # what an approved freeze, then a release, does
+            s.execute(update(Wallet).where(Wallet.wallet_id == sender).values(status=status))
+            change(sender)
+        catch_up(replica)
+        assert (sender in replica.frozen) == (status == "frozen")
 
 
 def test_the_live_feed_needs_a_token(client):

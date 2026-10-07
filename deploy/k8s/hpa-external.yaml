@@ -1,0 +1,33 @@
+# The same policy without KEDA: a plain HPA on an external metric.
+#
+# Not in kustomization.yaml by default; use it instead of keda.yaml. It needs an
+# external-metrics adapter (prometheus-adapter) serving `fraudlens_stream_lag`,
+# for example from redis_exporter started with
+#   --check-streams=fraudlens:events
+# and an adapter rule mapping redis_stream_length{stream="fraudlens:events"}
+# to fraudlens_stream_lag. The workers' /metrics also reports their own
+# backlog and latency for dashboards.
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: fraudlens-worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fraudlens-worker
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: fraudlens_stream_lag
+        target:
+          type: AverageValue
+          averageValue: "2000"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies: [{type: Pods, value: 1, periodSeconds: 60}]

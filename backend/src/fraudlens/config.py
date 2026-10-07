@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     events_stream: str = "fraudlens:events"
     alerts_channel: str = "fraudlens:alerts"
     run_worker: bool = True  # consume the event stream inside the API process
+    # Stream workers (`python -m fraudlens.platform.worker`, docs/SCALING.md).
+    worker_name: str | None = None  # consumer name; default host-pid
+    worker_port: int = 8081  # /health, /ready, /metrics
+    claim_idle_ms: int = 30_000  # a pending entry idle this long is taken from its consumer
+    follow_interval_s: float = 0.5  # how often the API's replica catches up with the log
 
     # Signing key for access tokens. The default is for local development only;
     # the API refuses to start with it when environment == "production".
