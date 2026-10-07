@@ -432,6 +432,84 @@ export interface ImpactPoint {
   legit_customers_alerted: number;
 }
 
+/** What the business case assumes (backend: decision/business.py `Assumptions`). */
+export interface BusinessAssumptions {
+  monthly_payments: number;
+  avg_payment_taka: number;
+  scam_loss_bps: number;
+  stop_warn: number;
+  stop_step_up: number;
+  stop_hold: number;
+  abandon_rate: number;
+  abandon_cost_taka: number;
+  contacts_warn: number;
+  contacts_step_up: number;
+  contacts_hold: number;
+  contact_cost_taka: number;
+  review_minutes: number;
+  analyst_monthly_cost_taka: number;
+  analyst_hours_per_month: number;
+  min_analysts: number;
+  platform_monthly_cost_taka: number;
+  reimbursement_share: number;
+  reputation_per_taka: number;
+}
+
+/** One threshold of the sweep, priced for a month at the assumed volume. */
+export interface BusinessPoint {
+  threshold: number;
+  alert_rate: number;
+  interrupted: Record<"warn" | "step_up" | "hold", number>;
+  interrupted_total: number;
+  honest_interrupted: number;
+  honest_per_10k: number;
+  held_for_review: number;
+  prevented: Record<"warn" | "step_up" | "hold" | "mule_cash_out_held", number>;
+  prevented_total: number;
+  prevented_share: number;
+  missed: number;
+  friction: { abandoned_payments: number; support_contacts: number };
+  friction_total: number;
+  abandoned_payments: number;
+  support_contacts: number;
+  review_hours: number;
+  workload_fte: number;
+  analysts: number;
+  analyst_cost: number;
+  platform_cost: number;
+  operating_cost: number;
+  net_benefit: number;
+  provider_net_benefit: number;
+  prevented_per_taka_cost: number | null;
+  missed_cost_provider: number;
+}
+
+export interface BusinessCase {
+  model_version: string;
+  policy_version: string;
+  rows: number;
+  days: number;
+  assumptions: BusinessAssumptions;
+  defaults: BusinessAssumptions;
+  sources: { key: keyof BusinessAssumptions; label: string; unit: string; low: number; high: number; source: string }[];
+  synthetic: { scam_loss_per_payment: number; scale: number };
+  scam_loss_at_risk: number;
+  today_index: number;
+  best_index: number;
+  policy: BusinessPoint;
+  points: BusinessPoint[];
+  sensitivity: {
+    threshold: number;
+    net_benefit: number;
+    provider_net_benefit: number;
+    rows: {
+      key: keyof BusinessAssumptions; label: string; unit: string; low: number; high: number;
+      net_low: number; net_high: number; provider_low: number; provider_high: number; swing: number; provider_swing: number;
+    }[];
+  };
+  break_even_bps: { net_benefit: number | null; provider_net_benefit: number | null };
+}
+
 export interface FairRow {
   group: string;
   transactions: number;

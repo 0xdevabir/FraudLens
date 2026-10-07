@@ -438,6 +438,17 @@ def test_dashboard_reads(client, tokens, replayed):
     assert report["model"]["test"]["risk_score"] and report["policy"]["tier_counts"]
     assert report["model_version"] == report["policy"]["model_version"]
 
+    case = client.get("/v1/model/business", headers=analyst).json()
+    assert len(case["points"]) == len(report["insights"]["impact"])
+    assert case["assumptions"] == case["defaults"] and case["sensitivity"]["rows"]
+    bigger = client.post(
+        "/v1/model/business", headers=analyst, json={"monthly_payments": 40_000_000}
+    ).json()
+    assert bigger["scam_loss_at_risk"] == 2 * case["scam_loss_at_risk"]
+    bad = client.post("/v1/model/business", headers=analyst, json={"abandon_rate": 2})
+    assert bad.status_code == 422
+    assert client.post("/v1/model/business", headers=analyst, json={"wage": 1}).status_code == 422
+
     policy = client.get("/v1/policy", headers=analyst).json()
     assert policy["tiers"]["hold"]["human_review"] is True
     assert {"en", "bn"} == set(policy["messages"]["scam"]["hold"])
@@ -445,7 +456,7 @@ def test_dashboard_reads(client, tokens, replayed):
     warn, step_up, hold = (policy["resolved_thresholds"][t] for t in ("warn", "step_up", "hold"))
     assert 0 < warn <= step_up <= hold < 1
 
-    for path in ("/v1/metrics/daily", "/v1/model/report", "/v1/policy"):
+    for path in ("/v1/metrics/daily", "/v1/model/report", "/v1/model/business", "/v1/policy"):
         assert client.get(path).status_code == 401
         assert client.get(path, headers=tokens("upay-core")).status_code == 403
 

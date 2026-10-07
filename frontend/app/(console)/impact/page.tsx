@@ -8,6 +8,8 @@ import { useApi } from "@/lib/api";
 import { num, pct, taka } from "@/lib/format";
 import type { ImpactPoint, Insights, Report } from "@/lib/types";
 
+import { BusinessSection } from "./business";
+
 const TIER_NAME = { warn: "Warn", step_up: "Step-up check", hold: "Hold for review" } as const;
 /** Hours of case work one reviewer gets through in a shift. */
 const REVIEW_HOURS = 6;
@@ -154,6 +156,8 @@ function Simulator({ insights, version }: { insights: Insights; version: string 
         </Card>
       </div>
 
+      <BusinessSection index={index} setIndex={setIndex} minutes={minutes} version={version} />
+
       <p className="mt-4 text-xs text-fg-3">
         Measured by replaying model {version} over {num(insights.rows)} payments from {days} days it never trained on. The fraud is simulated, so the
         taka figures show the shape of the trade-off, not a forecast for a real customer base. Moving the slider changes nothing in production: thresholds
@@ -169,7 +173,7 @@ export default function ImpactPage() {
     <>
       <PageHeader
         title="Impact simulator"
-        sub="Move the alert threshold and see what it does to money saved, customers interrupted and reviewer workload."
+        sub="Move the alert threshold and see what it does to money saved, customers interrupted and reviewer workload, and what that is worth in taka a month."
       />
       <Async state={report}>
         {(data) =>

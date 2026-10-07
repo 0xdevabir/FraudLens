@@ -11,6 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Response
 from sqlalchemy import Date, cast, func, select, text
 
+from ...decision.business import Assumptions, business_case
 from ...decision.evaluate import REPORT_FILE as POLICY_REPORT_FILE
 from ...decision.insights import INSIGHTS_FILE
 from ...models import registry
@@ -264,6 +265,39 @@ def model_report(
         "policy": _report(directory, POLICY_REPORT_FILE),
         "insights": _report(directory, INSIGHTS_FILE),
     }
+
+
+def _business(p: Plat, version: str | None, assumptions: Assumptions) -> dict:
+    if version is None and p.scorer.bundle is not None:
+        version = p.scorer.bundle.version
+    if version is None or version not in registry.versions(p.settings.models_dir):
+        raise WorkflowError(404, "model_not_found", f"no model version {version}")
+    insights = _report(p.settings.models_dir / version, INSIGHTS_FILE)
+    if not insights or not insights.get("impact"):
+        raise WorkflowError(404, "not_evaluated", f"model {version} has no threshold sweep")
+    return business_case(insights, assumptions)
+
+
+@router.get("/model/business")
+def business(
+    p: Plat, ctx: Staff, version: Annotated[str | None, Query(pattern=r"^v\d{1,6}$")] = None
+) -> dict:
+    """The threshold sweep as a monthly profit and loss in taka, under default assumptions.
+
+    Every assumption, its source and its range are in the answer; POST to change them.
+    """
+    return _business(p, version, Assumptions())
+
+
+@router.post("/model/business")
+def business_with(
+    assumptions: Assumptions,
+    p: Plat,
+    ctx: Staff,
+    version: Annotated[str | None, Query(pattern=r"^v\d{1,6}$")] = None,
+) -> dict:
+    """The same, with some assumptions changed. Computes only: nothing is stored."""
+    return _business(p, version, assumptions)
 
 
 @router.get("/policy")
