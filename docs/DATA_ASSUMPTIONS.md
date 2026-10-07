@@ -208,7 +208,8 @@ behaviour that was missing. But the test period is no longer strictly
 
 ## 10. Known limitations
 
-- Rates, shares and amounts are informed guesses, not calibrated to real traffic.
+- Rates, shares and amounts are informed guesses, not calibrated to real traffic
+  (the optional calibrated profile, §11, sets the few that have a public source).
   Absolute metrics will not transfer; the relative findings and the system design
   are what we claim.
 - Fraud prevalence is likely higher than in real traffic, to give enough positives
@@ -224,3 +225,51 @@ behaviour that was missing. But the test period is no longer strictly
   review simulator (`make review`) closes cases with the simulator's ground
   truth, so the labels the feedback loop learns from are more accurate and more
   complete than real verdicts would be (MODEL_CARD §13).
+
+## 11. Calibration against Bangladesh sources
+
+Most of the parameters above have no public source. A few do, and the
+**calibrated** profile (`SimConfig.calibrated()`) sets those from public
+Bangladesh figures and leaves everything else alone. The **default** profile is
+unchanged: every published model, policy and metric still comes from it, and a
+test checks that `with_profile("default")` returns the same config.
+
+```
+cd backend
+uv run python -m fraudlens.simulator.generate --profile calibrated   # writes data/full_calibrated
+FRAUDLENS_SIM_PROFILE=calibrated uv run python -m fraudlens.simulator.generate
+```
+
+Sources are listed in full, with access dates, in BANGLADESH_CONTEXT.md.
+
+| Parameter | Default | Calibrated | Sourced value | Source |
+| --- | --- | --- | --- | --- |
+| `txn_cap` (largest single wallet transaction) | ৳25,000 | ৳30,000 | Bangladesh Bank publishes daily limits, not a per-transaction one: cash-out ৳30,000/day, send money ৳50,000/day (from 27 Mar 2025). We use the smallest. | [S10] |
+| `send_median` (send-money amount) | ৳1,500 → mean ৳2,425 | ৳2,850 → mean ৳3,520 | Average P2P transfer ৳3,552 (Oct 2025, derived from 134.26M txns worth ৳476.93bn) | [S2] |
+| `cash_out_median` (spontaneous cash-out) | ৳3,000 → mean ৳4,336 | ৳1,400 → mean ৳4,337 | Average cash-out ৳2,132 (Oct 2025, derived). **Not matched**: most simulated cash-outs are balance-driven withdrawals after salary and remittance, which this parameter does not set. | [S2] |
+| `report_rate` (share of victim transfers reported) | 0.50 (assumed) | 0.412 | 41.2% of personal holders with a problem complained (TIB). The denominator is all problems, not only fraud, so this is an approximation. | [S4] |
+| Account-takeover share of base-typology cases (`ato_keep_share`) | 24.8% (keep 1.0) | 12.5% (keep 0.5; the rest become impersonation) | Hacking 12.3% of fraud reports; deceptive information 52.6% | [S4] |
+| Cash-in amount | mean ৳2,978 | unchanged | Average cash-in ৳2,898 (Oct 2025, derived) — already close | [S2] |
+| Overall mean transaction | ৳2,456 | ৳2,957 | ৳2,454 (Feb 2025, derived from ৳164,726 crore / 671.3M). The default matched without being tuned to it; the calibrated profile moves away because of the higher send amounts. | [S1] |
+| Mean loss per case | ৳8,982 | ৳11,157 | "Over ৳9,000" average loss (2021 survey); TIB range ৳300–83,000 | [S5], [S4] |
+
+**Effect on the data (full world, seed 7).** 1,207 cases instead of 1,056; the
+typology mix moves from 21% to 10.5% account takeover and from 19% to 31%
+impersonation. The random stream of the default profile is untouched (the
+extra draw for takeovers only happens when `ato_keep_share < 1`).
+
+**Not calibrated, and why.**
+
+- *Transaction mix by type.* Bangladesh Bank's Oct 2025 counts give P2P 19.8%,
+  cash-in 21.0%, cash-out 25.7%; the simulator has 29%, 20% and 15%. The mix
+  comes out of many behaviours (salary, remittance, agent farming) rather than
+  one parameter, and re-weighting it is a larger change than this profile makes.
+- *Fraud prevalence.* No public source gives a per-transaction scam rate; the
+  simulator's rate stays deliberately high (§10).
+- *No public source found* for district weights, segment shares, mule dwell
+  times and lifetimes, report delay, colluding-agent share or cell structure.
+  The validation kit (docs/validation/) is designed to collect several of these
+  from customers and analysts.
+
+The calibrated profile has not been used to retrain or re-evaluate the model;
+doing so, and reporting the change, is the next step.

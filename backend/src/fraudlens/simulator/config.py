@@ -1,10 +1,17 @@
 """Simulation parameters. Every number here is a documented synthetic assumption
-(see docs/DATA_ASSUMPTIONS.md), not a measurement of any real MFS."""
+(see docs/DATA_ASSUMPTIONS.md), not a measurement of any real MFS.
 
-from dataclasses import dataclass
+Two profiles exist. "default" is the world every published number comes from.
+"calibrated" replaces the parameters that a public Bangladesh source pins down
+(DATA_ASSUMPTIONS.md §11, sources in docs/BANGLADESH_CONTEXT.md) and leaves
+everything else as it is.
+"""
+
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 DAY = 86_400
+PROFILES = ("default", "calibrated")
 
 
 @dataclass(frozen=True)
@@ -35,6 +42,16 @@ class SimConfig:
     max_mule_wallets: int = 3_000
     farming_agent_share: float = 0.015
 
+    profile: str = "default"
+    # Median (BDT, before the segment multiplier) of spontaneous send-money and
+    # cash-out amounts. The calibrated profile moves them toward Bangladesh Bank's
+    # published average ticket sizes.
+    send_median: float = 1_500.0
+    cash_out_median: float = 3_000.0
+    # Share of account-takeover cases kept; the rest are run as impersonation
+    # instead. 1.0 leaves the typology mix (and the random stream) untouched.
+    ato_keep_share: float = 1.0
+
     def split_of(self, day: int) -> str:
         if day < self.train_end_day:
             return "train"
@@ -58,3 +75,27 @@ class SimConfig:
             n_heldout_cells=1,
             max_mule_wallets=600,
         )
+
+    def calibrated(self) -> "SimConfig":
+        """The same world with every parameter that has a public Bangladesh source
+        set from it. Values and sources: DATA_ASSUMPTIONS.md §11."""
+        return replace(
+            self,
+            profile="calibrated",
+            # Smallest Bangladesh Bank daily limit from 27 March 2025 (cash-out, Tk 30,000).
+            txn_cap=30_000.0,
+            # Average P2P ticket Tk 3,552 and cash-out Tk 2,132 (Bangladesh Bank, Oct 2025).
+            # The send median puts the simulated send mean at about Tk 3,520. Most cash-outs
+            # are balance-driven withdrawals, so the cash-out mean barely moves (§11).
+            send_median=2_850.0,
+            cash_out_median=1_400.0,
+            # 41.2% of personal account holders filed a complaint (TIB 2025).
+            report_rate=0.412,
+            # Hacking is 12.3% of fraud reports (TIB 2025), half the default ATO share.
+            ato_keep_share=0.5,
+        )
+
+    def with_profile(self, profile: str) -> "SimConfig":
+        if profile not in PROFILES:
+            raise ValueError(f"unknown simulator profile {profile!r}; choose from {PROFILES}")
+        return self.calibrated() if profile == "calibrated" else self

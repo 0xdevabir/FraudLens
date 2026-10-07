@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     data_dir: Path = BACKEND_DIR / "data"
     artifacts_dir: Path = BACKEND_DIR / "artifacts"
     dataset: str = "full"  # sub-directory of data_dir the platform serves
+    # Simulator profile for `fraudlens.simulator.generate`: "default" or "calibrated"
+    # (Bangladesh-sourced parameters, docs/DATA_ASSUMPTIONS.md §11).
+    sim_profile: str = "default"
 
     # Model and policy the API serves. None means the promoted (CURRENT) model version.
     models_root: Path | None = None
