@@ -54,12 +54,14 @@
 | The **sender looks normal**, because the victim is the one paying | Scores the **receiving wallet and its network** as well as the sender | `Alert queue` · `Payment` |
 | A blocked payment is too late and too blunt | Four tiers: **allow → warn → step-up → hold**, the first two decided by the customer | `Customer phone demo` |
 | Customers do not read English warnings | Fixed, reviewed warning texts in **Bangla and English** | `Decision policy` |
-| "The model said so" is not an explanation | Exact **SHAP reasons** as plain sentences, a rule trace, and the closest past case | `Payment` |
-| Money that got through is gone | A **second chance at cash-out**, plus agent peer comparison and ring detection | `Mule rings` · `Agent risk` |
+| "The model said so" is not an explanation | Exact **SHAP reasons** as plain sentences, a rule trace, and a case note (template or optional LLM draft, checked against the evidence) | `Payment` |
+| Money that got through is gone | A **second chance at cash-out**, plus **victim refunds** once fraud is confirmed and the mule is frozen | `Mule rings` · `Victim refunds` |
+| An honest customer is interrupted | They can **appeal**; a person answers every one, and an approved hold is released (never to a frozen or confirmed-fraud wallet) | `Customer appeals` · `Customer phone demo` |
+| A mule hops to another provider | A privacy-preserving **mule consortium** shares keyed tokens, not phone numbers or handsets | `Mule consortium` |
 | Automation should not freeze someone's money | A hold waits for **an analyst**; a freeze needs **two people** | `Cases` · `Freeze approvals` |
 | Models go stale | Verdicts become labels, challengers run in **shadow mode**, drift and fairness are on a dashboard | `Model monitoring` · `Fairness report` |
 
-**Hero workflow:** a customer types a number and an amount. Before the money moves, the phone shows a scam warning in Bangla. A riskier payment asks them to verify again and wait out a cooling-off period. The riskiest is paused, lands at the top of an analyst's queue with its reasons, and stays paused until a person decides.
+**Hero workflow:** a customer types a number and an amount. Before the money moves, the phone shows a scam warning in Bangla. A riskier payment asks them to verify again and wait out a cooling-off period. The riskiest is paused, lands at the top of an analyst's queue with its reasons, and stays paused until a person decides. If money already left, reporting the scam opens a refund claim; once two people freeze the mule and fraud is confirmed, what remains in that wallet is shared back among the victims.
 
 ---
 
@@ -150,16 +152,21 @@ The warning a customer reads before sending to a suspected mule:
 |---|---|
 | **Executive summary** | Money stopped, customers interrupted, reviewer backlog and decision latency, from the live service |
 | **Impact simulator** | The trade-off between fraud stopped and customers interrupted, at any threshold |
-| **Alert queue → Payment** | Reasons, rule trace, similar past cases, the customer's message and recommended next steps |
+| **Alert queue → Payment** | Reasons, rule trace, similar past cases, the customer's message, and a case note in English or বাংলা (template by default; optional LLM draft that never decides and is rejected if it invents a number) |
 | **Cases** | One case per wallet with a review deadline (on time, due soon, overdue), a workload board per reviewer, filters, saved views and CSV export; a false-alarm verdict can say why |
+| **Customer appeals** | Customers who say a warned or held payment is genuine. A person answers every one; approving a hold releases it, and the verdict becomes a `legitimate` training label |
+| **Victim refunds** | A report on a completed payment opens a refund claim. After fraud is confirmed and two people freeze the mule, what is left in that wallet is paid back, shared by each victim's loss ([PLATFORM.md](docs/PLATFORM.md) §6) |
 | **Blocklist** | Wallets, phone numbers and domains known to be used for fraud. A listed wallet asks the sender to verify and wait; it never blocks money by itself |
 | **Webhooks · Partner API keys** | Signed, retried webhooks and customer SMS; scoped, rate-limited partner keys with a sandbox that returns every outcome on demand ([PARTNER_API.md](docs/PARTNER_API.md)) |
 | **Follow a report** (`/track`) | A customer enters the reference they were given, gets a code on their phone, and sees where the report stands, in Bangla or English |
-| **Freeze approvals** | The second person of the two-person rule |
+| **Freeze approvals** | The second person of the two-person rule; approving a freeze can also settle open refund claims on that wallet |
 | **Network explorer · Mule rings · Agent risk** | Follow the money, see shared handsets, rank agents against their peers |
+| **Mule consortium** | Privacy-preserving cross-provider mule intel: OPRF tokens, signed daily bundles, partner lookups, disputes and a hash-chained audit log — no MSISDN or handset leaves a provider ([CONSORTIUM.md](docs/CONSORTIUM.md)) |
 | **Model monitoring** | Performance by tier and scam type, drift, the model registry, shadow mode, the feedback loop |
 | **Fairness report · Decision policy · Audit log** | False alarms by group, the exact rules and texts in force, and who did what |
 | **Fraud types** | The eight kinds of fraud wallet customers in Bangladesh meet, what detects each and how well; check a suspicious message, verify a claimed payment against the ledger |
+| **Customer phone demo** | Plays the wallet app against the real scoring endpoint: send, warn, step-up, hold, report a scam, check a refund, and appeal — side by side with what FraudLens decided |
+| **Guided tour** | A walk-through of the console in English or বাংলা (sidebar **Take a tour**), including API keys, blocklist, webhooks, appeals and refunds |
 
 ---
 
@@ -228,6 +235,7 @@ pie showData
 | 🕵️ **Mule wallets** | 94 of 145 mules detected, **70 of them before any victim had paid**, a median 40.2 hours ahead of the victim's report |
 | 🕸️ **Rings** | 34 rings covering 331 wallets; 94% of ring members are true fraud-cell wallets |
 | 🏪 **Agents** | No labels used: 90.9% precision in a review list of 22, finding all commission-farming agents |
+| 🤝 **Mule consortium** | At 25% shared-SIM (simulated), confirmed partner listings raise mule recall from 0.648 to **0.693** (~6 mules found only via partners) with almost no extra false alerts; ৳ paid to undetected mules falls by ~৳50k ([CONSORTIUM.md](docs/CONSORTIUM.md)) |
 | 🔁 **Feedback loop** | Retraining on analyst verdicts raised PR-AUC from 0.774 to 0.912 on later data (reviewers were simulated and always right, so this is an upper bound) |
 | 👥 **Shadow mode** | The retrained challenger scored all 136,180 served decisions without deciding any, and agreed on the tier for 98.5%; it would hold 1.06% of payments against 0.78% |
 | 💬 **Scam messages** | A classifier for English, Bangla and Banglish messages, with a link check, flags 90.2% of scam messages in new wording and 81.0% from scripts it never saw, at 0.23% and 0% of harmless ones. The corpus is synthetic; naming the exact fraud type on unseen scripts is weak ([FRAUD_TAXONOMY.md](docs/FRAUD_TAXONOMY.md)) |
@@ -309,9 +317,10 @@ flowchart TB
 | Features | 61 point-in-time features from one engine used for both training and serving |
 | Models | LightGBM transaction risk, mule-wallet score, Isolation Forest anomaly, agent peer comparison, ring detection |
 | Decisions | allow / warn / step-up / hold from versioned rules and budgeted thresholds, with a rules-only fallback |
-| Explanations | SHAP reasons in Bangla and English, rule trace, similar past cases, case summary |
-| Platform | FastAPI scoring API, Redis Streams ingestion, Postgres, roles, append-only audit log |
-| Console | Alert queue, case page, network explorer, ring freeze with second approval, agent risk, customer phone demo |
+| Explanations | SHAP reasons in Bangla and English, rule trace, similar past cases, case note (template, or optional LLM draft fenced by grounding checks) |
+| Platform | FastAPI scoring API, Redis Streams ingestion, Postgres, roles, append-only audit log, appeals, refund claims, partner webhooks |
+| Console | Alert queue, cases, appeals, refunds, network explorer, mule consortium, ring freeze with second approval, agent risk, customer phone demo, guided tour |
+| Consortium | Simulated multi-provider mule intel over OPRF tokens and signed bundles; no raw identifiers leave a provider |
 | MLOps | Verdicts become labels, retraining, model registry, shadow mode, drift, fairness report |
 
 </details>
@@ -333,13 +342,15 @@ FraudLens/
 │   │   ├── simulator/   # the synthetic world and its fraud cells
 │   │   ├── features/    # one feature engine for training and serving
 │   │   ├── models/      # training, evaluation, registry, agents, rings
-│   │   ├── decision/    # policy file, rules, tiers, reasons, case notes
-│   │   ├── platform/    # scorer, cases, freezes, stream worker, audit
+│   │   ├── decision/    # policy file, rules, tiers, reasons, case notes (+ optional LLM)
+│   │   ├── consortium/  # privacy-preserving cross-provider mule intel (simulation)
+│   │   ├── platform/    # scorer, cases, freezes, appeals, refunds, stream worker, audit
 │   │   ├── mlops/       # verdicts as labels, retraining, shadow, drift
 │   │   └── api/         # HTTP routes, schemas, middleware
 │   └── tests/           # 435 tests
-├── frontend/            # the analyst console
-├── docs/                # architecture, model card, policy, platform, demo script
+├── frontend/            # the analyst console (incl. guided tour, phone demo)
+├── sdk/                 # partner API Python example client
+├── docs/                # architecture, model card, policy, platform, consortium, demo script
 ├── docker-compose.yml
 ├── Makefile
 └── scripts/             # demo.sh / demo.ps1 (and up / demo-reset) for Mac, Windows, Linux
@@ -447,14 +458,14 @@ Keep two browser windows open: one as `analyst1`, one private window as `supervi
 
 | Time | Beat |
 |---|---|
-| **0:00** | **Problem:** the victim sends the money themselves, so the sender looks normal. Open the **Executive summary**: 25 days of traffic replayed through the live API, one scam type never shown to the models. |
+| **0:00** | **Problem:** the victim sends the money themselves, so the sender looks normal. Open the **Executive summary**: 25 days of traffic replayed through the live API, one scam type never shown to the models. (Optional: **Take a tour** in EN / বাংলা.) |
 | **0:20** | **Customer phone demo:** an ordinary payment goes straight through. "Looks like a scam" shows the Bangla warning before the money moves. "Riskier" asks for a second check and a wait; skip the clock ahead to end it. |
 | **1:00** | **Hold:** "Very likely fraud" is paused, not blocked. It appears at the top of the **Alert queue** over the live feed. |
-| **1:20** | **Payment page:** the ranked reasons with the facts behind them, the rule trace, the closest past case. Switch the summary to বাংলা. Click a masked wallet number to reveal it. |
-| **1:50** | **Two-person freeze:** request a freeze as the analyst, approve it as the supervisor in the other window. Then give the verdict **confirmed fraud**. |
-| **2:20** | **Mule rings:** open a ring and see the wallets tied by shared handsets. |
-| **2:35** | **Trust:** the **Fairness report** shows young wallets pay more for false alarms; the **Audit log** shows the reveal from 1:20 and cannot be edited. |
-| **2:50** | **Close:** the model ranks and explains, the customer gets the first say, and a person makes every irreversible decision. |
+| **1:20** | **Payment page:** the ranked reasons with the facts behind them, the rule trace, the closest past case. Switch the case note to বাংলা. Click a masked wallet number to reveal it. |
+| **1:50** | **Two-person freeze + refund:** request a freeze as the analyst, approve it as the supervisor. Verdict **confirmed fraud** settles the victim's refund claim; on the phone, *Check my refund* shows the amount returned. |
+| **2:20** | **Mule rings · Consortium:** open a ring of shared handsets, then **Mule consortium** to show partner listings as tokens (no raw numbers leave a provider). |
+| **2:40** | **Trust:** the **Fairness report** shows young wallets pay more for false alarms; the **Audit log** shows the reveal from 1:20 and cannot be edited. |
+| **2:55** | **Close:** the model ranks and explains, the customer gets the first say (warn, appeal, refund), and a person makes every irreversible decision. |
 
 ---
 
@@ -464,30 +475,33 @@ Keep two browser windows open: one as `analyst1`, one private window as `supervi
 |---|---|
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the parts fit and why they are split that way |
 | [DATA_ASSUMPTIONS.md](docs/DATA_ASSUMPTIONS.md) | What the synthetic world contains and what it leaves out |
+| [BANGLADESH_CONTEXT.md](docs/BANGLADESH_CONTEXT.md) | Sourced Bangladesh MFS evidence the simulator and pitch are grounded in |
 | [MODEL_CARD.md](docs/MODEL_CARD.md) | Models, results, ablations, fairness, limits |
 | [DECISION_POLICY.md](docs/DECISION_POLICY.md) | Tiers, rules, thresholds, explanations, the language model's role |
 | [BUSINESS_CASE.md](docs/BUSINESS_CASE.md) | The threshold sweep as a monthly P&L in taka, assumptions and sensitivity |
-| [PLATFORM.md](docs/PLATFORM.md) | API, workflow, security, stream, measured latency |
+| [PLATFORM.md](docs/PLATFORM.md) | API, workflow (cases, appeals, refunds), security, stream, measured latency |
+| [CONSORTIUM.md](docs/CONSORTIUM.md) | Privacy-preserving cross-provider mule intel: OPRF tokens, bundles, disputes, measured lift |
 | [SCALING.md](docs/SCALING.md) | Several stream workers in one consumer group, measured; Kubernetes manifests in `deploy/` |
 | [FRAUD_TAXONOMY.md](docs/FRAUD_TAXONOMY.md) | Eight kinds of fraud in the Bangladesh context, what detects each, the scam-message classifier and its limits |
-| [DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | The walk-through |
-| [INGEST.md](docs/INGEST.md) | The signed webhook for core banking: ISO 20022 pacs.008 mapping, HMAC signing, replay protection, decision callbacks, a partner SDK |
+| [DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | The full walk-through (phone, freeze, refund, consortium, fairness) |
+| [INGEST.md](docs/INGEST.md) | The signed webhook for core banking: ISO 20022 pacs.008 mapping, HMAC signing, replay protection, decision callbacks |
+| [PARTNER_API.md](docs/PARTNER_API.md) | Partner API keys, sandbox outcomes, signed callbacks; Python SDK under `sdk/` |
 | [SECURITY.md](docs/SECURITY.md) | STRIDE threat model with the status of each mitigation, personal data and retention |
 
 ## ⚠️ What this is not
 
-- **Everything runs on synthetic data,** so absolute numbers will not transfer to real traffic. Fraud is more common and more scripted here than in real life, and thresholds must be re-fitted on real data.
+- **Everything runs on synthetic data,** so absolute numbers will not transfer to real traffic. Fraud is more common and more scripted here than in real life, and thresholds must be re-fitted on real data. The mule consortium's four providers and shared-SIM rates are simulated assumptions; the crypto protocol is real code ([CONSORTIUM.md](docs/CONSORTIUM.md)).
 - **It is a prototype, not a deployment.** Stream workers scale out, but every one holds the whole feature state and events enter it one at a time, so throughput stops growing at a few workers ([SCALING.md](docs/SCALING.md)). TLS ends at a Caddy proxy, secrets come from files with no vault client, and keys rotate by command, not on a schedule ([SECURITY.md](docs/SECURITY.md)).
 - **The demo scaffolding is not the product.** The demo accounts, the phone demo endpoints and the review simulator exist only outside production mode.
-- **No model output moves or blocks money on its own.** A hold waits for an analyst and a freeze needs two people.
+- **No model output moves or blocks money on its own.** A hold waits for an analyst and a freeze needs two people. An optional language-model case note never decides; failed drafts fall back to the template ([DECISION_POLICY.md](docs/DECISION_POLICY.md) §7).
 - **The Bangla texts were written by the developers** and have not been reviewed by a professional translator. The console has a sign-off per text for a translator to use; until it is filled in, they are shown as unreviewed.
 
 The limits of each part are listed in its document under "Limits, stated plainly".
 
 ## 🌍 Impact
 
-- **Customers:** a warning in their own language at the one moment it can still help, and far fewer honest payments interrupted than a rules-only system.
-- **Fraud teams:** one case per mule wallet instead of one alert per victim, each with its reasons and its network already laid out.
+- **Customers:** a warning in their own language at the one moment it can still help, a way to appeal a wrong interrupt, and a refund claim when money already left — with far fewer honest payments interrupted than a rules-only system.
+- **Fraud teams:** one case per mule wallet instead of one alert per victim, each with its reasons and its network already laid out, plus partner mule signals that never expose raw identifiers.
 - **The wallet operator:** a measurable trade-off between money saved, customers interrupted and reviewer hours, and an audit trail for every decision.
 
 <div align="center">
