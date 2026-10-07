@@ -35,7 +35,7 @@ SYSTEM = Ctx(None, "system", None)
 RUNTIME_TABLES = (
     "refunds", "appeals", "pending_decisions", "shadow_scores", "decisions", "case_events",
     "freeze_requests", "customer_reports",
-    "wallet_flags", "cases", "transactions", "past_cases", "wallets", "agents",
+    "wallet_flags", "blocklist", "cases", "transactions", "past_cases", "wallets", "agents",
 )  # fmt: skip
 TXN_COLUMNS = (
     "txn_id", "ts", "type", "sender_id", "sender_type", "receiver_id", "receiver_type",

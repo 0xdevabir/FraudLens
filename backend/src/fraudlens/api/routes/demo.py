@@ -257,7 +257,7 @@ def recipient_check(body: RecipientCheck, p: Plat, ctx: Staff) -> dict:
 def message_check(body: MessageCheck, p: Plat, s: Db, ctx: Staff) -> dict:
     """The demo customer asks whether a message is a scam. The text is not recorded."""
     _limit(p.message_limit, body.wallet_id)
-    found = check_text(p, body.text, body.wallet_id)
+    found = check_text(p, body.text, s, body.wallet_id)
     audit(
         s, ctx, "demo.message_checked", "wallet", body.wallet_id,
         level=found["level"], categories=[c["id"] for c in found["categories"]],

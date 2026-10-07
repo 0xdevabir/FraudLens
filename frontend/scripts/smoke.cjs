@@ -52,11 +52,11 @@ async function examples(password) {
 async function main() {
   const password = seedPassword();
   const staff = ["/", "/impact", "/model", "/fairness", "/policy", "/fraud-types", "/phone"];
-  const review = ["/alerts", "/cases", "/approvals", "/appeals", "/refunds", "/network", "/rings", "/agents", ...(await examples(password))];
+  const review = ["/alerts", "/cases", "/approvals", "/appeals", "/blocklist", "/refunds", "/network", "/rings", "/agents", ...(await examples(password))];
   const plan = {
     analyst1: [...staff, ...review],
-    supervisor1: [...staff, ...review, "/audit"],
-    admin: [...staff, "/audit"],
+    supervisor1: [...staff, ...review, "/audit", "/webhooks", "/api-keys"],
+    admin: [...staff, "/audit", "/webhooks", "/api-keys"],
   };
 
   const browser = await chromium.launch();

@@ -98,3 +98,12 @@ export function idKind(id: string): "wallet" | "agent" | "device" {
   if (id.startsWith("D")) return "device";
   return "wallet";
 }
+
+/** "12 min left", "3 min late": how far a deadline is, from a signed number of seconds. */
+export function countdown(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) return "–";
+  const late = seconds < 0;
+  const minutes = Math.round(Math.abs(seconds) / 60);
+  const text = minutes >= 120 ? `${Math.round(minutes / 60)} h` : `${minutes} min`;
+  return late ? `${text} late` : `${text} left`;
+}

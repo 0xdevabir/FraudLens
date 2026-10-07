@@ -1,7 +1,7 @@
 """refunds for scam victims
 
-Revision ID: 0006_refunds
-Revises: 0005
+Revision ID: 0010
+Revises: 0009
 Create Date: 2026-10-07 18:00:00.000000
 
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0006_refunds"
-down_revision: str | Sequence[str] | None = "0005"
+revision: str = "0010"
+down_revision: str | Sequence[str] | None = "0009"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -1,9 +1,12 @@
 "use client";
 
-import { Async, Badge, Card, PageHeader, Table, Td, TierBadge } from "@/components/ui";
-import { useApi } from "@/lib/api";
-import { num, pct, TIERS, words } from "@/lib/format";
-import type { Report, Text2, Tier } from "@/lib/types";
+import { useState } from "react";
+
+import { useSession } from "@/components/session";
+import { Async, Badge, Button, Card, ErrorNote, inputClass, Modal, PageHeader, Table, Td, type Tone, TierBadge } from "@/components/ui";
+import { api, download, useApi } from "@/lib/api";
+import { num, pct, TIERS, when, words } from "@/lib/format";
+import type { Report, Text2, Tier, TranslationText, Translations } from "@/lib/types";
 
 interface Condition { field: string; op: string; value: number | string }
 interface Policy {
@@ -169,6 +172,112 @@ function View({ policy, report }: { policy: Policy; report?: Report }) {
   );
 }
 
+const REVIEW_TONE: Record<TranslationText["status"], Tone> = { approved: "green", changes_requested: "amber", unreviewed: "slate", outdated: "orange" };
+const REVIEW_LABEL: Record<TranslationText["status"], string> = {
+  approved: "Signed off", changes_requested: "Changes asked", unreviewed: "Not reviewed", outdated: "Wording changed",
+};
+
+function SignOff({ item, onClose, onDone }: { item: TranslationText; onClose: () => void; onDone: () => void }) {
+  const [name, setName] = useState("");
+  const [status, setStatus] = useState<"approved" | "changes_requested">("approved");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (name.trim().length < 2 || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/v1/policy/translations/${encodeURIComponent(item.key).replace(/%3A/g, ":")}/review`, {
+        status, reviewer_name: name.trim(), ...(note.trim() ? { note: note.trim() } : {}),
+      });
+      onDone();
+      onClose();
+    } catch (problem) {
+      setError(problem as Error);
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal title={`Sign off: ${item.label}`} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-3">
+        <p lang="bn" className="rounded-xl bg-white/6 p-3 text-sm text-fg">{item.bn}</p>
+        <p className="text-xs text-fg-3">{item.en}</p>
+        <label className="block text-xs font-medium text-fg-2">
+          Translator&apos;s name
+          <input autoFocus maxLength={120} className={`${inputClass} mt-1 block w-full`} value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label className="block text-xs font-medium text-fg-2">
+          Verdict
+          <select className={`${inputClass} mt-1 block w-full`} value={status} onChange={(e) => setStatus(e.target.value as typeof status)}>
+            <option value="approved">The Bangla is right</option>
+            <option value="changes_requested">Changes needed</option>
+          </select>
+        </label>
+        <label className="block text-xs font-medium text-fg-2">
+          Note (optional)
+          <textarea rows={2} maxLength={1000} className={`${inputClass} mt-1 block w-full`} value={note} onChange={(e) => setNote(e.target.value)} />
+        </label>
+        {error && <ErrorNote error={error} />}
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" disabled={name.trim().length < 2 || busy}>{busy ? "Working…" : "Record"}</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Which Bangla texts a translator has read. A sign-off covers the exact wording, so an edit un-signs it. */
+function TranslationReview() {
+  const { canAudit } = useSession();
+  const sheet = useApi<Translations>("/v1/policy/translations");
+  const [open, setOpen] = useState<TranslationText | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  return (
+    <Card
+      title="Bangla review"
+      hint="The texts were written by the developers. A translator signs each one off here; a sign-off covers the exact wording, so changing a text makes it unreviewed again."
+      actions={
+        <Button small onClick={() => download("/v1/policy/translations.csv", "fraudlens-bangla-texts.csv").catch(setError)}>
+          Sheet for the translator
+        </Button>
+      }
+      flush
+    >
+      {error && <div className="px-4 pt-3"><ErrorNote error={error} /></div>}
+      <Async state={sheet}>
+        {(data) => (
+          <>
+            <div className="flex flex-wrap gap-2 border-b border-line px-4 py-3 text-xs text-fg-2">
+              {(Object.keys(REVIEW_LABEL) as TranslationText["status"][]).map((s) => (
+                <Badge key={s} tone={REVIEW_TONE[s]}>{REVIEW_LABEL[s]}: {num(data.counts[s] ?? 0)}</Badge>
+              ))}
+              <span className="ml-auto text-fg-3">Policy {data.policy_version}</span>
+            </div>
+            <Table head={["Text", "বাংলা", "Review", ""]}>
+              {data.texts.map((item) => (
+                <tr key={item.key}>
+                  <Td className="whitespace-nowrap font-mono text-xs text-fg-3">{item.label}</Td>
+                  <Td className="max-w-xl whitespace-normal"><span lang="bn">{item.bn}</span></Td>
+                  <Td className="whitespace-normal">
+                    <Badge tone={REVIEW_TONE[item.status]}>{REVIEW_LABEL[item.status]}</Badge>
+                    {item.reviewed_by && <div className="mt-1 text-xs text-fg-3">{item.reviewed_by} · {when(item.reviewed_at)}</div>}
+                    {item.note && <div className="text-xs text-fg-3">{item.note}</div>}
+                  </Td>
+                  <Td>{canAudit && <Button small onClick={() => setOpen(item)}>Sign off</Button>}</Td>
+                </tr>
+              ))}
+            </Table>
+            {open && <SignOff item={open} onClose={() => setOpen(null)} onDone={sheet.reload} />}
+          </>
+        )}
+      </Async>
+    </Card>
+  );
+}
+
 export default function PolicyPage() {
   const policy = useApi<Policy>("/v1/policy");
   const report = useApi<Report>("/v1/model/report");
@@ -179,6 +288,7 @@ export default function PolicyPage() {
         sub="How a risk score becomes an action: the tier thresholds, the rules that sit beside the model, the rules-only fallback, and the words customers see."
       />
       <Async state={policy}>{(data) => <View policy={data} report={report.data} />}</Async>
+      <div className="mt-4"><TranslationReview /></div>
     </>
   );
 }

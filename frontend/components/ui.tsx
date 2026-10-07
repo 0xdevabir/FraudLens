@@ -3,7 +3,7 @@
 import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react";
 
 import { ApiError, type Loaded } from "@/lib/api";
-import { TIER_LABEL, words } from "@/lib/format";
+import { countdown, TIER_LABEL, words } from "@/lib/format";
 import type { NamedCategory, Tier } from "@/lib/types";
 
 export function cx(...parts: (string | false | null | undefined)[]): string {
@@ -100,12 +100,26 @@ const STATUS_TONE: Record<string, Tone> = {
   pending: "amber", approved: "red", confirmed_fraud: "red", legitimate: "green", inconclusive: "slate",
   stable: "green", watch: "amber", shifted: "red", frozen: "blue", active: "slate",
   fired: "red", not_fired: "slate", not_applicable: "slate",
+  delivered: "green", dead: "red",
+  changes_requested: "amber", unreviewed: "slate", outdated: "orange", expired: "amber", removed: "slate",
   paid: "green", unrecoverable: "orange", declined: "slate",
 };
 
 export function StatusBadge({ status }: { status: string | null | undefined }) {
   if (!status) return <span className="text-fg-4">–</span>;
   return <Badge tone={STATUS_TONE[status] ?? "slate"}>{words(status)}</Badge>;
+}
+
+const SLA_TONE: Record<string, Tone> = { ok: "green", at_risk: "amber", breached: "red" };
+
+/** How close a held case is to its review deadline; nothing for a case without one. */
+export function SlaBadge({ state, seconds }: { state: string | null | undefined; seconds: number | null | undefined }) {
+  if (!state) return <span className="text-fg-4">–</span>;
+  return (
+    <Badge tone={SLA_TONE[state] ?? "slate"} title={state === "breached" ? "The review deadline has passed" : "Time left to review"}>
+      {state === "breached" ? "overdue · " : state === "at_risk" ? "due soon · " : ""}{countdown(seconds)}
+    </Badge>
+  );
 }
 
 /** The fraud categories an alert, a report or a message was put in. The tooltip says on what evidence. */
@@ -364,10 +378,10 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
  * The server enforces the length; the dialog only saves a round trip.
  */
 export function ReasonDialog({
-  title, label = "Reason", intro, confirm, variant = "primary", minLength = 10, onSubmit, onClose,
+  title, label = "Reason", intro, confirm, variant = "primary", minLength = 10, onSubmit, onClose, children,
 }: {
   title: string; label?: string; intro?: ReactNode; confirm: string; variant?: "primary" | "danger" | "good";
-  minLength?: number; onSubmit: (reason: string) => Promise<unknown>; onClose: () => void;
+  minLength?: number; onSubmit: (reason: string) => Promise<unknown>; onClose: () => void; children?: ReactNode;
 }) {
   const id = useId();
   const [text, setText] = useState("");
@@ -393,6 +407,7 @@ export function ReasonDialog({
     <Modal title={title} onClose={onClose}>
       <form onSubmit={submit} className="space-y-3">
         {intro && <div className="text-sm text-fg-2">{intro}</div>}
+        {children}
         <label htmlFor={id} className="block text-xs font-medium text-fg-2">{label}</label>
         <textarea
           id={id}

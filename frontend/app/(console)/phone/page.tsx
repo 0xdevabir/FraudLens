@@ -32,7 +32,7 @@ interface Habits {
 }
 interface Check { level: "none" | "caution" | "high"; message: Text2 | null }
 interface Outcome { status: string; status_reason: string | null }
-interface Reported { report_id: number; case_id: number; refund: CustomerRefund | null }
+interface Reported { report_id: number; case_id: number; reference: string; refund: CustomerRefund | null }
 
 // Addresses from the ranges reserved for documentation: they belong to nobody.
 const NETWORKS = [
@@ -845,6 +845,8 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
           <p className="mt-3 text-center text-xs text-fg-2">
             Report received.{" "}
             {canReview ? <Link href={`/cases/${reported.case_id}`} className="text-info hover:underline">It is on case #{reported.case_id}</Link> : `It is on case #${reported.case_id}`}.
+            {" "}Reference <code>{reported.reference}</code>:{" "}
+            <Link href="/track" target="_blank" className="text-info hover:underline">follow it</Link>.
             {reported.refund && (
               <>
                 {" "}Refund claim #{reported.refund.id} is {words(reported.refund.status).toLowerCase()}

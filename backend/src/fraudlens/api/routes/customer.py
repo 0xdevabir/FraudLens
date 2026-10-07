@@ -13,6 +13,7 @@ from ...intel import proof
 from ...intel.analyze import check_message
 from ...intel.memory import explain as explain_link
 from ...intel.taxonomy import load_taxonomy
+from ...platform import blocklist as lists
 from ...platform import cases as workflow
 from ...platform.audit import WorkflowError
 from ..deps import Db, Plat, Platform, Service, TxnId
@@ -89,24 +90,32 @@ def report_view(p: Platform, made, refund) -> dict:
     claim = None
     if refund is not None:
         claim = customer_refund_view(refund, refund.wallet_id in p.scorer.frozen, p.scorer.now())
-    return {"report_id": made.id, "case_id": made.case_id, "refund": claim}
+    return {
+        "report_id": made.id,
+        "case_id": made.case_id,
+        "reference": made.reference,
+        "refund": claim,
+    }
 
 
 @router.post("/message-check")
-def message_check(body: MessageCheck, p: Plat, ctx: Service) -> dict:
+def message_check(body: MessageCheck, p: Plat, s: Db, ctx: Service) -> dict:
     """'Is this message a scam?' A level, the kinds of fraud it looks like, and why.
 
     Advice only: nothing is blocked, opened or recorded because of the answer, and
     the text is not kept. What the customer is told is the taxonomy's fixed advice.
     """
     _limit(p.message_limit, body.wallet_id)
-    return check_text(p, body.text, body.wallet_id)
+    return check_text(p, body.text, s, body.wallet_id)
 
 
-def check_text(p: Platform, text: str, wallet_id: str | None = None) -> dict:
+def check_text(
+    p: Platform, text: str, s: Session | None = None, wallet_id: str | None = None
+) -> dict:
     """With `wallet_id`, a flagged message's wallet IDs and amounts (never its text) are
     kept for half an hour, so a payment that follows it is warned (`intel/memory.py`)."""
-    found = check_message(text, p.intel, load_taxonomy())
+    listed = lists.in_text(s, text, p.scorer.now()) if s is not None else []
+    found = check_message(text, p.intel, load_taxonomy(), listed)
     if wallet_id is not None:
         p.scorer.messages.remember(wallet_id, text, found, p.scorer.now())
     return found
@@ -132,5 +141,5 @@ def verify_payment(p: Platform, s: Session, body: PaymentVerify) -> dict:
         "claimed": {"txn_id": claim.txn_id, "amount": claim.amount},
         "message": load_taxonomy().proof_messages[found["status"]].model_dump(),
         # What the accompanying text asks for ("send the extra back") is a second, separate sign.
-        "text": check_text(p, body.message) if body.message.strip() else None,
+        "text": check_text(p, body.message, s) if body.message.strip() else None,
     }

@@ -31,3 +31,10 @@ def redact(text: str | None) -> str | None:
         out += [text[last:start], label]
         last = end
     return "".join(out) + text[last:]
+
+
+def mask_id(value: str | None) -> str | None:
+    """A wallet or agent identifier as the console shows it: `W***6128`."""
+    if not value:
+        return value
+    return f"{value[0]}***" if len(value) <= 5 else f"{value[0]}***{value[-4:]}"

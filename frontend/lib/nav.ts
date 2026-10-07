@@ -28,6 +28,7 @@ export const NAV: { heading: string; items: NavItem[] }[] = [
       { href: "/cases", label: "Cases", short: "Cases", roles: REVIEW, icon: "M3 7.5A2 2 0 0 1 5 5.5h4l2 2h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" },
       { href: "/approvals", label: "Freeze approvals", short: "Approvals", roles: REVIEW, icon: "M7.5 11V8a4.5 4.5 0 0 1 9 0v3M5.5 11h13v9.5h-13zM12 14.5v2.5" },
       { href: "/appeals", label: "Customer appeals", short: "Appeals", roles: REVIEW, icon: "M4 5.5h16v10.5H9.5L5 20v-4H4z" },
+      { href: "/blocklist", label: "Blocklist", short: "Blocklist", roles: REVIEW, icon: "M3 12a9 9 0 1 0 18 0 9 9 0 1 0-18 0M5.6 5.6l12.8 12.8" },
       { href: "/refunds", label: "Victim refunds", short: "Refunds", roles: REVIEW, icon: "M9 13.5 4.5 9 9 4.5M4.5 9H14a5.5 5.5 0 0 1 0 11h-3.5" },
     ],
   },
@@ -48,6 +49,8 @@ export const NAV: { heading: string; items: NavItem[] }[] = [
       { href: "/policy", label: "Decision policy", short: "Policy", roles: ALL, icon: "M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6" },
       { href: "/fraud-types", label: "Fraud types", short: "Fraud types", roles: ALL, icon: "M3.5 12V3.5H12l9 9-8.5 8.5zM8 8h.01" },
       { href: "/audit", label: "Audit log", short: "Audit", roles: ["supervisor", "admin"], icon: "M12 3l7.5 3v6c0 4.6-3.2 7.7-7.5 9-4.3-1.3-7.5-4.4-7.5-9V6zM9 12l2 2 4-4" },
+      { href: "/webhooks", label: "Webhooks", short: "Webhooks", roles: ["supervisor", "admin"], icon: "M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" },
+      { href: "/api-keys", label: "Partner API keys", short: "API keys", roles: ["supervisor", "admin"], icon: "M8 15a4 4 0 1 0 0-8 4 4 0 1 0 0 8M11.5 11H21M18 11v3.5M15 11v2.5" },
     ],
   },
   {

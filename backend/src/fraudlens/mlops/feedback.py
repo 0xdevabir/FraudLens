@@ -106,4 +106,28 @@ def summary(s: Session) -> dict:
         },
         "approved_appeals": appeals,
         "last_verdict_at": s.scalar(select(func.max(Case.closed_at))),
+        "false_alarm_reasons": false_alarm_reasons(s),
     }
+
+
+def false_alarm_reasons(s: Session) -> list[dict]:
+    """Why reviewers called alerts legitimate, most common first. For reading, not training:
+    a reason code never changes a label or a weight. A code that keeps coming back points
+    at a rule or threshold worth a look in the next policy review."""
+    rows = s.execute(
+        select(Case.reason_code, func.count(Case.id.distinct()), func.count(Decision.txn_id))
+        .outerjoin(Decision, Decision.case_id == Case.id)
+        .where(Case.verdict == "legitimate")
+        .group_by(Case.reason_code)
+        .order_by(func.count(Case.id.distinct()).desc())
+    ).all()
+    total = sum(cases for _, cases, _ in rows) or 1
+    return [
+        {
+            "reason_code": code or "not_given",
+            "cases": cases,
+            "alerts": alerts,
+            "share": cases / total,
+        }
+        for code, cases, alerts in rows
+    ]

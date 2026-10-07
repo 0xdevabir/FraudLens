@@ -6,6 +6,7 @@ from datetime import datetime
 
 from ..intel.attribute import categorise
 from ..intel.taxonomy import load_taxonomy
+from ..platform.cases import sla_state
 from ..platform.models import (
     Appeal,
     Case,
@@ -48,7 +49,14 @@ def case_view(c: Case, now: datetime, names: dict[int, str] | None = None) -> di
         "opened_at": c.opened_at,
         "sla_due_at": c.sla_due_at,
         "overdue": c.status != "closed" and c.sla_due_at is not None and c.sla_due_at < now,
+        "sla_state": sla_state(c, now),
+        "sla_remaining_seconds": (
+            round((c.sla_due_at - now).total_seconds())
+            if c.status != "closed" and c.sla_due_at is not None
+            else None
+        ),
         "verdict": c.verdict,
+        "reason_code": c.reason_code,
         "closed_at": c.closed_at,
         "closed_by": c.closed_by,
         "closer": names.get(c.closed_by),

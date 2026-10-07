@@ -9,13 +9,14 @@ verdict on a frozen wallet also refunds the victims who reported it (refunds.py)
 from __future__ import annotations
 
 import math
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from . import refunds
+from . import blocklist as lists
+from . import notify, refunds, tracking
 from .audit import Ctx, WorkflowError, audit
 from .models import (
     Case,
@@ -31,6 +32,61 @@ from .models import (
 from .scoring import Scorer
 
 REVIEWERS = ("analyst", "supervisor")
+
+# A case is "at risk" once this share of its review window is left, or less.
+AT_RISK_FRACTION = 0.3
+SYSTEM = Ctx(None, "system", None)
+
+
+def sla_state(case: Case, now: datetime) -> str | None:
+    """`ok`, `at_risk` or `breached` for an open case with a review deadline; else None."""
+    if case.status == "closed" or case.sla_due_at is None:
+        return None
+    if case.sla_due_at < now:
+        return "breached"
+    window = (case.sla_due_at - case.opened_at).total_seconds()
+    left = (case.sla_due_at - now).total_seconds()
+    return "at_risk" if left <= window * AT_RISK_FRACTION else "ok"
+
+
+def sweep_sla(scorer: Scorer, auto_escalate: bool = False) -> list[int]:
+    """Record the cases that have missed their review deadline, once each.
+
+    A breach is written to the timeline and the audit log. With `auto_escalate`
+    the case also goes to the supervisors; the money stays held either way, and
+    only a person releases or blocks it. Returns the ids newly found breached.
+    """
+    now = scorer.now()
+    found: list[int] = []
+    with scorer.sessions() as s:
+        already = select(CaseEvent.case_id).where(CaseEvent.kind == "sla_breached")
+        due = s.scalars(
+            select(Case)
+            .where(
+                Case.status != "closed",
+                Case.sla_due_at.is_not(None),
+                Case.sla_due_at < now,
+                Case.id.not_in(already),
+            )
+            .order_by(Case.sla_due_at)
+            .with_for_update(skip_locked=True)
+        ).all()
+        for case in due:
+            minutes = round((now - case.sla_due_at).total_seconds() / 60)
+            escalate_it = auto_escalate and case.status in ("open", "in_review")
+            _event(
+                s, case.id, SYSTEM, "sla_breached",
+                f"review deadline missed by {minutes} min",
+                due_at=case.sla_due_at.isoformat(), escalated=escalate_it,
+            )  # fmt: skip
+            audit(s, SYSTEM, "case.sla_breached", "case", case.id, minutes_late=minutes)
+            if escalate_it:
+                case.status = "escalated"
+                _event(s, case.id, SYSTEM, "escalated", "automatic: review deadline missed")
+                audit(s, SYSTEM, "case.escalate", "case", case.id, automatic=True)
+            found.append(case.id)
+        s.commit()
+    return found
 
 
 def _case(s: Session, case_id: int, lock: bool = True) -> Case:
@@ -122,8 +178,19 @@ def escalate(sessions, ctx: Ctx, case_id: int, reason: str) -> Case:
     return case
 
 
-def give_verdict(scorer: Scorer, ctx: Ctx, case_id: int, verdict: str, note: str) -> dict:
+def give_verdict(
+    scorer: Scorer,
+    ctx: Ctx,
+    case_id: int,
+    verdict: str,
+    note: str,
+    reason_code: str | None = None,
+) -> dict:
     """Close a case. This is where held money is released or blocked, by a person."""
+    if reason_code is not None and verdict != "legitimate":
+        raise WorkflowError(
+            422, "reason_code_needs_legitimate", "a reason code explains a legitimate verdict"
+        )
     with scorer.transaction() as s:
         case = _case(s, case_id)
         if case.status == "closed":
@@ -157,18 +224,30 @@ def give_verdict(scorer: Scorer, ctx: Ctx, case_id: int, verdict: str, note: str
                 scorer.complete(txn)
                 released.append(txn.txn_id)
         now = scorer.now()
-        case.status, case.verdict = "closed", verdict
+        case.status, case.verdict, case.reason_code = "closed", verdict, reason_code
         case.closed_at, case.closed_by = now, ctx.user_id
         _event(
-            s, case.id, ctx, "verdict", note, verdict=verdict, released=released, blocked=blocked
-        )
+            s, case.id, ctx, "verdict", note,
+            verdict=verdict, reason_code=reason_code, released=released, blocked=blocked,
+        )  # fmt: skip
         audit(
             s, ctx, "case.verdict", "case", case.id,
-            verdict=verdict, subject=case.subject_id, released=released, blocked=blocked,
+            verdict=verdict, reason_code=reason_code, subject=case.subject_id,
+            released=released, blocked=blocked,
+        )  # fmt: skip
+        notify.enqueue(
+            s, "case.verdict",
+            {"case_id": case.id, "verdict": verdict, "released": released, "blocked": blocked},
         )  # fmt: skip
         s.flush()
         if fraud:
             scorer.flag(s, case.subject_id, now.timestamp(), "case_verdict", "case", case.id)
+            # Also listed, so the same wallet is recognised if it comes back unflagged.
+            lists.add(
+                s, ctx, "wallet", case.subject_id, f"confirmed fraud in case #{case.id}",
+                "verdict", case_id=case.id,
+            )  # fmt: skip
+            scorer.load_blocklist(s)
         settled = refunds.on_verdict(s, scorer, ctx, case)
     return {"case": case, "released": released, "blocked": blocked, **settled}
 
@@ -228,6 +307,15 @@ def decide_freeze(scorer: Scorer, ctx: Ctx, request_id: int, approve: bool, note
             s, ctx, f"freeze.{'approve' if approve else 'reject'}", "wallet", wallet.wallet_id,
             request_id=request.id, requested_by=request.requested_by,
         )  # fmt: skip
+        if approve:
+            notify.enqueue(
+                s, "freeze.approved",
+                {
+                    "wallet_id": wallet.wallet_id,
+                    "request_id": request.id,
+                    "case_id": request.case_id,
+                },
+            )  # fmt: skip
         s.flush()
         if approve:
             scorer.frozen.add(wallet.wallet_id)
@@ -326,6 +414,7 @@ def report_scam(
             s.add(case)
             s.flush()
         report = CustomerReport(
+            reference=tracking.new_reference(s),
             reporter_id=reporter_id,
             reported_wallet_id=reported_wallet_id,
             txn_id=txn_id,

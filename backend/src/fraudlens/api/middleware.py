@@ -12,6 +12,8 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.exceptions import HTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from ..platform import apikeys
+
 log = logging.getLogger(__name__)
 
 MAX_BODY_BYTES = 1_000_000
@@ -33,6 +35,17 @@ class RequestContext:
         self.app = app
         self.production = production
 
+    @staticmethod
+    def _count_failure(scope: Scope, status: int) -> None:
+        """A partner's failed request is counted against its key, for the usage chart."""
+        key_id = scope.get("state", {}).get("api_key_id")
+        if key_id is None or status < 400:
+            return
+        try:
+            apikeys.count_error(scope["app"].state.platform.redis, key_id)
+        except Exception:
+            log.exception("could not count a failed request for key %s", key_id)
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
@@ -49,6 +62,7 @@ class RequestContext:
             nonlocal response_started
             if message["type"] == "http.response.start":
                 response_started = True
+                self._count_failure(scope, message["status"])
                 out = MutableHeaders(scope=message)
                 out["X-Request-ID"] = request_id
                 out["X-Content-Type-Options"] = "nosniff"
