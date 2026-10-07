@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import settings
-from .config import DAY, SimConfig
+from .config import DAY, PROFILES, SimConfig
 from .engine import ADD_MONEY, CASH_IN, K_WALLET, KIND_NAMES, TYPE_NAMES, Simulation
 from .world import DISTRICTS, MERCHANT_CATEGORIES, SEGMENTS
 
@@ -210,9 +210,19 @@ def main() -> None:
     parser.add_argument("--small", action="store_true", help="test-sized world")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument(
+        "--profile",
+        choices=PROFILES,
+        default=settings.sim_profile,
+        help="calibrated: Bangladesh-sourced parameters (env FRAUDLENS_SIM_PROFILE)",
+    )
     args = parser.parse_args()
     cfg = SimConfig.small(args.seed) if args.small else SimConfig(seed=args.seed)
-    out = args.out or settings.data_dir / ("small" if args.small else "full")
+    cfg = cfg.with_profile(args.profile)
+    name = "small" if args.small else "full"
+    if cfg.profile != "default":
+        name = f"{name}_{cfg.profile}"  # never overwrite the published dataset
+    out = args.out or settings.data_dir / name
     meta = generate(cfg, out)
     print(json.dumps(meta["profile"], indent=2, default=str))
     print(f"wrote {out} in {meta['seconds']}s")

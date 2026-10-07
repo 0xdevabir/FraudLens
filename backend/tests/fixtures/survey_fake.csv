@@ -1,0 +1,6 @@
+respondent_id,consent,area,q01_contacted,q02_lost_money,q03_scam_type,q04_loss_bdt,q05_reported_to,q06_recovered,q07_warn_would_stop,q08_step_up_ok,q09_hold_ok,q10_max_hold_minutes,q11_false_alarms_per_year,q12_trust,q13_language,q14_comments
+FAKE-001,yes,urban,yes,yes,impersonation,5000,provider,none,5,4,3,30,2,more,bangla,FAKE ROW - not a real person
+FAKE-002,yes,urban,yes,no,,,,,4,5,2,10,1,same,both,FAKE ROW - not a real person
+FAKE-003,yes,rural,yes,yes,lottery_fee,1000,nobody,none,2,3,1,0,0,less,bangla,FAKE ROW - not a real person
+FAKE-004,yes,rural,no,no,,,,,5,5,4,60,3,more,bangla,FAKE ROW - not a real person
+FAKE-005,no,urban,yes,yes,wrong_send,99999,police,full,1,1,1,0,0,less,english,FAKE ROW - declined consent so must be ignored

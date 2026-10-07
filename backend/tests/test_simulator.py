@@ -1,4 +1,7 @@
+from dataclasses import fields
+
 import pandas as pd
+import pytest
 
 from fraudlens.simulator.config import SimConfig
 from fraudlens.simulator.engine import Simulation
@@ -90,3 +93,37 @@ def test_same_seed_gives_identical_data(small_tables):
     sim.run()
     again = build_tables(sim)["transactions"]
     pd.testing.assert_frame_equal(again, small_tables["transactions"])
+
+
+def test_default_profile_is_the_published_world():
+    assert SimConfig().with_profile("default") == SimConfig()
+    assert SimConfig.small().with_profile("default") == SimConfig.small()
+
+
+def test_calibrated_profile_changes_only_sourced_parameters():
+    base, cal = SimConfig.small(), SimConfig.small().with_profile("calibrated")
+    changed = {f.name for f in fields(SimConfig) if getattr(base, f.name) != getattr(cal, f.name)}
+    assert changed == {
+        "profile",
+        "txn_cap",
+        "send_median",
+        "cash_out_median",
+        "report_rate",
+        "ato_keep_share",
+    }
+
+
+def test_unknown_profile_is_rejected():
+    with pytest.raises(ValueError):
+        SimConfig().with_profile("real")
+
+
+def test_calibrated_world_is_capped_and_has_fewer_takeovers(small_tables):
+    cfg = SimConfig.small().with_profile("calibrated")
+    sim = Simulation(cfg)
+    sim.run()
+    cal = build_tables(sim)
+    t = cal["transactions"]
+    assert t.loc[t["sender_type"] == "wallet", "amount"].max() <= cfg.txn_cap
+    ato = (cal["cases"]["typology"] == "account_takeover").mean()
+    assert ato < (small_tables["cases"]["typology"] == "account_takeover").mean()

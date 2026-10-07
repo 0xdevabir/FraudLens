@@ -1,4 +1,4 @@
-.PHONY: help setup up redis down data features train policy insights intel pipeline test lint fmt \
+.PHONY: help setup up redis down data data-calibrated features train policy insights intel pipeline test lint fmt \
 	migrate seed load api replay replay-live verify platform \
 	review retrain shadow models promote console console-build smoke \
 	demo demo-reset
@@ -39,6 +39,9 @@ down: ## Stop everything (the demo too) and keep the data
 
 data: ## Generate the synthetic dataset
 	cd backend && uv run python -m fraudlens.simulator.generate
+
+data-calibrated: ## Generate the Bangladesh-calibrated dataset into data/full_calibrated
+	cd backend && uv run python -m fraudlens.simulator.generate --profile calibrated
 
 features: ## Replay the dataset through the feature engine
 	cd backend && uv run python -m fraudlens.features.build

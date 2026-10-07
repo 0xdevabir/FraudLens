@@ -187,7 +187,7 @@ class Simulation:
                 continue
             times = self._times(idx, t0).tolist()
             if typ == SEND:
-                amounts = self._amounts(idx, 1500, 0.9, 50)
+                amounts = self._amounts(idx, cfg.send_median, 0.9, 50)
             elif typ == PAYMENT:
                 amounts = self._amounts(idx, 450, 0.8, 20)
             elif typ == RECHARGE:
@@ -195,7 +195,7 @@ class Simulation:
             elif typ == BILL_PAY:
                 amounts = self._amounts(idx, 900, 0.6, 100)
             elif typ == CASH_OUT:
-                amounts = self._amounts(idx, 3000, 0.7, 500)
+                amounts = self._amounts(idx, cfg.cash_out_median, 0.7, 500)
             else:
                 amounts = self._amounts(idx, 2500, 0.7, 500)
             topup = typ in (SEND, PAYMENT, RECHARGE, BILL_PAY)
