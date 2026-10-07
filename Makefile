@@ -1,6 +1,6 @@
 .PHONY: help setup up redis down data data-calibrated features train policy insights mitigation intel intel-compare adversary pipeline test lint fmt \
 	migrate seed load api replay replay-live verify platform \
-	review retrain shadow models promote console console-build smoke label-realism e2e-phone \
+	review history retrain shadow models promote console console-build smoke label-realism e2e-phone \
 	demo demo-reset external
 
 API_PORT ?= 8010
@@ -107,8 +107,11 @@ verify: ## Check that what was served matches the offline evaluation
 
 platform: migrate seed load ## Database ready for `make api`
 
-review: ## Demo: close the older open cases with the simulation's ground truth (needs `make api`)
+review: ## Close the older open cases with the simulation's ground truth (needs `make api`)
 	cd backend && uv run python -m fraudlens.mlops.review --api $(API_URL)
+
+history: ## Seed prior freezes, appeals, refunds and blocklist activity (needs `make api`)
+	cd backend && uv run python -m fraudlens.mlops.history --api $(API_URL)
 
 retrain: ## Retrain with analyst verdicts as labels; registers a challenger, promotes nothing
 	cd backend && uv run python -m fraudlens.mlops.retrain
@@ -161,4 +164,6 @@ keys: ## List the key ids in both keyrings (never the secrets)
 
 fmt: ## Auto-format
 	cd backend && uv run ruff check --fix src tests && uv run ruff format src tests
+
+
 

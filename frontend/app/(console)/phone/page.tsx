@@ -48,6 +48,18 @@ const SCENARIO: Record<string, { title: string; text: string }> = {
   hold: { title: "Very likely fraud", text: "Paused until a reviewer decides; the customer can appeal." },
   confirmed_fraud: { title: "To a confirmed-fraud wallet", text: "Held by a hard rule, whatever the model says." },
 };
+
+/** Primary scenarios keep a plain tier id; extras are `warn_2`, `hold_3`, … */
+function scenarioKind(id: string): string {
+  return id.replace(/_\d+$/, "");
+}
+
+function scenarioCopy(id: string): { title: string; text: string } {
+  const kind = scenarioKind(id);
+  const base = SCENARIO[kind] ?? { title: words(kind), text: "A wallet-to-wallet payment the platform has already seen." };
+  if (id === kind) return base;
+  return { title: `${base.title} (another pair)`, text: "Same answer today, different wallets." };
+}
 const CATEGORIES: [string, string, string][] = [
   ["impersonation", "কেউ কর্মকর্তা সেজে ফোন করেছে", "Someone posed as staff"],
   ["prize_or_lottery", "পুরস্কার বা লটারির কথা বলেছে", "A prize or lottery"],
@@ -950,9 +962,10 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
                 )}
               >
                 <span>
-                  <span className="font-medium text-fg">{SCENARIO[scenario.id]?.title ?? words(scenario.id)}</span>
+                  <span className="font-medium text-fg">{scenarioCopy(scenario.id).title}</span>
                   <span className="block text-xs text-fg-3">
-                    {SCENARIO[scenario.id]?.text} {taka(scenario.payment.amount)} to {maskId(scenario.payment.receiver_id)}.
+                    {maskId(scenario.payment.sender_id)} → {maskId(scenario.payment.receiver_id)} · {taka(scenario.payment.amount)}.{" "}
+                    {scenarioCopy(scenario.id).text}
                   </span>
                 </span>
                 <TierBadge tier={scenario.expected_tier} />
@@ -961,12 +974,81 @@ function Demo({ scenarios, startedAt }: { scenarios: Scenario[]; startedAt: stri
             {!scenarios.length && <p className="text-sm text-fg-3">No ready payments: the platform has not scored any yet.</p>}
           </div>
         </Card>
-        <Card title="Or enter your own" hint="Both wallets must be ones the platform has seen.">
+        <Card title="Or enter your own" hint="Pick a ready pair, or type wallet ids the platform has seen (for example W0001234) — not mobile numbers.">
+          {scenarios.length > 0 && (
+            <div className="mb-3 space-y-1.5">
+              <div className="text-xs text-fg-3">Ready wallet → wallet pairs</div>
+              <div className="flex flex-col gap-1.5">
+                {scenarios.map((scenario) => (
+                  <button
+                    key={`pair-${scenario.id}`}
+                    type="button"
+                    onClick={() =>
+                      setCustom({
+                        sender: scenario.payment.sender_id,
+                        receiver: scenario.payment.receiver_id,
+                        amount: String(Math.round(scenario.payment.amount)),
+                      })
+                    }
+                    className="flex w-full items-center justify-between gap-2 rounded-xl border border-line px-2.5 py-1.5 text-left text-xs hover:bg-wash"
+                  >
+                    <span className="font-mono text-fg">
+                      {maskId(scenario.payment.sender_id)} → {maskId(scenario.payment.receiver_id)}
+                    </span>
+                    <span className="shrink-0 text-fg-3">
+                      {taka(scenario.payment.amount)} · <TierBadge tier={scenario.expected_tier} />
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <form onSubmit={putCustom} className="grid grid-cols-2 gap-2 text-xs text-fg-2">
-            <label>From wallet<input className={`${inputClass} mt-1 w-full`} value={custom.sender} maxLength={32} onChange={(e) => setCustom({ ...custom, sender: e.target.value })} /></label>
-            <label>To wallet<input className={`${inputClass} mt-1 w-full`} value={custom.receiver} maxLength={32} onChange={(e) => setCustom({ ...custom, receiver: e.target.value })} /></label>
-            <label className="col-span-2">Amount (taka)<input className={`${inputClass} mt-1 w-full`} inputMode="decimal" value={custom.amount} maxLength={10} onChange={(e) => setCustom({ ...custom, amount: e.target.value })} /></label>
-            <Button type="submit" disabled={busy} className="col-span-2 mt-1">Put on the phone</Button>
+            <label>
+              From wallet
+              <input
+                className={`${inputClass} mt-1 w-full font-mono`}
+                list="demo-senders"
+                value={custom.sender}
+                maxLength={32}
+                placeholder="W0001234"
+                onChange={(e) => setCustom({ ...custom, sender: e.target.value })}
+              />
+            </label>
+            <label>
+              To wallet
+              <input
+                className={`${inputClass} mt-1 w-full font-mono`}
+                list="demo-receivers"
+                value={custom.receiver}
+                maxLength={32}
+                placeholder="W0005678"
+                onChange={(e) => setCustom({ ...custom, receiver: e.target.value })}
+              />
+            </label>
+            <datalist id="demo-senders">
+              {[...new Set(scenarios.map((s) => s.payment.sender_id))].map((id) => (
+                <option key={id} value={id} />
+              ))}
+            </datalist>
+            <datalist id="demo-receivers">
+              {[...new Set(scenarios.map((s) => s.payment.receiver_id))].map((id) => (
+                <option key={id} value={id} />
+              ))}
+            </datalist>
+            <label className="col-span-2">
+              Amount (taka)
+              <input
+                className={`${inputClass} mt-1 w-full`}
+                inputMode="decimal"
+                value={custom.amount}
+                maxLength={10}
+                onChange={(e) => setCustom({ ...custom, amount: e.target.value })}
+              />
+            </label>
+            <Button type="submit" disabled={busy} className="col-span-2 mt-1">
+              Put on the phone
+            </Button>
           </form>
         </Card>
         {payment && profile && (

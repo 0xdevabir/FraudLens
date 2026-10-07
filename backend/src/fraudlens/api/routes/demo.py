@@ -45,7 +45,8 @@ from .refunds import customer_view, find_refund
 router = APIRouter(prefix="/demo", tags=["demo"])
 
 DEFAULT_BALANCE = 20_000.0
-CANDIDATES = 40  # recent payments tried per tier
+CANDIDATES = 80  # recent payments tried per tier
+PER_TIER = 3  # how many ready wallet→wallet options to offer per answer
 Amount = Annotated[float, Query(gt=0, le=10_000_000, allow_inf_nan=False)]
 
 
@@ -124,11 +125,12 @@ def habits(sender_id: Identifier, p: Plat, ctx: Staff) -> dict:
 
 @router.get("/scenarios")
 def scenarios(p: Plat, s: Db, ctx: Staff) -> dict:
-    """One ready payment per tier, checked against the policy as it stands right now.
+    """Ready wallet→wallet payments, checked against the policy as it stands right now.
 
-    Each is a recent payment between two wallets that would still get that answer
-    today, plus one to a confirmed-fraud wallet to show a hard rule. A tier with no
-    such payment is left out.
+    Up to a few recent payments per tier that would still get that answer today,
+    plus one to a confirmed-fraud wallet to show a hard rule. The first of each
+    tier keeps the plain tier id (`allow`, `hold`, …) so existing demos and
+    tests keep working; extras are `warn_2`, `hold_3`, and so on.
     """
     frozen = p.scorer.frozen
     found = []
@@ -143,16 +145,23 @@ def scenarios(p: Plat, s: Db, ctx: Staff) -> dict:
             .order_by(Transaction.ts.desc())
             .limit(CANDIDATES)
         ).all()  # fmt: skip
+        seen: set[tuple[str, str]] = set()
+        n = 0
         for sender, receiver, amount, device in rows:
-            if sender in frozen or receiver in frozen:
+            if sender in frozen or receiver in frozen or (sender, receiver) in seen:
                 continue
             try:
                 body = _draft(p, s, sender, receiver, float(amount), device)
-                if _tier(p, body) == tier:
-                    found.append({"id": tier, "expected_tier": tier, "payment": body})
-                    break
+                if _tier(p, body) != tier:
+                    continue
             except (WorkflowError, KeyError):
                 continue
+            seen.add((sender, receiver))
+            n += 1
+            sid = tier if n == 1 else f"{tier}_{n}"
+            found.append({"id": sid, "expected_tier": tier, "payment": body})
+            if n >= PER_TIER:
+                break
 
     flagged = sorted(p.scorer.engine.flagged.keys() - frozen)
     payer = next((f["payment"]["sender_id"] for f in found if f["id"] == "allow"), None)

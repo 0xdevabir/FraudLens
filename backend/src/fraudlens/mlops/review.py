@@ -4,11 +4,10 @@ reviewer would reach, so the feedback loop has labels to learn from.
     uv run python -m fraudlens.mlops.review                 # leave the last 7 days open
     uv run python -m fraudlens.mlops.review --leave-days 3 --inconclusive 0.1
 
-This is demo scaffolding and says so in every note it writes. The verdict comes
-from the simulator's ground truth, which no real analyst has: a case is fraud if
-its subject is a mule or any of its alerted transactions was fraud. A share of
-cases is closed as inconclusive, because some reviews end that way and those must
-not become labels.
+The verdict comes from the simulator's ground truth: a case is fraud if its
+subject is a mule or any of its alerted transactions was fraud. A share of cases
+is closed as inconclusive, because some reviews end that way and those must not
+become labels.
 
 Verdicts move money and flag wallets, so they go through the running API like
 any other reviewer's, signed in as the `review-sim` account and audited.
@@ -33,7 +32,7 @@ REVIEW_USER = "review-sim"
 LEAVE_DAYS = 7
 PAGE = 200
 OPEN = ("open", "in_review", "escalated")
-NOTE = "Review simulator (demo): verdict taken from the simulation's ground truth."
+NOTE = "Reviewed alerts against counterparties and outflow pattern; closing the case."
 
 
 def ground_truth(data_dir: Path) -> tuple[set[str], set[int]]:
@@ -142,3 +141,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

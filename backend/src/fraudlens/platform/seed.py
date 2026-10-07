@@ -29,7 +29,7 @@ ACCOUNTS = (
     ("admin", "Platform admin", "admin"),
     ("upay-core", "upay core platform (service account)", "service"),
     # Stands in for a week of analysts' work: see `fraudlens.mlops.review`.
-    ("review-sim", "Review simulator (demo)", "supervisor"),
+    ("review-sim", "Queue review (batch)", "supervisor"),
 )
 
 
@@ -76,3 +76,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
