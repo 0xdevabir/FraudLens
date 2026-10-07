@@ -288,6 +288,15 @@ function findTarget(name: string): HTMLElement | null {
   return all.find(isShown) ?? all[0] ?? null;
 }
 
+/** A visible anchor inside the page itself, usually its header: used when a step's own target never shows up. */
+function pageAnchor(): HTMLElement | null {
+  return Array.from(document.querySelectorAll<HTMLElement>("main [data-tour]")).find(isShown) ?? null;
+}
+
+/** Tallest spotlight, as a share of the viewport: a long table is lit from its top instead of filling the screen. */
+const maxHole = () => (window.innerWidth < 640 ? 0.34 : 0.46);
+const isTall = (el: Element) => el.getBoundingClientRect().height > window.innerHeight * maxHole();
+
 function inViewport(el: Element): boolean {
   const r = el.getBoundingClientRect();
   return r.top >= 8 && r.bottom <= window.innerHeight - 8;
@@ -397,6 +406,8 @@ function TourOverlay({
   /** Everything the frame loop reads, refreshed after each render. */
   const live = useRef({
     target: null as HTMLElement | null,
+    /** data-tour name of the target, so a remounted element can be found again. */
+    name: null as string | null,
     placement: "auto" as TourStep["placement"],
     reduced: false,
     nonce: -1,
@@ -444,18 +455,36 @@ function TourOverlay({
         if (cancelled) return;
         await sleep(live.current.reduced ? 60 : 480); // let <main> finish its rise-in
       }
-      let el: HTMLElement | null = null;
       const name = window.innerWidth < 1024 && step.mobileTarget ? step.mobileTarget : step.target;
-      if (name) {
-        el = await waitFor(() => findTarget(name), navigated ? 4000 : 1500, isCancelled);
-        if (cancelled) return;
-        if (el && isShown(el) && !inViewport(el)) {
-          el.scrollIntoView({ block: "center", inline: "nearest", behavior: live.current.reduced ? "auto" : "smooth" });
-          await sleep(live.current.reduced ? 30 : 420);
+      const probe = () => {
+        const hit = name ? findTarget(name) : null;
+        return hit && isShown(hit) ? hit : null;
+      };
+      const show = async (el: HTMLElement | null) => {
+        if (el && !inViewport(el)) {
+          const behavior = live.current.reduced ? "auto" : "smooth";
+          if (isTall(el)) {
+            // Long tables: bring their top under the chapter rail, so the lit part is the start of the table.
+            window.scrollTo({ top: window.scrollY + el.getBoundingClientRect().top - 72, behavior });
+          } else {
+            el.scrollIntoView({ block: "center", inline: "nearest", behavior });
+          }
+          await sleep(live.current.reduced ? 30 : 480);
         }
-        if (el && !isShown(el)) el = null; // e.g. inside the off-canvas sidebar on a phone
-      }
-      if (!cancelled) setReady({ nonce, el });
+        if (cancelled) return;
+        live.current.name = el?.dataset.tour ?? null;
+        setReady({ nonce, el });
+      };
+      if (!name) return show(null);
+
+      let el = await waitFor(probe, navigated ? 1200 : 1500, isCancelled);
+      if (cancelled) return;
+      if (el || !step.route) return show(el); // sidebar targets hidden on a phone: centred card
+      // Data-backed target still loading: light the page header now, then glide over once it lands.
+      const interim = pageAnchor();
+      await show(interim);
+      el = await waitFor(probe, 8000, isCancelled);
+      if (!cancelled && el) await show(el);
     })();
     return () => {
       cancelled = true;
@@ -477,12 +506,17 @@ function TourOverlay({
 
       // Spotlight
       let box: Box | null = null;
+      if (l.target && !l.target.isConnected && l.name) {
+        // React swapped the element (data refresh, re-render): follow its replacement.
+        const again = findTarget(l.name);
+        if (again) l.target = again;
+      }
       if (l.target && l.target.isConnected) {
         const r = l.target.getBoundingClientRect();
         const left = Math.max(r.left - PAD, 4);
         const top = Math.max(r.top - PAD, 4);
         const right = Math.min(r.right + PAD, vw - 4);
-        const bottom = Math.min(r.bottom + PAD, vh - 4);
+        const bottom = Math.min(r.bottom + PAD, vh - 4, top + vh * maxHole());
         box = { left, top, width: Math.max(right - left, 0), height: Math.max(bottom - top, 0) };
       }
       const hole = holeRef.current;
@@ -677,7 +711,7 @@ function TourOverlay({
       {/* Chapter rail */}
       <nav
         aria-label="Tour chapters"
-        className="tour-fade fixed top-3 left-1/2 flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-2 overflow-x-auto rounded-full border border-white/10 bg-card/80 px-3 py-1.5 shadow-[0_10px_30px_rgb(0_0_0/0.4)] backdrop-blur-2xl"
+        className="tour-fade fixed top-3 left-1/2 flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-2 overflow-x-auto rounded-full border border-white/10 bg-card/95 px-3 py-1.5 shadow-[0_10px_30px_rgb(0_0_0/0.4)] backdrop-blur-2xl"
       >
         <span className="mr-0.5 hidden max-w-36 truncate text-xs font-medium text-accent sm:block">
           {finished ? "Complete" : step?.chapter}
@@ -719,6 +753,8 @@ function TourOverlay({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        data-step={finished ? "finished" : step?.id}
+        data-ready={isReady}
         className={cx(
           "fixed top-0 left-0 w-[min(22.5rem,calc(100vw-1.5rem))] rounded-2xl border border-white/10 bg-card shadow-[0_24px_60px_rgb(0_0_0/0.55)]",
           isReady ? "scale-100 opacity-100" : "pointer-events-none scale-[0.97] opacity-0",
@@ -839,8 +875,8 @@ function FinishCard({
         You&rsquo;re ready
       </h2>
       <p className="relative mx-auto mt-2 max-w-xs text-[0.9375rem] leading-relaxed text-fg-3">
-        That&rsquo;s all {total} stops. Replay the tour anytime from <span className="text-accent">Take the tour</span> in
-        the sidebar.
+        That&rsquo;s all {total} stops. Replay it anytime from <span className="text-accent">Take the tour</span>, the compass
+        button.
       </p>
       <div className="relative mt-5 flex justify-center gap-2">
         <button type="button" onClick={onRestart} className="rounded-xl px-4 py-2 text-sm font-medium text-fg-2 hover:bg-white/8">

@@ -269,7 +269,7 @@ export const TOUR_STEPS: TourStep[] = [
   {
     id: "done",
     chapter: "Finish",
-    title: "You're ready",
+    title: "Where to start",
     body: "Start with the highest-risk item in your queue. Every action you take is audited and feeds the next model.",
   },
 ];
