@@ -1,4 +1,4 @@
-.PHONY: help setup up redis down data data-calibrated features train policy insights mitigation intel adversary pipeline test lint fmt \
+.PHONY: help setup up redis down data data-calibrated features train policy insights mitigation intel intel-compare adversary pipeline test lint fmt \
 	migrate seed load api replay replay-live verify platform \
 	review retrain shadow models promote console console-build smoke label-realism e2e-phone \
 	demo demo-reset external
@@ -60,6 +60,9 @@ mitigation: ## Fit and measure young-wallet thresholds (policy v3) against v2 (d
 
 intel: ## Train and evaluate the scam-message classifier (docs/FRAUD_TAXONOMY.md)
 	cd backend && uv run python -m fraudlens.intel.train
+
+intel-compare: ## Compare message models, MiniLM included with the transformer extra (compare.json)
+	cd backend && uv run --extra transformer python -m fraudlens.intel.compare
 
 adversary: ## Adaptive scammers vs frozen, retrained and drift-gated models (after `make pipeline`)
 	cd backend && uv run python -m fraudlens.models.adversary

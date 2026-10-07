@@ -4,10 +4,14 @@ Two independent readings are combined and the stronger one wins: the classifier
 reads the words (`text.py`), the link check reads where the links go (`links.py`).
 The text is read and discarded. It is not stored, not logged and, like every
 other piece of customer free text in the platform, never treated as an instruction.
+
+The reasons point into the message itself (`explain.py`): each signal carries the
+phrases that matched it, and `highlights` names the words that raised the score most.
 """
 
 from __future__ import annotations
 
+from .explain import cue_phrases, highlights
 from .links import check_links, worst
 from .taxonomy import Taxonomy
 from .text import TextModel
@@ -25,14 +29,19 @@ _LINK_CATEGORIES = {
 def check_message(text: str, model: TextModel | None, taxonomy: Taxonomy) -> dict:
     """`model` is None when the classifier has not been trained; links are still checked."""
     links = check_links(text, taxonomy.brands)
-    level, risk, named, signals = worst(links), None, {}, []
+    level, risk, named, signals, words = worst(links), None, {}, [], []
 
     if model is not None:
         scores = model.score([text])[0]
         risk = round(float(scores[0]), 4)
         text_level = model.level(risk)
         if text_level != "none":
-            signals = [{"id": cue.id, "label": cue.label} for cue in model.signals(text)]
+            # Each cue with the stretch of the customer's own text that showed it.
+            signals = [
+                {"id": cue.id, "label": cue.label, "phrases": phrases}
+                for cue, phrases in cue_phrases(text)
+            ]
+            words = highlights(text, model.pipeline)
             for cid, p in zip(model.categories, scores[1:], strict=True):
                 if p >= model.thresholds["category"]:
                     named[cid] = {"probability": round(float(p), 4), "source": "model"}
@@ -61,6 +70,7 @@ def check_message(text: str, model: TextModel | None, taxonomy: Taxonomy) -> dic
         "risk": risk,
         "categories": categories,
         "signals": signals,
+        "highlights": words,
         "links": links,
         "advice": advice,
         "model_version": model.version if model is not None else None,

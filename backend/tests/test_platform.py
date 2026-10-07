@@ -1656,6 +1656,10 @@ def test_a_message_check_advises_and_keeps_nothing(
     assert row.object_id == wallet and row.detail["level"] == "high"
     assert "upay-verify" not in json.dumps(row.detail)
 
+    # The flagged message's own words are pointed at, in the script they were written in.
+    assert found["highlights"]
+    assert all(SCAM_TEXT[w["start"] : w["end"]] == w["text"] for w in found["highlights"])
+
     for body in ({"wallet_id": wallet, "text": " "}, {"wallet_id": wallet, "text": "x" * 2001}):
         assert (
             client.post("/v1/customer/message-check", headers=service, json=body).status_code == 422
@@ -1672,6 +1676,45 @@ def test_a_message_check_advises_and_keeps_nothing(
         "/v1/customer/message-check", headers=service, json={"wallet_id": wallet, "text": "hi"}
     )
     assert limited.status_code == 429
+
+
+def test_a_payment_to_what_a_flagged_message_named_is_warned(
+    client, tokens, p, spare, text_model, monkeypatch
+):
+    monkeypatch.setattr(p, "intel", text_model)
+    service, analyst = tokens("upay-core"), tokens("analyst1")
+    victim, scammer = spare(), spare()
+    text = (
+        f"Sir ami upay head office theke bolchi. Bhul kore apnar account e 3,450 taka chole "
+        f"gese, ekhoni {scammer} number e ferot pathan, na hole account block hoye jabe."
+    )
+    checked = client.post(
+        "/v1/customer/message-check", headers=service, json={"wallet_id": victim, "text": text}
+    ).json()
+    assert checked["level"] != "none", checked
+
+    before = client.post(
+        "/v1/customer/recipient-check",
+        headers=service,
+        json={"sender_id": victim, "receiver_id": scammer},
+    ).json()
+    assert before["level"] != "none" and before["reasons"][0]["code"] == "follows_flagged_message"
+
+    body = send(p, victim, scammer, amount=3_450.0)
+    paid = client.post("/v1/score", headers=service, json=body).json()
+    assert paid["decision"]["tier"] != "allow", paid
+    record = client.get(f"/v1/decisions/{body['txn_id']}", headers=analyst).json()
+    assert "follows_flagged_message" in json.dumps(record)
+    assert text not in json.dumps(record)  # the reason, never the message
+
+    # Someone who checked nothing is not affected.
+    other = spare()
+    plain = client.post(
+        "/v1/customer/recipient-check",
+        headers=service,
+        json={"sender_id": other, "receiver_id": scammer},
+    ).json()
+    assert "reasons" not in plain
 
 
 def test_a_payment_is_verified_from_the_ledger_for_its_receiver_only(client, tokens, p, spare):

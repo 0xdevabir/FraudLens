@@ -50,6 +50,7 @@ from ..decision import DecisionEngine, SimilarCases, context_from_engine, load_p
 from ..decision.customer import cue as customer_cue
 from ..decision.policy import RANK
 from ..features import SCORED_TYPES, FeatureEngine, Txn
+from ..intel.memory import MessageMemory, escalate
 from ..mlops.shadow import Shadow
 from ..models import registry
 from .audit import WorkflowError
@@ -138,6 +139,7 @@ class Scored:
     decision: EngineDecision | None = None
     row: dict | None = None  # the decision row, once decided
     shadow: dict | None = None
+    link: dict | None = None  # the flagged message this payment follows, if any
     resumed: bool = False  # left pending by a worker that stopped; already in the database
 
 
@@ -216,6 +218,7 @@ class Scorer:
         self.engine = FeatureEngine()
         self.clock = Clock(0.0)
         self.frozen: set[str] = set()
+        self.messages = MessageMemory()  # flagged messages a payment may follow
         self.mule_scores: dict[str, float] = {}  # wallets the mule model has alerted on
         self.seq = 0  # last position of the log applied to this replica
         self._frozen_key = settings.events_stream + FROZEN_VERSION_SUFFIX
@@ -563,6 +566,12 @@ class Scorer:
             for row in rows
         ]
 
+    def _decision(self, item: Scored) -> EngineDecision:
+        decision = self.decision.decide(item.txn, item.features, item.context)
+        if item.link is not None:  # paid what a flagged message asked
+            decision = escalate(decision, item.link, self.policy)
+        return decision
+
     def _decide(self, scored: list[Scored], mule: dict[str, float]) -> None:
         """Make (or finish) the decisions. Reads no state that changes: safe outside
         the lock and in parallel."""
@@ -570,7 +579,7 @@ class Scorer:
             t = item.txn
             if item.decision is None:
                 t0 = time.perf_counter()
-                item.decision = self.decision.decide(t, item.features, item.context)
+                item.decision = self._decision(item)
                 item.elapsed += time.perf_counter() - t0
                 if item.source == "replay":  # applied already; the workflow still holds it
                     item.result.status = "held" if item.decision.tier == "hold" else "completed"
@@ -699,6 +708,8 @@ class Scorer:
         context = context_from_engine(self.engine, t)
         result = Result(t.txn_id, "completed", scored=True)
         item = Scored(result, t, event.source, features, context, when)
+        # Paid what a flagged message asked: read here, under the lock, with the clock.
+        item.link = self.messages.link(t.sender_id, t.receiver_id, t.amount, when)
         if event.source == "replay":
             # Recorded history: applied whatever the decision, which can wait for the lock
             # to be released. The workflow's status follows in `_decide`.
@@ -708,7 +719,7 @@ class Scorer:
             return item.result, row, item
 
         # Live: the decision says whether the state changes, so it is made here.
-        item.decision = self.decision.decide(t, features, context)
+        item.decision = self._decision(item)
         item.elapsed = time.perf_counter() - t0
         tier = item.decision.tier
         if tier == "hold":

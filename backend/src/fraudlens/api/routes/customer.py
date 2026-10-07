@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ...intel import proof
 from ...intel.analyze import check_message
+from ...intel.memory import explain as explain_link
 from ...intel.taxonomy import load_taxonomy
 from ...platform import cases as workflow
 from ...platform.audit import WorkflowError
@@ -37,10 +38,10 @@ def recipient_check(body: RecipientCheck, p: Plat, ctx: Service) -> dict:
     it cannot be used to probe which wallets have been caught.
     """
     _limit(p.check_limit, body.sender_id)
-    return check_recipient(p, body.receiver_id)
+    return check_recipient(p, body.receiver_id, body.sender_id)
 
 
-def check_recipient(p: Platform, receiver_id: str) -> dict:
+def check_recipient(p: Platform, receiver_id: str, sender_id: str | None = None) -> dict:
     risk = p.graph.risk(receiver_id)
     level = "none"
     if risk is not None:
@@ -48,8 +49,16 @@ def check_recipient(p: Platform, receiver_id: str) -> dict:
             level = "high"
         elif risk["mule_alert"]:
             level = "caution"
+    # The sender's own flagged message named this wallet: say so before they type an amount.
+    # `reasons` appears only then, so an ordinary answer is unchanged and reveals nothing new.
+    link = None
+    if sender_id is not None:
+        link = p.scorer.messages.link(sender_id, receiver_id, None, p.scorer.now())
+        if link is not None and level == "none":
+            level = "caution"
     message = p.scorer.policy.messages["scam"]["warn"].model_dump() if level != "none" else None
-    return {"receiver_id": receiver_id, "level": level, "message": message}
+    out = {"receiver_id": receiver_id, "level": level, "message": message}
+    return out if link is None else out | {"reasons": [explain_link(link)]}
 
 
 @router.post("/transactions/{txn_id}/respond")
@@ -80,11 +89,16 @@ def message_check(body: MessageCheck, p: Plat, ctx: Service) -> dict:
     the text is not kept. What the customer is told is the taxonomy's fixed advice.
     """
     _limit(p.message_limit, body.wallet_id)
-    return check_text(p, body.text)
+    return check_text(p, body.text, body.wallet_id)
 
 
-def check_text(p: Platform, text: str) -> dict:
-    return check_message(text, p.intel, load_taxonomy())
+def check_text(p: Platform, text: str, wallet_id: str | None = None) -> dict:
+    """With `wallet_id`, a flagged message's wallet IDs and amounts (never its text) are
+    kept for half an hour, so a payment that follows it is warned (`intel/memory.py`)."""
+    found = check_message(text, p.intel, load_taxonomy())
+    if wallet_id is not None:
+        p.scorer.messages.remember(wallet_id, text, found, p.scorer.now())
+    return found
 
 
 @router.post("/payment-verify")

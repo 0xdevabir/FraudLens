@@ -242,14 +242,14 @@ def appeal_status(
 @router.post("/recipient-check")
 def recipient_check(body: RecipientCheck, p: Plat, ctx: Staff) -> dict:
     """What the app would show before the customer types an amount."""
-    return check_recipient(p, body.receiver_id)
+    return check_recipient(p, body.receiver_id, body.sender_id)
 
 
 @router.post("/message-check")
 def message_check(body: MessageCheck, p: Plat, s: Db, ctx: Staff) -> dict:
     """The demo customer asks whether a message is a scam. The text is not recorded."""
     _limit(p.message_limit, body.wallet_id)
-    found = check_text(p, body.text)
+    found = check_text(p, body.text, body.wallet_id)
     audit(
         s, ctx, "demo.message_checked", "wallet", body.wallet_id,
         level=found["level"], categories=[c["id"] for c in found["categories"]],
